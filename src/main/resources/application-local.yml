@@ -1,0 +1,15 @@
+spring:
+  datasource:
+    url: ${MONEYFLOW_DB_URL:${SPRING_DATASOURCE_URL:${DB_URL:jdbc:postgresql://localhost:5432/moneyflow}}}
+    username: ${MONEYFLOW_DB_USERNAME:${SPRING_DATASOURCE_USERNAME:${DB_USERNAME:moneyflow}}}
+    password: ${MONEYFLOW_DB_PASSWORD:${SPRING_DATASOURCE_PASSWORD:${DB_PASSWORD:moneyflow}}}
+  docker:
+    compose:
+      enabled: ${SPRING_DOCKER_COMPOSE_ENABLED:false}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    baseline-on-migrate: ${FLYWAY_BASELINE_ON_MIGRATE:false}
+    baseline-version: 1
+    baseline-description: MoneyFlow schema manually initialized

@@ -1,0 +1,730 @@
+package com.moneyflowbackend.transaction.service;
+
+import com.moneyflowbackend.auth.model.User;
+import com.moneyflowbackend.auth.repository.UserRepository;
+import com.moneyflowbackend.category.model.Category;
+import com.moneyflowbackend.category.model.CategoryType;
+import com.moneyflowbackend.category.repository.CategoryRepository;
+import com.moneyflowbackend.common.exception.BusinessException;
+import com.moneyflowbackend.transaction.dto.TransactionPageResponse;
+import com.moneyflowbackend.transaction.dto.TransactionRequest;
+import com.moneyflowbackend.transaction.dto.TransactionResponse;
+import com.moneyflowbackend.transaction.model.Transaction;
+import com.moneyflowbackend.transaction.model.TransactionSourceType;
+import com.moneyflowbackend.transaction.model.TransactionStatus;
+import com.moneyflowbackend.transaction.model.TransactionType;
+import com.moneyflowbackend.transaction.model.TransferDetail;
+import com.moneyflowbackend.transaction.repository.TransactionRepository;
+import com.moneyflowbackend.transaction.repository.TransferDetailRepository;
+import com.moneyflowbackend.voice.repository.VoiceRecordRepository;
+import com.moneyflowbackend.wallet.model.Wallet;
+import com.moneyflowbackend.wallet.repository.WalletRepository;
+import com.moneyflowbackend.workspace.model.Workspace;
+import com.moneyflowbackend.workspace.model.WorkspaceMember;
+import com.moneyflowbackend.workspace.model.WorkspacePerson;
+import com.moneyflowbackend.workspace.model.WorkspaceRole;
+import com.moneyflowbackend.workspace.repository.WorkspaceMemberRepository;
+import com.moneyflowbackend.workspace.repository.WorkspacePersonRepository;
+import com.moneyflowbackend.workspace.repository.WorkspaceRepository;
+import jakarta.persistence.criteria.Join;
+import jakarta.persistence.criteria.JoinType;
+import jakarta.persistence.criteria.Predicate;
+import jakarta.persistence.criteria.Root;
+import jakarta.persistence.criteria.Subquery;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
+import org.springframework.http.HttpStatus;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.math.BigDecimal;
+import java.time.Clock;
+import java.time.DateTimeException;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+import java.util.Set;
+import java.util.UUID;
+
+@Service
+public class TransactionService {
+    private static final String FALLBACK_ZONE = "Asia/Ho_Chi_Minh";
+
+    private static final Set<TransactionType> MANUAL_TYPES = Set.of(
+            TransactionType.INCOME,
+            TransactionType.EXPENSE,
+            TransactionType.TRANSFER);
+    private static final Set<TransactionStatus> MANUAL_STATUSES = Set.of(
+            TransactionStatus.PLANNED,
+            TransactionStatus.POSTED);
+    private static final Set<String> SORT_FIELDS = Set.of(
+            "transactionDate",
+            "transactionTime",
+            "createdAt",
+            "amount");
+
+    private final TransactionRepository transactionRepository;
+    private final TransferDetailRepository transferDetailRepository;
+    private final VoiceRecordRepository voiceRecordRepository;
+    private final UserRepository userRepository;
+    private final WalletRepository walletRepository;
+    private final CategoryRepository categoryRepository;
+    private final WorkspaceRepository workspaceRepository;
+    private final WorkspaceMemberRepository workspaceMemberRepository;
+    private final WorkspacePersonRepository workspacePersonRepository;
+    private final Clock clock;
+
+    public TransactionService(
+            TransactionRepository transactionRepository,
+            TransferDetailRepository transferDetailRepository,
+            VoiceRecordRepository voiceRecordRepository,
+            UserRepository userRepository,
+            WalletRepository walletRepository,
+            CategoryRepository categoryRepository,
+            WorkspaceRepository workspaceRepository,
+            WorkspaceMemberRepository workspaceMemberRepository,
+            WorkspacePersonRepository workspacePersonRepository,
+            Clock clock) {
+        this.transactionRepository = transactionRepository;
+        this.transferDetailRepository = transferDetailRepository;
+        this.voiceRecordRepository = voiceRecordRepository;
+        this.userRepository = userRepository;
+        this.walletRepository = walletRepository;
+        this.categoryRepository = categoryRepository;
+        this.workspaceRepository = workspaceRepository;
+        this.workspaceMemberRepository = workspaceMemberRepository;
+        this.workspacePersonRepository = workspacePersonRepository;
+        this.clock = clock;
+    }
+
+    @Transactional(readOnly = true)
+    public TransactionPageResponse list(
+            UUID workspaceId,
+            LocalDate dateFrom,
+            LocalDate dateTo,
+            TransactionType type,
+            TransactionStatus status,
+            UUID walletId,
+            UUID categoryId,
+            UUID attributedPersonId,
+            TransactionSourceType sourceType,
+            String search,
+            boolean includeDeleted,
+            int page,
+            int size,
+            String sort,
+            UUID userId) {
+        return list(workspaceId, dateFrom, dateTo, type, status, walletId, categoryId, null,
+                attributedPersonId, sourceType, search, includeDeleted, page, size, sort, userId);
+    }
+
+    @Transactional(readOnly = true)
+    public TransactionPageResponse list(
+            UUID workspaceId,
+            LocalDate dateFrom,
+            LocalDate dateTo,
+            TransactionType type,
+            TransactionStatus status,
+            UUID walletId,
+            UUID categoryId,
+            UUID jarId,
+            UUID attributedPersonId,
+            TransactionSourceType sourceType,
+            String search,
+            boolean includeDeleted,
+            int page,
+            int size,
+            String sort,
+            UUID userId) {
+        requireActiveMember(workspaceId, userId);
+        if (dateFrom != null && dateTo != null && dateFrom.isAfter(dateTo)) {
+            throw new BusinessException("INVALID_DATE_RANGE", "Invalid date range");
+        }
+
+        int pageNumber = Math.max(page, 0);
+        int pageSize = Math.min(Math.max(size, 1), 100);
+        Pageable pageable = PageRequest.of(pageNumber, pageSize, parseSort(sort));
+
+        Specification<Transaction> spec = (root, query, cb) -> {
+            List<Predicate> predicates = new ArrayList<>();
+            predicates.add(cb.equal(root.get("workspace").get("id"), workspaceId));
+            if (!includeDeleted) {
+                predicates.add(cb.isNull(root.get("deletedAt")));
+            }
+            if (dateFrom != null) {
+                predicates.add(cb.greaterThanOrEqualTo(root.get("transactionDate"), dateFrom));
+            }
+            if (dateTo != null) {
+                predicates.add(cb.lessThanOrEqualTo(root.get("transactionDate"), dateTo));
+            }
+            if (type != null) {
+                predicates.add(cb.equal(root.get("transactionType"), type));
+            }
+            if (status != null) {
+                predicates.add(cb.equal(root.get("transactionStatus"), status));
+            }
+            if (categoryId != null) {
+                predicates.add(cb.equal(root.get("category").get("id"), categoryId));
+            }
+            if (jarId != null) {
+                predicates.add(cb.equal(root.get("category").get("jar").get("id"), jarId));
+            }
+            if (attributedPersonId != null) {
+                predicates.add(cb.equal(root.get("attributedPerson").get("id"), attributedPersonId));
+            }
+            if (sourceType != null) {
+                predicates.add(cb.equal(root.get("sourceType"), sourceType));
+            }
+            if (walletId != null) {
+                Join<Transaction, Wallet> walletJoin = root.join("wallet", JoinType.LEFT);
+                Subquery<UUID> transferSubquery = query.subquery(UUID.class);
+                Root<TransferDetail> td = transferSubquery.from(TransferDetail.class);
+                transferSubquery.select(td.get("transaction").get("id"));
+                transferSubquery.where(
+                        cb.equal(td.get("transaction").get("id"), root.get("id")),
+                        cb.or(
+                                cb.equal(td.get("sourceWallet").get("id"), walletId),
+                                cb.equal(td.get("destinationWallet").get("id"), walletId)));
+                predicates.add(cb.or(
+                        cb.equal(walletJoin.get("id"), walletId),
+                        cb.exists(transferSubquery)));
+            }
+            if (search != null && !search.isBlank()) {
+                String pattern = "%" + search.trim().toLowerCase(Locale.ROOT) + "%";
+                predicates.add(cb.or(
+                        cb.like(cb.lower(root.<String>get("description")), pattern),
+                        cb.like(cb.lower(root.<String>get("note")), pattern)));
+            }
+            return cb.and(predicates.toArray(Predicate[]::new));
+        };
+
+        Page<TransactionResponse> result = transactionRepository.findAll(spec, pageable).map(this::mapToResponse);
+        return TransactionPageResponse.builder()
+                .content(result.getContent())
+                .page(result.getNumber())
+                .size(result.getSize())
+                .totalElements(result.getTotalElements())
+                .totalPages(result.getTotalPages())
+                .first(result.isFirst())
+                .last(result.isLast())
+                .build();
+    }
+
+    @Transactional(readOnly = true)
+    public TransactionResponse getDetails(UUID workspaceId, UUID transactionId, boolean includeDeleted, UUID userId) {
+        requireActiveMember(workspaceId, userId);
+        Transaction tx = findTransaction(workspaceId, transactionId);
+        if (tx.getDeletedAt() != null && !includeDeleted) {
+            throw new BusinessException("TRANSACTION_NOT_FOUND", "Transaction not found", HttpStatus.NOT_FOUND);
+        }
+        return mapToResponse(tx);
+    }
+
+    @Transactional
+    public TransactionResponse create(UUID workspaceId, TransactionRequest req, UUID userId) {
+        return createWithSource(workspaceId, req, userId, TransactionSourceType.MANUAL, null, null);
+    }
+
+    @Transactional
+    public TransactionResponse createHistoricalExcelMigration(UUID workspaceId, TransactionRequest req, UUID userId,
+                                                             String migrationKey, String sourceReference, String rawInput) {
+        requireWritableMember(workspaceId, userId);
+        if (migrationKey == null || migrationKey.isBlank()) {
+            throw new BusinessException("MIGRATION_KEY_REQUIRED", "Migration key is required");
+        }
+        var existing = transactionRepository.findByWorkspaceIdAndMigrationKey(workspaceId, migrationKey.trim());
+        if (existing.isPresent()) {
+            return mapToResponse(existing.get());
+        }
+        Workspace workspace = findWorkspace(workspaceId);
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new BusinessException("USER_NOT_FOUND", "User not found", HttpStatus.NOT_FOUND));
+        TransactionType type = requireManualType(req.getType());
+        if (type != TransactionType.INCOME && type != TransactionType.EXPENSE) {
+            throw new BusinessException("INVALID_MIGRATION_TRANSACTION_TYPE", "Historical migration supports income/expense only");
+        }
+        BigDecimal amount = requireAmount(req.getAmount());
+        Category category = resolveCategory(workspaceId, req.getCategoryId(), type, true, true);
+        WorkspacePerson person = resolvePersonForWrite(workspaceId, req.getAttributedPersonId(), false);
+
+        Transaction tx = Transaction.builder()
+                .workspace(workspace)
+                .createdByUser(user)
+                .attributedPerson(person)
+                .wallet(null)
+                .category(category)
+                .transactionType(type)
+                .transactionStatus(TransactionStatus.POSTED)
+                .amount(amount)
+                .currency(workspaceCurrency(workspace))
+                .transactionDate(req.getTransactionDate() != null ? req.getTransactionDate() : today(workspace))
+                .transactionTime(req.getTransactionTime())
+                .description(normalizeText(req.getDescription()))
+                .note(normalizeText(req.getNote()))
+                .sourceType(TransactionSourceType.EXCEL_MIGRATION)
+                .rawInput(normalizeText(rawInput))
+                .sourceReference(normalizeText(sourceReference))
+                .migrationKey(migrationKey.trim())
+                .walletUnknown(true)
+                .historical(true)
+                .affectsWalletBalance(false)
+                .legacyLabel(normalizeText(req.getDescription()))
+                .build();
+        return mapToResponse(transactionRepository.save(tx));
+    }
+
+    @Transactional
+    public TransactionResponse createWithSource(UUID workspaceId, TransactionRequest req, UUID userId, TransactionSourceType sourceType, String rawInput) {
+        return createWithSource(workspaceId, req, userId, sourceType, rawInput, null);
+    }
+
+    @Transactional
+    public TransactionResponse createWithSource(UUID workspaceId, TransactionRequest req, UUID userId, TransactionSourceType sourceType, String rawInput, UUID voiceRecordId) {
+        requireWritableMember(workspaceId, userId);
+        Workspace workspace = findWorkspace(workspaceId);
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new BusinessException("USER_NOT_FOUND", "User not found", HttpStatus.NOT_FOUND));
+        TransactionType type = requireManualType(req.getType());
+        TransactionStatus status = normalizeStatus(req.getStatus(), TransactionStatus.POSTED);
+        BigDecimal amount = requireAmount(req.getAmount());
+        WorkspacePerson person = resolvePersonForWrite(workspaceId, req.getAttributedPersonId(), true);
+
+        Transaction tx = Transaction.builder()
+                .workspace(workspace)
+                .createdByUser(user)
+                .attributedPerson(person)
+                .transactionType(type)
+                .transactionStatus(status)
+                .amount(amount)
+                .currency(workspaceCurrency(workspace))
+                .transactionDate(req.getTransactionDate() != null ? req.getTransactionDate() : today(workspace))
+                .transactionTime(req.getTransactionTime())
+                .description(normalizeText(req.getDescription()))
+                .note(normalizeText(req.getNote()))
+                .sourceType(normalizeSourceType(sourceType))
+                .rawInput(normalizeText(rawInput))
+                .walletUnknown(false)
+                .historical(false)
+                .affectsWalletBalance(true)
+                .build();
+        if (voiceRecordId != null) {
+            voiceRecordRepository.findByIdAndWorkspaceId(voiceRecordId, workspaceId)
+                    .orElseThrow(() -> new BusinessException("VOICE_RECORD_NOT_FOUND", "Voice record not found", HttpStatus.NOT_FOUND));
+            tx.setVoiceRecordId(voiceRecordId);
+        }
+
+        if (type == TransactionType.TRANSFER) {
+            if (req.getCategoryId() != null) {
+                throw new BusinessException("TRANSFER_CATEGORY_NOT_ALLOWED", "Transfer cannot have category");
+            }
+            Wallet source = resolveWallet(workspaceId, req.getSourceWalletId(), true, status == TransactionStatus.POSTED, "TRANSFER_SOURCE_REQUIRED");
+            Wallet destination = resolveWallet(workspaceId, req.getDestinationWalletId(), true, status == TransactionStatus.POSTED, "TRANSFER_DESTINATION_REQUIRED");
+            validateDifferentWallets(source, destination);
+
+            tx.setWallet(source);
+            tx.setCategory(null);
+            tx = transactionRepository.saveAndFlush(tx);
+            transferDetailRepository.save(TransferDetail.builder()
+                    .transactionId(tx.getId())
+                    .transaction(tx)
+                    .sourceWallet(source)
+                    .destinationWallet(destination)
+                    .build());
+            return mapToResponse(tx);
+        }
+
+        Wallet wallet = resolveWallet(workspaceId, req.getWalletId(), status == TransactionStatus.POSTED, status == TransactionStatus.POSTED, "WALLET_NOT_FOUND");
+        Category category = resolveCategory(workspaceId, req.getCategoryId(), type, status == TransactionStatus.POSTED, true);
+        tx.setWallet(wallet);
+        tx.setCategory(category);
+        return mapToResponse(transactionRepository.save(tx));
+    }
+
+    @Transactional
+    public TransactionResponse update(UUID workspaceId, UUID transactionId, TransactionRequest req, UUID userId) {
+        requireWritableMember(workspaceId, userId);
+        Transaction tx = findTransaction(workspaceId, transactionId);
+        if (tx.getDeletedAt() != null) {
+            throw new BusinessException("TRANSACTION_NOT_FOUND", "Transaction not found", HttpStatus.NOT_FOUND);
+        }
+        TransactionType requestedType = requireManualType(req.getType());
+        if (requestedType != tx.getTransactionType()) {
+            throw new BusinessException("TRANSACTION_TYPE_IMMUTABLE", "Transaction type cannot be changed");
+        }
+
+        TransactionStatus oldStatus = tx.getTransactionStatus();
+        TransactionStatus newStatus = normalizeStatus(req.getStatus(), oldStatus);
+        BigDecimal amount = requireAmount(req.getAmount());
+        boolean postingNow = oldStatus != TransactionStatus.POSTED && newStatus == TransactionStatus.POSTED;
+
+        tx.setTransactionStatus(newStatus);
+        tx.setAmount(amount);
+        if (req.getTransactionDate() != null) {
+            tx.setTransactionDate(req.getTransactionDate());
+        }
+        tx.setTransactionTime(req.getTransactionTime());
+        tx.setDescription(normalizeText(req.getDescription()));
+        tx.setNote(normalizeText(req.getNote()));
+        tx.setUpdatedAt(Instant.now());
+        tx.setAttributedPerson(resolvePersonForUpdate(workspaceId, tx.getAttributedPerson(), req.getAttributedPersonId()));
+
+        if (tx.getTransactionType() == TransactionType.TRANSFER) {
+            if (req.getCategoryId() != null) {
+                throw new BusinessException("TRANSFER_CATEGORY_NOT_ALLOWED", "Transfer cannot have category");
+            }
+            TransferDetail detail = transferDetailRepository.findById(tx.getId())
+                    .orElseThrow(() -> new BusinessException("TRANSFER_DETAIL_NOT_FOUND", "Transfer detail not found"));
+            Wallet source = resolveWalletForUpdate(workspaceId, detail.getSourceWallet(), req.getSourceWalletId(), newStatus, postingNow);
+            Wallet destination = resolveWalletForUpdate(workspaceId, detail.getDestinationWallet(), req.getDestinationWalletId(), newStatus, postingNow);
+            validateDifferentWallets(source, destination);
+            tx.setWallet(source);
+            tx.setCategory(null);
+            transactionRepository.save(tx);
+            detail.setSourceWallet(source);
+            detail.setDestinationWallet(destination);
+            transferDetailRepository.save(detail);
+            return mapToResponse(tx);
+        }
+
+        Wallet wallet = resolveWalletForUpdate(workspaceId, tx.getWallet(), req.getWalletId(), newStatus, postingNow);
+        Category category = resolveCategoryForUpdate(workspaceId, tx.getCategory(), req.getCategoryId(), tx.getTransactionType(), newStatus, postingNow);
+        tx.setWallet(wallet);
+        tx.setCategory(category);
+        return mapToResponse(transactionRepository.save(tx));
+    }
+
+    @Transactional
+    public void delete(UUID workspaceId, UUID transactionId, UUID userId) {
+        requireWritableMember(workspaceId, userId);
+        Transaction tx = findTransaction(workspaceId, transactionId);
+        if (tx.getDeletedAt() != null) {
+            return;
+        }
+        Instant now = Instant.now();
+        tx.setDeletedAt(now);
+        tx.setUpdatedAt(now);
+        transactionRepository.save(tx);
+    }
+
+    @Transactional
+    public TransactionResponse restore(UUID workspaceId, UUID transactionId, UUID userId) {
+        requireWritableMember(workspaceId, userId);
+        Transaction tx = findTransaction(workspaceId, transactionId);
+        if (tx.getDeletedAt() == null) {
+            throw new BusinessException("TRANSACTION_NOT_DELETED", "Transaction is not deleted");
+        }
+        validateReferencesExist(workspaceId, tx);
+        if (tx.getTransactionType() == TransactionType.TRANSFER && transferDetailRepository.findById(tx.getId()).isEmpty()) {
+            throw new BusinessException("TRANSFER_DETAIL_NOT_FOUND", "Transfer detail not found");
+        }
+        tx.setDeletedAt(null);
+        tx.setUpdatedAt(Instant.now());
+        return mapToResponse(transactionRepository.save(tx));
+    }
+
+    private Workspace findWorkspace(UUID workspaceId) {
+        return workspaceRepository.findById(workspaceId)
+                .filter(workspace -> workspace.getDeletedAt() == null)
+                .orElseThrow(() -> new BusinessException("WORKSPACE_NOT_FOUND", "Workspace not found", HttpStatus.NOT_FOUND));
+    }
+
+    private Transaction findTransaction(UUID workspaceId, UUID transactionId) {
+        return transactionRepository.findByIdAndWorkspaceId(transactionId, workspaceId)
+                .orElseThrow(() -> new BusinessException("TRANSACTION_NOT_FOUND", "Transaction not found", HttpStatus.NOT_FOUND));
+    }
+
+    private WorkspaceMember requireActiveMember(UUID workspaceId, UUID userId) {
+        findWorkspace(workspaceId);
+        return workspaceMemberRepository.findByWorkspaceIdAndUserIdAndMemberStatus(workspaceId, userId, "ACTIVE")
+                .orElseThrow(() -> new BusinessException("WORKSPACE_ACCESS_DENIED", "Workspace access denied", HttpStatus.FORBIDDEN));
+    }
+
+    private WorkspaceMember requireWritableMember(UUID workspaceId, UUID userId) {
+        WorkspaceMember member = requireActiveMember(workspaceId, userId);
+        if (member.getRole() == WorkspaceRole.VIEWER) {
+            throw new BusinessException("FORBIDDEN", "Viewer cannot modify transactions", HttpStatus.FORBIDDEN);
+        }
+        return member;
+    }
+
+    private TransactionType requireManualType(TransactionType type) {
+        if (type == null || !MANUAL_TYPES.contains(type)) {
+            throw new BusinessException("INVALID_TRANSACTION_TYPE", "Invalid transaction type");
+        }
+        return type;
+    }
+
+    private TransactionStatus normalizeStatus(TransactionStatus status, TransactionStatus fallback) {
+        TransactionStatus normalized = status == null ? fallback : status;
+        if (!MANUAL_STATUSES.contains(normalized)) {
+            throw new BusinessException("INVALID_TRANSACTION_STATUS", "Invalid transaction status");
+        }
+        return normalized;
+    }
+
+    private TransactionSourceType normalizeSourceType(TransactionSourceType sourceType) {
+        if (sourceType == null) {
+            return TransactionSourceType.MANUAL;
+        }
+        return sourceType;
+    }
+
+    private BigDecimal requireAmount(BigDecimal amount) {
+        if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new BusinessException("INVALID_AMOUNT", "Amount must be greater than 0");
+        }
+        return amount;
+    }
+
+    private LocalDate today(Workspace workspace) {
+        try {
+            String timezone = workspace.getTimezone() == null ? FALLBACK_ZONE : workspace.getTimezone();
+            return LocalDate.now(clock.withZone(ZoneId.of(timezone)));
+        } catch (DateTimeException ex) {
+            return LocalDate.now(clock.withZone(ZoneId.of(FALLBACK_ZONE)));
+        }
+    }
+
+    private Wallet resolveWallet(UUID workspaceId, UUID walletId, boolean required, boolean requireActive, String missingCode) {
+        if (walletId == null) {
+            if (required) {
+                throw new BusinessException(missingCode, "Wallet is required");
+            }
+            return null;
+        }
+        Wallet wallet = walletRepository.findByIdAndWorkspaceId(walletId, workspaceId)
+                .orElseThrow(() -> new BusinessException("WALLET_NOT_FOUND", "Wallet not found", HttpStatus.NOT_FOUND));
+        if (requireActive && !wallet.isActive()) {
+            throw new BusinessException("WALLET_INACTIVE", "Wallet is inactive");
+        }
+        return wallet;
+    }
+
+    private Wallet resolveWalletForUpdate(UUID workspaceId, Wallet current, UUID requestedId, TransactionStatus status, boolean postingNow) {
+        boolean required = status == TransactionStatus.POSTED;
+        if (requestedId == null) {
+            if (required) {
+                throw new BusinessException("WALLET_NOT_FOUND", "Wallet is required");
+            }
+            return null;
+        }
+        boolean changed = current == null || !current.getId().equals(requestedId);
+        return resolveWallet(workspaceId, requestedId, required, status == TransactionStatus.POSTED && (changed || postingNow), "WALLET_NOT_FOUND");
+    }
+
+    private Category resolveCategory(UUID workspaceId, UUID categoryId, TransactionType type, boolean required, boolean requireActive) {
+        if (categoryId == null) {
+            if (required) {
+                throw new BusinessException("CATEGORY_NOT_FOUND", "Category is required");
+            }
+            return null;
+        }
+        Category category = categoryRepository.findByIdAndWorkspaceId(categoryId, workspaceId)
+                .orElseThrow(() -> new BusinessException("CATEGORY_NOT_FOUND", "Category not found", HttpStatus.NOT_FOUND));
+        if (requireActive) {
+            if (!category.isActive()) {
+                throw new BusinessException("CATEGORY_INACTIVE", "Category is inactive");
+            }
+            if (category.isArchived()) {
+                throw new BusinessException("CATEGORY_ARCHIVED", "Category is archived");
+            }
+        }
+        validateCategoryType(type, category);
+        return category;
+    }
+
+    private Category resolveCategoryForUpdate(UUID workspaceId, Category current, UUID requestedId, TransactionType type, TransactionStatus status, boolean postingNow) {
+        boolean required = status == TransactionStatus.POSTED;
+        if (requestedId == null) {
+            if (required) {
+                throw new BusinessException("CATEGORY_NOT_FOUND", "Category is required");
+            }
+            return null;
+        }
+        boolean changed = current == null || !current.getId().equals(requestedId);
+        return resolveCategory(workspaceId, requestedId, type, required, status == TransactionStatus.POSTED && (changed || postingNow));
+    }
+
+    private WorkspacePerson resolvePersonForWrite(UUID workspaceId, UUID personId, boolean requireActive) {
+        if (personId == null) {
+            return null;
+        }
+        WorkspacePerson person = workspacePersonRepository.findByIdAndWorkspaceId(personId, workspaceId)
+                .orElseThrow(() -> new BusinessException("PERSON_NOT_FOUND", "Person not found", HttpStatus.NOT_FOUND));
+        if (requireActive && !person.isActive()) {
+            throw new BusinessException("PERSON_INACTIVE", "Person is inactive");
+        }
+        return person;
+    }
+
+    private WorkspacePerson resolvePersonForUpdate(UUID workspaceId, WorkspacePerson current, UUID requestedId) {
+        if (requestedId == null) {
+            return null;
+        }
+        boolean changed = current == null || !current.getId().equals(requestedId);
+        return resolvePersonForWrite(workspaceId, requestedId, changed);
+    }
+
+    private void validateCategoryType(TransactionType type, Category category) {
+        if (type == TransactionType.INCOME && category.getCategoryType() != CategoryType.INCOME) {
+            throw new BusinessException("CATEGORY_TYPE_MISMATCH", "Category type mismatch");
+        }
+        if (type == TransactionType.EXPENSE && category.getCategoryType() != CategoryType.EXPENSE) {
+            throw new BusinessException("CATEGORY_TYPE_MISMATCH", "Category type mismatch");
+        }
+    }
+
+    private void validateDifferentWallets(Wallet source, Wallet destination) {
+        if (source == null) {
+            throw new BusinessException("TRANSFER_SOURCE_REQUIRED", "Transfer source is required");
+        }
+        if (destination == null) {
+            throw new BusinessException("TRANSFER_DESTINATION_REQUIRED", "Transfer destination is required");
+        }
+        if (source.getId().equals(destination.getId())) {
+            throw new BusinessException("TRANSFER_SAME_WALLET", "Transfer wallets must be different");
+        }
+    }
+
+    private void validateReferencesExist(UUID workspaceId, Transaction tx) {
+        if (tx.getWallet() != null) {
+            walletRepository.findByIdAndWorkspaceId(tx.getWallet().getId(), workspaceId)
+                    .orElseThrow(() -> new BusinessException("WALLET_NOT_FOUND", "Wallet not found", HttpStatus.NOT_FOUND));
+        }
+        if (tx.getCategory() != null) {
+            categoryRepository.findByIdAndWorkspaceId(tx.getCategory().getId(), workspaceId)
+                    .orElseThrow(() -> new BusinessException("CATEGORY_NOT_FOUND", "Category not found", HttpStatus.NOT_FOUND));
+        }
+        if (tx.getAttributedPerson() != null) {
+            workspacePersonRepository.findByIdAndWorkspaceId(tx.getAttributedPerson().getId(), workspaceId)
+                    .orElseThrow(() -> new BusinessException("PERSON_NOT_FOUND", "Person not found", HttpStatus.NOT_FOUND));
+        }
+        if (tx.getVoiceRecordId() != null) {
+            voiceRecordRepository.findByIdAndWorkspaceId(tx.getVoiceRecordId(), workspaceId)
+                    .orElseThrow(() -> new BusinessException("VOICE_RECORD_NOT_FOUND", "Voice record not found", HttpStatus.NOT_FOUND));
+        }
+    }
+
+    private Sort parseSort(String sort) {
+        Sort fallback = Sort.by(
+                Sort.Order.desc("transactionDate"),
+                Sort.Order.desc("transactionTime"),
+                Sort.Order.desc("createdAt"));
+        if (sort == null || sort.isBlank()) {
+            return fallback;
+        }
+        List<Sort.Order> orders = new ArrayList<>();
+        for (String token : sort.split(";")) {
+            String[] parts = token.split(",");
+            String field = parts[0].trim();
+            if (!SORT_FIELDS.contains(field)) {
+                continue;
+            }
+            boolean desc = parts.length < 2 || !"asc".equalsIgnoreCase(parts[1].trim());
+            orders.add(desc ? Sort.Order.desc(field) : Sort.Order.asc(field));
+        }
+        return orders.isEmpty() ? fallback : Sort.by(orders);
+    }
+
+    private String workspaceCurrency(Workspace workspace) {
+        return workspace.getCurrency() == null ? "VND" : workspace.getCurrency().trim().toUpperCase(Locale.ROOT);
+    }
+
+    private String normalizeText(String value) {
+        return value == null ? null : value.trim();
+    }
+
+    private TransactionResponse mapToResponse(Transaction tx) {
+        TransactionResponse.TransactionResponseBuilder builder = TransactionResponse.builder()
+                .id(tx.getId())
+                .type(tx.getTransactionType().name())
+                .status(tx.getTransactionStatus().name())
+                .amount(tx.getAmount())
+                .currency(tx.getCurrency())
+                .transactionDate(tx.getTransactionDate())
+                .transactionTime(tx.getTransactionTime())
+                .description(tx.getDescription())
+                .note(tx.getNote())
+                .rawInput(tx.getRawInput())
+                .sourceType(tx.getSourceType().name())
+                .voiceRecordId(tx.getVoiceRecordId())
+                .voiceAudioAvailable(false)
+                .voiceAudioStatus(null)
+                .historical(tx.isHistorical())
+                .affectsWalletBalance(tx.isAffectsWalletBalance())
+                .walletUnknown(tx.isWalletUnknown())
+                .createdAt(tx.getCreatedAt())
+                .updatedAt(tx.getUpdatedAt())
+                .deletedAt(tx.getDeletedAt());
+
+        if (tx.getVoiceRecordId() != null) {
+            voiceRecordRepository.findById(tx.getVoiceRecordId()).ifPresent(voiceRecord -> {
+                builder.voiceAudioAvailable(voiceRecord.getStoragePublicId() != null);
+                builder.voiceAudioStatus(voiceRecord.getVoiceStatus().name());
+            });
+        }
+
+        if (tx.getCreatedByUser() != null) {
+            builder.createdBy(TransactionResponse.UserRef.builder()
+                    .id(tx.getCreatedByUser().getId())
+                    .username(tx.getCreatedByUser().getUsername())
+                    .fullName(tx.getCreatedByUser().getFullName())
+                    .build());
+        }
+        if (tx.getAttributedPerson() != null) {
+            builder.attributedPerson(TransactionResponse.PersonRef.builder()
+                    .id(tx.getAttributedPerson().getId())
+                    .displayName(tx.getAttributedPerson().getDisplayName())
+                    .build());
+        }
+
+        if (tx.getTransactionType() == TransactionType.TRANSFER) {
+            transferDetailRepository.findById(tx.getId()).ifPresent(td -> {
+                builder.sourceWalletId(td.getSourceWallet().getId());
+                builder.sourceWalletName(td.getSourceWallet().getName());
+                builder.destinationWalletId(td.getDestinationWallet().getId());
+                builder.destinationWalletName(td.getDestinationWallet().getName());
+                builder.transfer(TransactionResponse.TransferRef.builder()
+                        .sourceWalletId(td.getSourceWallet().getId())
+                        .sourceWalletName(td.getSourceWallet().getName())
+                        .destinationWalletId(td.getDestinationWallet().getId())
+                        .destinationWalletName(td.getDestinationWallet().getName())
+                        .build());
+            });
+            return builder.build();
+        }
+
+        if (tx.getWallet() != null) {
+            builder.walletId(tx.getWallet().getId());
+            builder.walletName(tx.getWallet().getName());
+            builder.wallet(TransactionResponse.WalletRef.builder()
+                    .id(tx.getWallet().getId())
+                    .name(tx.getWallet().getName())
+                    .type(tx.getWallet().getWalletType().name())
+                    .build());
+        }
+        if (tx.getCategory() != null) {
+            builder.categoryId(tx.getCategory().getId());
+            builder.categoryName(tx.getCategory().getName());
+            builder.category(TransactionResponse.CategoryRef.builder()
+                    .id(tx.getCategory().getId())
+                    .name(tx.getCategory().getName())
+                    .type(tx.getCategory().getCategoryType().name())
+                    .jarId(tx.getCategory().getJar() != null ? tx.getCategory().getJar().getId() : null)
+                    .jarName(tx.getCategory().getJar() != null ? tx.getCategory().getJar().getName() : null)
+                    .build());
+        }
+        return builder.build();
+    }
+}
+
+
+
+
+
