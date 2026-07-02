@@ -71,7 +71,7 @@ public class WalletController {
         return ResponseEntity.ok(ApiResponse.ok("Cập nhật ví thành công", res));
     }
 
-    @PatchMapping("/{walletId}/default")
+    @RequestMapping(value = "/{walletId}/default", method = {RequestMethod.PATCH, RequestMethod.PUT})
     public ResponseEntity<ApiResponse<Void>> setDefault(
             @PathVariable UUID workspaceId,
             @PathVariable UUID walletId) {
@@ -79,6 +79,26 @@ public class WalletController {
         UUID userId = UUID.fromString(auth.getName());
         walletService.setDefault(workspaceId, walletId, userId);
         return ResponseEntity.ok(ApiResponse.ok("Đặt làm ví mặc định thành công", null));
+    }
+
+    @PutMapping("/{walletId}/activate")
+    public ResponseEntity<ApiResponse<Void>> activate(
+            @PathVariable UUID workspaceId,
+            @PathVariable UUID walletId) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        UUID userId = UUID.fromString(auth.getName());
+        walletService.activate(workspaceId, walletId, userId);
+        return ResponseEntity.ok(ApiResponse.ok("Kích hoạt ví thành công", null));
+    }
+
+    @PutMapping("/{walletId}/deactivate")
+    public ResponseEntity<ApiResponse<Void>> deactivate(
+            @PathVariable UUID workspaceId,
+            @PathVariable UUID walletId) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        UUID userId = UUID.fromString(auth.getName());
+        walletService.deactivate(workspaceId, walletId, userId);
+        return ResponseEntity.ok(ApiResponse.ok("Ngừng sử dụng ví thành công", null));
     }
 
     @PatchMapping("/{walletId}/status")
@@ -95,5 +115,14 @@ public class WalletController {
         }
         walletService.toggleStatus(workspaceId, walletId, requestedActive, userId);
         return ResponseEntity.ok(ApiResponse.ok("Cập nhật trạng thái ví thành công", null));
+    }
+    @DeleteMapping("/{walletId}")
+    public ResponseEntity<ApiResponse<Void>> delete(
+            @PathVariable UUID workspaceId,
+            @PathVariable UUID walletId) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        UUID userId = UUID.fromString(auth.getName());
+        walletService.delete(workspaceId, walletId, userId);
+        return ResponseEntity.ok(ApiResponse.ok("Xóa ví thành công", null));
     }
 }

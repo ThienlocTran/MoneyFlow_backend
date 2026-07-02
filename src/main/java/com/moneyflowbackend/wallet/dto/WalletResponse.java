@@ -6,6 +6,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.UUID;
 
@@ -26,4 +27,6 @@ public class WalletResponse {
     private boolean isActive;
     @JsonProperty("includeInTotal")
     private boolean includeInTotal;
+    private Instant createdAt;
+    private Instant updatedAt;
 }

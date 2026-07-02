@@ -1,6 +1,7 @@
 package com.moneyflowbackend.wallet.service;
 
 import com.moneyflowbackend.common.exception.BusinessException;
+import com.moneyflowbackend.transaction.repository.TransactionRepository;
 import com.moneyflowbackend.transaction.model.TransactionStatus;
 import com.moneyflowbackend.transaction.model.TransactionType;
 import com.moneyflowbackend.wallet.dto.WalletRequest;
@@ -34,6 +35,7 @@ import java.util.UUID;
 public class WalletService {
 
     private final WalletRepository walletRepository;
+    private final TransactionRepository transactionRepository;
     private final WorkspaceRepository workspaceRepository;
     private final WorkspaceMemberRepository workspaceMemberRepository;
 
@@ -42,9 +44,11 @@ public class WalletService {
 
     public WalletService(
             WalletRepository walletRepository,
+            TransactionRepository transactionRepository,
             WorkspaceRepository workspaceRepository,
             WorkspaceMemberRepository workspaceMemberRepository) {
         this.walletRepository = walletRepository;
+        this.transactionRepository = transactionRepository;
         this.workspaceRepository = workspaceRepository;
         this.workspaceMemberRepository = workspaceMemberRepository;
     }
@@ -151,6 +155,16 @@ public class WalletService {
     }
 
     @Transactional
+    public void activate(UUID workspaceId, UUID walletId, UUID userId) {
+        toggleStatus(workspaceId, walletId, true, userId);
+    }
+
+    @Transactional
+    public void deactivate(UUID workspaceId, UUID walletId, UUID userId) {
+        toggleStatus(workspaceId, walletId, false, userId);
+    }
+
+    @Transactional
     public void toggleStatus(UUID workspaceId, UUID walletId, boolean active, UUID userId) {
         requireWritableMember(workspaceId, userId);
         Wallet wallet = findWalletInWorkspace(workspaceId, walletId);
@@ -167,6 +181,19 @@ public class WalletService {
         wallet.setActive(active);
         wallet.setUpdatedAt(Instant.now());
         walletRepository.save(wallet);
+    }
+
+    @Transactional
+    public void delete(UUID workspaceId, UUID walletId, UUID userId) {
+        requireWritableMember(workspaceId, userId);
+        Wallet wallet = findWalletInWorkspace(workspaceId, walletId);
+        if (transactionRepository.countWalletUsage(workspaceId, walletId) > 0) {
+            throw new BusinessException(
+                    "WALLET_HAS_TRANSACTIONS",
+                    "Không thể xóa ví đã có giao dịch. Bạn có thể ngừng sử dụng ví này.",
+                    HttpStatus.CONFLICT);
+        }
+        walletRepository.delete(wallet);
     }
 
     @Transactional(readOnly = true)
@@ -336,6 +363,8 @@ public class WalletService {
                 .isDefault(w.isDefault())
                 .isActive(w.isActive())
                 .includeInTotal(w.isIncludeInTotal())
+                .createdAt(w.getCreatedAt())
+                .updatedAt(w.getUpdatedAt())
                 .build();
     }
 }
