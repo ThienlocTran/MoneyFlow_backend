@@ -130,8 +130,8 @@ public class CategoryKeywordService {
 
     private WorkspaceMember requireWritableMember(UUID workspaceId, UUID userId) {
         WorkspaceMember member = requireActiveMember(workspaceId, userId);
-        if (member.getRole() == WorkspaceRole.VIEWER) {
-            throw new BusinessException("FORBIDDEN", "Viewer cannot modify keywords", HttpStatus.FORBIDDEN);
+        if (member.getRole() != WorkspaceRole.OWNER) {
+            throw new BusinessException("FORBIDDEN", "Only workspace owner can modify keywords", HttpStatus.FORBIDDEN);
         }
         return member;
     }

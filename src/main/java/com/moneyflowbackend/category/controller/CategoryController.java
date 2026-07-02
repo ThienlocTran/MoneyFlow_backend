@@ -10,6 +10,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -81,6 +82,22 @@ public class CategoryController {
         return ResponseEntity.ok(ApiResponse.ok("Category status updated", null));
     }
 
+    @PutMapping("/{categoryId}/activate")
+    public ResponseEntity<ApiResponse<Void>> activate(
+            @PathVariable UUID workspaceId,
+            @PathVariable UUID categoryId) {
+        categoryService.toggleStatus(workspaceId, categoryId, true, currentUserId());
+        return ResponseEntity.ok(ApiResponse.ok("Category activated", null));
+    }
+
+    @PutMapping("/{categoryId}/deactivate")
+    public ResponseEntity<ApiResponse<Void>> deactivate(
+            @PathVariable UUID workspaceId,
+            @PathVariable UUID categoryId) {
+        categoryService.toggleStatus(workspaceId, categoryId, false, currentUserId());
+        return ResponseEntity.ok(ApiResponse.ok("Category deactivated", null));
+    }
+
     @PatchMapping("/{categoryId}/archive")
     public ResponseEntity<ApiResponse<Void>> setArchived(
             @PathVariable UUID workspaceId,
@@ -97,6 +114,23 @@ public class CategoryController {
             @RequestParam boolean quickAction) {
         categoryService.toggleQuickAction(workspaceId, categoryId, quickAction, currentUserId());
         return ResponseEntity.ok(ApiResponse.ok("Category quick action updated", null));
+    }
+
+    @PutMapping("/{categoryId}/quick-action")
+    public ResponseEntity<ApiResponse<Void>> putQuickAction(
+            @PathVariable UUID workspaceId,
+            @PathVariable UUID categoryId,
+            @RequestParam boolean quickAction) {
+        categoryService.toggleQuickAction(workspaceId, categoryId, quickAction, currentUserId());
+        return ResponseEntity.ok(ApiResponse.ok("Category quick action updated", null));
+    }
+
+    @DeleteMapping("/{categoryId}")
+    public ResponseEntity<ApiResponse<Void>> delete(
+            @PathVariable UUID workspaceId,
+            @PathVariable UUID categoryId) {
+        categoryService.delete(workspaceId, categoryId, currentUserId());
+        return ResponseEntity.ok(ApiResponse.ok("Category deleted", null));
     }
 
     @PutMapping("/reorder")

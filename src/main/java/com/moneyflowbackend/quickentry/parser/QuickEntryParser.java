@@ -106,8 +106,13 @@ public class QuickEntryParser {
             missing.add("CATEGORY");
             warnings.add("AMBIGUOUS_CATEGORY");
         } else if (categoryMatch != null && categoryMatch.category() != null) {
+            if (!categoryMatchesType(categoryMatch.category(), type)) {
+                missing.add("CATEGORY");
+                warnings.add("CATEGORY_TYPE_MISMATCH");
+            } else {
             category = categoryMatch.category();
             matchedKeyword = categoryMatch.keyword().getKeyword();
+            }
         } else if (type == TransactionType.INCOME || type == TransactionType.EXPENSE) {
             missing.add("CATEGORY");
             warnings.add("UNKNOWN_CATEGORY");
@@ -209,6 +214,11 @@ public class QuickEntryParser {
         if (transferText) {
             return TransactionType.TRANSFER;
         }
+        boolean income = INCOME_WORDS.stream().anyMatch(word -> containsWordOrPhrase(normalized, word));
+        boolean expense = EXPENSE_WORDS.stream().anyMatch(word -> containsWordOrPhrase(normalized, word));
+        if (income != expense) {
+            return income ? TransactionType.INCOME : TransactionType.EXPENSE;
+        }
         if (categoryMatch != null && !categoryMatch.ambiguous() && categoryMatch.category() != null) {
             CategoryType type = categoryMatch.category().getCategoryType();
             if (type == CategoryType.INCOME) {
@@ -218,12 +228,17 @@ public class QuickEntryParser {
                 return TransactionType.EXPENSE;
             }
         }
-        boolean income = INCOME_WORDS.stream().anyMatch(word -> containsWordOrPhrase(normalized, word));
-        boolean expense = EXPENSE_WORDS.stream().anyMatch(word -> containsWordOrPhrase(normalized, word));
-        if (income == expense) {
-            return null;
+        return null;
+    }
+
+    private boolean categoryMatchesType(Category category, TransactionType type) {
+        if (type == TransactionType.INCOME) {
+            return category.getCategoryType() == CategoryType.INCOME;
         }
-        return income ? TransactionType.INCOME : TransactionType.EXPENSE;
+        if (type == TransactionType.EXPENSE) {
+            return category.getCategoryType() == CategoryType.EXPENSE;
+        }
+        return false;
     }
 
     private Optional<CategoryMatch> matchCategory(String normalized, String display, List<CategoryKeyword> keywords) {

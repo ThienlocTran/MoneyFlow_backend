@@ -6,6 +6,7 @@ import com.moneyflowbackend.category.dto.CategoryResponse;
 import com.moneyflowbackend.category.model.Category;
 import com.moneyflowbackend.category.model.CategoryType;
 import com.moneyflowbackend.category.repository.CategoryRepository;
+import com.moneyflowbackend.category.repository.CategoryKeywordRepository;
 import com.moneyflowbackend.common.exception.BusinessException;
 import com.moneyflowbackend.jar.model.Jar;
 import com.moneyflowbackend.jar.repository.JarRepository;
@@ -31,6 +32,7 @@ public class CategoryService {
 
     private final CategoryRepository categoryRepository;
     private final JarRepository jarRepository;
+    private final CategoryKeywordRepository keywordRepository;
     private final WorkspaceRepository workspaceRepository;
     private final WorkspaceMemberRepository workspaceMemberRepository;
     private final TransactionRepository transactionRepository;
@@ -38,11 +40,13 @@ public class CategoryService {
     public CategoryService(
             CategoryRepository categoryRepository,
             JarRepository jarRepository,
+            CategoryKeywordRepository keywordRepository,
             WorkspaceRepository workspaceRepository,
             WorkspaceMemberRepository workspaceMemberRepository,
             TransactionRepository transactionRepository) {
         this.categoryRepository = categoryRepository;
         this.jarRepository = jarRepository;
+        this.keywordRepository = keywordRepository;
         this.workspaceRepository = workspaceRepository;
         this.workspaceMemberRepository = workspaceMemberRepository;
         this.transactionRepository = transactionRepository;
@@ -195,6 +199,16 @@ public class CategoryService {
     }
 
     @Transactional
+    public void delete(UUID workspaceId, UUID categoryId, UUID userId) {
+        requireWritableMember(workspaceId, userId);
+        Category category = findCategoryInWorkspace(workspaceId, categoryId);
+        if (transactionRepository.countByWorkspaceIdAndCategoryId(workspaceId, categoryId) > 0) {
+            throw new BusinessException("CATEGORY_IN_USE", "Category has transactions; deactivate it instead");
+        }
+        categoryRepository.delete(category);
+    }
+
+    @Transactional
     public List<CategoryResponse> reorder(UUID workspaceId, CategoryReorderRequest req, UUID userId) {
         requireWritableMember(workspaceId, userId);
         Set<UUID> seen = new HashSet<>();
@@ -256,8 +270,8 @@ public class CategoryService {
 
     private WorkspaceMember requireWritableMember(UUID workspaceId, UUID userId) {
         WorkspaceMember member = requireActiveMember(workspaceId, userId);
-        if (member.getRole() == WorkspaceRole.VIEWER) {
-            throw new BusinessException("FORBIDDEN", "Viewer cannot modify categories", HttpStatus.FORBIDDEN);
+        if (member.getRole() != WorkspaceRole.OWNER) {
+            throw new BusinessException("FORBIDDEN", "Only workspace owner can modify categories", HttpStatus.FORBIDDEN);
         }
         return member;
     }
@@ -289,6 +303,7 @@ public class CategoryService {
     private CategoryResponse mapToResponse(Category category) {
         return CategoryResponse.builder()
                 .id(category.getId())
+                .workspaceId(category.getWorkspace().getId())
                 .name(category.getName())
                 .type(category.getCategoryType().name())
                 .jarId(category.getJar() != null ? category.getJar().getId() : null)
@@ -298,6 +313,10 @@ public class CategoryService {
                 .isActive(category.isActive())
                 .isArchived(category.isArchived())
                 .displayOrder(category.getDisplayOrder())
+                .keywordCount(keywordRepository.countByCategoryId(category.getId()))
+                .usageCount(transactionRepository.countByWorkspaceIdAndCategoryId(category.getWorkspace().getId(), category.getId()))
+                .createdAt(category.getCreatedAt())
+                .updatedAt(category.getUpdatedAt())
                 .build();
     }
 }
