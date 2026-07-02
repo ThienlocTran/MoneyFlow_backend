@@ -8,4 +8,5 @@ import java.util.UUID;
 
 public interface WorkspacePersonRepository extends JpaRepository<WorkspacePerson, UUID> {
     Optional<WorkspacePerson> findByIdAndWorkspaceId(UUID id, UUID workspaceId);
+    Optional<WorkspacePerson> findByWorkspaceIdAndLinkedUserId(UUID workspaceId, UUID linkedUserId);
 }
