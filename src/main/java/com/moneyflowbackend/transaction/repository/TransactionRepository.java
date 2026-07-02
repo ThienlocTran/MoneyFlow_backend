@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -15,6 +16,23 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID>,
     boolean existsByWorkspaceIdAndVoiceRecordIdAndSourceType(UUID workspaceId, UUID voiceRecordId, TransactionSourceType sourceType);
     Optional<Transaction> findByIdAndWorkspaceId(UUID transactionId, UUID workspaceId);
     Optional<Transaction> findByWorkspaceIdAndMigrationKey(UUID workspaceId, String migrationKey);
+
+    @Query("""
+            SELECT t.wallet FROM Transaction t
+            WHERE t.workspace.id = :workspaceId
+              AND t.createdByUser.id = :userId
+              AND t.transactionType = :transactionType
+              AND t.wallet IS NOT NULL
+              AND t.wallet.isActive = true
+              AND t.deletedAt IS NULL
+              AND t.affectsWalletBalance = true
+              AND t.sourceType <> com.moneyflowbackend.transaction.model.TransactionSourceType.EXCEL_MIGRATION
+            ORDER BY t.transactionDate DESC, t.createdAt DESC
+            """)
+    List<com.moneyflowbackend.wallet.model.Wallet> findRecentActiveWalletSuggestions(
+            @Param("workspaceId") UUID workspaceId,
+            @Param("userId") UUID userId,
+            @Param("transactionType") com.moneyflowbackend.transaction.model.TransactionType transactionType);
 
     @Query("""
             SELECT COUNT(t) FROM Transaction t

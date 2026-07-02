@@ -72,6 +72,11 @@ Use this checklist for the next browser UAT pass on staging. Do not use real fin
 
 - Open Quick Text.
 - Parse a staging-only text entry.
+- Try `ăn sáng 35k tiền mặt`.
+- Try `mẹ cho 500k vào MB`.
+- Try `chuyển 200k từ MB sang MoMo`.
+- Try `hôm qua cafe 45k momo`.
+- Confirm missing amount, wallet, or category stays as a draft and cannot be saved until fixed.
 - Confirm the preview.
 - Save the transaction.
 - Confirm Dashboard, Transactions, and Wallets refresh.
