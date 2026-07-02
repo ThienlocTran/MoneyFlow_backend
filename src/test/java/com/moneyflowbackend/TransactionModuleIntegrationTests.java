@@ -6,6 +6,8 @@ import com.moneyflowbackend.category.model.Category;
 import com.moneyflowbackend.category.model.CategoryType;
 import com.moneyflowbackend.category.repository.CategoryRepository;
 import com.moneyflowbackend.common.exception.BusinessException;
+import com.moneyflowbackend.transaction.audit.TransactionAuditLogRepository;
+import com.moneyflowbackend.transaction.audit.TransactionAuditService;
 import com.moneyflowbackend.transaction.dto.TransactionPageResponse;
 import com.moneyflowbackend.transaction.dto.TransactionRequest;
 import com.moneyflowbackend.transaction.dto.TransactionResponse;
@@ -55,6 +57,8 @@ class TransactionModuleIntegrationTests {
     @Autowired CategoryRepository categoryRepository;
     @Autowired TransactionRepository transactionRepository;
     @Autowired TransferDetailRepository transferDetailRepository;
+    @Autowired TransactionAuditLogRepository transactionAuditLogRepository;
+    @Autowired TransactionAuditService transactionAuditService;
 
     @Test
     void incomeExpenseTransferUpdateDeleteRestoreDriveBalances() {
@@ -107,6 +111,63 @@ class TransactionModuleIntegrationTests {
         transactionService.restore(ctx.workspace().getId(), transfer.getId(), ctx.user().getId());
         assertThat(walletService.calculateCurrentBalance(cash.getId())).isEqualByComparingTo("1700000");
         assertThat(walletService.calculateCurrentBalance(bank.getId())).isEqualByComparingTo("400000");
+    }
+
+    @Test
+    void transactionMutationsWriteAuditSnapshotsAndOwnerOnlyAuditAccess() {
+        TestContext owner = createContext("tx_audit", WorkspaceRole.OWNER);
+        TestContext editor = createContext("tx_audit_editor", WorkspaceRole.EDITOR);
+        TestContext viewer = createContext("tx_audit_viewer", WorkspaceRole.VIEWER);
+        TestContext outsider = createContext("tx_audit_outsider", WorkspaceRole.OWNER);
+        workspaceMemberRepository.save(WorkspaceMember.builder().workspace(owner.workspace()).user(editor.user()).role(WorkspaceRole.EDITOR).build());
+        workspaceMemberRepository.save(WorkspaceMember.builder().workspace(owner.workspace()).user(viewer.user()).role(WorkspaceRole.VIEWER).build());
+        Wallet cash = wallet(owner, "Cash", WalletType.CASH, "0");
+        Category food = category(owner, "Food", CategoryType.EXPENSE, true, false);
+
+        TransactionResponse created = transactionService.create(owner.workspace().getId(), expenseReq("100", cash, food, "Lunch", TransactionStatus.POSTED), owner.user().getId());
+        transactionService.update(owner.workspace().getId(), created.getId(), expenseReq("150", cash, food, "Lunch updated", TransactionStatus.POSTED), owner.user().getId());
+        transactionService.delete(owner.workspace().getId(), created.getId(), owner.user().getId());
+        transactionService.restore(owner.workspace().getId(), created.getId(), owner.user().getId());
+
+        var logs = transactionAuditLogRepository.findByWorkspaceIdAndTransactionIdOrderByCreatedAtAsc(owner.workspace().getId(), created.getId());
+        assertThat(logs).hasSize(4);
+        assertThat(logs).extracting(log -> log.getAction().name())
+                .containsExactly("CREATE", "UPDATE", "DELETE", "RESTORE");
+        assertThat(logs.get(0).getBeforeData()).isNull();
+        assertThat(new BigDecimal(logs.get(0).getAfterData().get("amount").toString())).isEqualByComparingTo("100.00");
+        assertThat(logs.get(1).getBeforeData()).containsEntry("description", "Lunch");
+        assertThat(logs.get(1).getAfterData()).containsEntry("description", "Lunch updated");
+        assertThat(logs.get(2).getBeforeData()).containsEntry("deletedAt", null);
+        assertThat(logs.get(2).getAfterData().get("deletedAt")).isNotNull();
+        assertThat(logs.get(0).getAfterData()).doesNotContainKeys("audioUrl", "storagePublicId", "password", "token");
+
+        assertThat(transactionAuditService.list(owner.workspace().getId(), created.getId(), owner.user().getId()))
+                .extracting("action")
+                .containsExactly("CREATE", "UPDATE", "SOFT_DELETE", "RESTORE");
+        assertBusinessCode(() -> transactionAuditService.list(owner.workspace().getId(), created.getId(), editor.user().getId()), "FORBIDDEN");
+        assertBusinessCode(() -> transactionAuditService.list(owner.workspace().getId(), created.getId(), viewer.user().getId()), "FORBIDDEN");
+        assertBusinessCode(() -> transactionAuditService.list(owner.workspace().getId(), created.getId(), outsider.user().getId()), "WORKSPACE_ACCESS_DENIED");
+    }
+
+    @Test
+    void failedCreateAndViewerMutationsDoNotWriteAudit() {
+        TestContext owner = createContext("tx_audit_fail", WorkspaceRole.OWNER);
+        TestContext viewer = createContext("tx_audit_fail_viewer", WorkspaceRole.VIEWER);
+        workspaceMemberRepository.save(WorkspaceMember.builder().workspace(owner.workspace()).user(viewer.user()).role(WorkspaceRole.VIEWER).build());
+        Wallet cash = wallet(owner, "Cash", WalletType.CASH, "0");
+        Category food = category(owner, "Food", CategoryType.EXPENSE, true, false);
+        long before = transactionAuditLogRepository.count();
+
+        assertBusinessCode(() -> transactionService.create(owner.workspace().getId(), expenseReq("0", cash, food, "Bad", TransactionStatus.POSTED), owner.user().getId()), "INVALID_AMOUNT");
+        assertBusinessCode(() -> transactionService.create(owner.workspace().getId(), expenseReq("1", cash, food, "Viewer", TransactionStatus.POSTED), viewer.user().getId()), "FORBIDDEN");
+
+        TransactionResponse tx = transactionService.create(owner.workspace().getId(), expenseReq("1", cash, food, "Owner", TransactionStatus.POSTED), owner.user().getId());
+        assertBusinessCode(() -> transactionService.update(owner.workspace().getId(), tx.getId(), expenseReq("2", cash, food, "Viewer", TransactionStatus.POSTED), viewer.user().getId()), "FORBIDDEN");
+        assertBusinessCode(() -> transactionService.delete(owner.workspace().getId(), tx.getId(), viewer.user().getId()), "FORBIDDEN");
+        transactionService.delete(owner.workspace().getId(), tx.getId(), owner.user().getId());
+        assertBusinessCode(() -> transactionService.restore(owner.workspace().getId(), tx.getId(), viewer.user().getId()), "FORBIDDEN");
+
+        assertThat(transactionAuditLogRepository.count()).isEqualTo(before + 2);
     }
 
     @Test
