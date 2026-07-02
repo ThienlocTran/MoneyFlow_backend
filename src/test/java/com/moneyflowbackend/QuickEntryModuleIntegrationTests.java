@@ -13,6 +13,7 @@ import com.moneyflowbackend.quickentry.dto.QuickEntryConfirmRequest;
 import com.moneyflowbackend.quickentry.dto.QuickEntryPreviewResponse;
 import com.moneyflowbackend.quickentry.service.QuickEntryService;
 import com.moneyflowbackend.transaction.model.Transaction;
+import com.moneyflowbackend.transaction.audit.TransactionAuditLogRepository;
 import com.moneyflowbackend.transaction.model.TransactionSourceType;
 import com.moneyflowbackend.transaction.model.TransactionStatus;
 import com.moneyflowbackend.transaction.model.TransactionType;
@@ -53,6 +54,7 @@ class QuickEntryModuleIntegrationTests {
     @Autowired CategoryRepository categoryRepository;
     @Autowired CategoryKeywordRepository keywordRepository;
     @Autowired TransactionRepository transactionRepository;
+    @Autowired TransactionAuditLogRepository transactionAuditLogRepository;
     @Autowired VoiceRecordRepository voiceRecordRepository;
 
     @Test
@@ -76,6 +78,10 @@ class QuickEntryModuleIntegrationTests {
         assertThat(tx.getSourceType()).isEqualTo(TransactionSourceType.QUICK_TEXT);
         assertThat(tx.getRawInput()).isEqualTo("an sang 35k tien mat");
         assertThat(tx.getVoiceRecordId()).isNull();
+        var logs = transactionAuditLogRepository.findByWorkspaceIdAndTransactionIdOrderByCreatedAtAsc(ctx.workspace().getId(), saved.getId());
+        assertThat(logs).hasSize(1);
+        assertThat(logs.get(0).getAction().name()).isEqualTo("CREATE");
+        assertThat(logs.get(0).getAfterData()).containsEntry("sourceType", "QUICK_TEXT");
         assertThat(walletService.calculateCurrentBalance(cash.getId())).isEqualByComparingTo("-35000");
     }
 
@@ -136,6 +142,11 @@ class QuickEntryModuleIntegrationTests {
         assertThat(voiceRecord.getOriginalTranscript()).isEqualTo("an sang 35k tien mat");
         assertThat(voiceRecord.getEditedTranscript()).isEqualTo("an sang 35k tien mat");
         assertThat(voiceRecord.getAudioUrl()).isNull();
+        var logs = transactionAuditLogRepository.findByWorkspaceIdAndTransactionIdOrderByCreatedAtAsc(ctx.workspace().getId(), saved.getId());
+        assertThat(logs).hasSize(1);
+        assertThat(logs.get(0).getAfterData()).containsEntry("sourceType", "VOICE");
+        assertThat(logs.get(0).getAfterData()).containsEntry("voiceRecordId", tx.getVoiceRecordId());
+        assertThat(logs.get(0).getAfterData()).doesNotContainKeys("audioUrl", "storagePublicId");
         assertThat(walletService.calculateCurrentBalance(cash.getId())).isEqualByComparingTo("-35000");
     }
 

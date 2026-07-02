@@ -1,6 +1,8 @@
 package com.moneyflowbackend.transaction.controller;
 
 import com.moneyflowbackend.dto.ApiResponse;
+import com.moneyflowbackend.transaction.audit.TransactionAuditService;
+import com.moneyflowbackend.transaction.audit.dto.TransactionAuditResponse;
 import com.moneyflowbackend.transaction.dto.TransactionPageResponse;
 import com.moneyflowbackend.transaction.dto.TransactionRequest;
 import com.moneyflowbackend.transaction.dto.TransactionResponse;
@@ -25,15 +27,18 @@ import org.springframework.web.bind.annotation.RestController;
 import java.time.LocalDate;
 import java.time.YearMonth;
 import java.util.UUID;
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/workspaces/{workspaceId}/transactions")
 public class TransactionController {
 
     private final TransactionService transactionService;
+    private final TransactionAuditService transactionAuditService;
 
-    public TransactionController(TransactionService transactionService) {
+    public TransactionController(TransactionService transactionService, TransactionAuditService transactionAuditService) {
         this.transactionService = transactionService;
+        this.transactionAuditService = transactionAuditService;
     }
 
     @GetMapping
@@ -92,6 +97,15 @@ public class TransactionController {
             @RequestParam(defaultValue = "false") boolean includeDeleted) {
         TransactionResponse res = transactionService.getDetails(workspaceId, transactionId, includeDeleted, currentUserId());
         return ResponseEntity.ok(ApiResponse.ok("Transaction loaded", res));
+    }
+
+    @GetMapping("/{transactionId}/audit")
+    public ResponseEntity<ApiResponse<List<TransactionAuditResponse>>> audit(
+            @PathVariable UUID workspaceId,
+            @PathVariable UUID transactionId) {
+        return ResponseEntity.ok(ApiResponse.ok(
+                "Transaction audit loaded",
+                transactionAuditService.list(workspaceId, transactionId, currentUserId())));
     }
 
     @PostMapping

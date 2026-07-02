@@ -137,7 +137,6 @@ public class QuickEntryService {
         TransactionRequest txReq = toTransactionRequest(workspace, req, sourceType);
         learnKeywordIfRequested(workspace, req);
         if (sourceType == TransactionSourceType.VOICE) {
-            TransactionResponse response = transactionService.createWithSource(workspaceId, txReq, userId, sourceType, req.getRawInput());
             VoiceRecord voiceRecord = voiceRecordRepository.save(VoiceRecord.builder()
                     .workspace(workspace)
                     .createdByUser(userRepository.findById(userId)
@@ -151,11 +150,7 @@ public class QuickEntryService {
                     .editedTranscript(normalize(req.getRawInput()))
                     .voiceStatus(VoiceRecordStatus.CONFIRMED)
                     .build());
-            var tx = transactionRepository.findByIdAndWorkspaceId(response.getId(), workspaceId)
-                    .orElseThrow(() -> new BusinessException("TRANSACTION_NOT_FOUND", "Transaction not found", HttpStatus.NOT_FOUND));
-            tx.setVoiceRecordId(voiceRecord.getId());
-            transactionRepository.save(tx);
-            return transactionService.getDetails(workspaceId, response.getId(), false, userId);
+            return transactionService.createWithSource(workspaceId, txReq, userId, sourceType, req.getRawInput(), voiceRecord.getId());
         }
         return transactionService.createWithSource(workspaceId, txReq, userId, sourceType, req.getRawInput());
     }

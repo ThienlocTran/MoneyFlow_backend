@@ -6,6 +6,8 @@ import com.moneyflowbackend.category.model.Category;
 import com.moneyflowbackend.category.model.CategoryType;
 import com.moneyflowbackend.category.repository.CategoryRepository;
 import com.moneyflowbackend.common.exception.BusinessException;
+import com.moneyflowbackend.transaction.audit.TransactionAuditAction;
+import com.moneyflowbackend.transaction.audit.TransactionAuditService;
 import com.moneyflowbackend.transaction.dto.TransactionPageResponse;
 import com.moneyflowbackend.transaction.dto.TransactionRequest;
 import com.moneyflowbackend.transaction.dto.TransactionResponse;
@@ -78,6 +80,7 @@ public class TransactionService {
     private final WorkspaceRepository workspaceRepository;
     private final WorkspaceMemberRepository workspaceMemberRepository;
     private final WorkspacePersonRepository workspacePersonRepository;
+    private final TransactionAuditService transactionAuditService;
     private final Clock clock;
 
     public TransactionService(
@@ -90,6 +93,7 @@ public class TransactionService {
             WorkspaceRepository workspaceRepository,
             WorkspaceMemberRepository workspaceMemberRepository,
             WorkspacePersonRepository workspacePersonRepository,
+            TransactionAuditService transactionAuditService,
             Clock clock) {
         this.transactionRepository = transactionRepository;
         this.transferDetailRepository = transferDetailRepository;
@@ -100,6 +104,7 @@ public class TransactionService {
         this.workspaceRepository = workspaceRepository;
         this.workspaceMemberRepository = workspaceMemberRepository;
         this.workspacePersonRepository = workspacePersonRepository;
+        this.transactionAuditService = transactionAuditService;
         this.clock = clock;
     }
 
@@ -336,6 +341,7 @@ public class TransactionService {
                     .sourceWallet(source)
                     .destinationWallet(destination)
                     .build());
+            transactionAuditService.record(tx, userId, TransactionAuditAction.CREATE, null, transactionAuditService.snapshot(tx));
             return mapToResponse(tx);
         }
 
@@ -343,7 +349,9 @@ public class TransactionService {
         Category category = resolveCategory(workspaceId, req.getCategoryId(), type, true, true);
         tx.setWallet(wallet);
         tx.setCategory(category);
-        return mapToResponse(transactionRepository.save(tx));
+        tx = transactionRepository.save(tx);
+        transactionAuditService.record(tx, userId, TransactionAuditAction.CREATE, null, transactionAuditService.snapshot(tx));
+        return mapToResponse(tx);
     }
 
     @Transactional
@@ -353,6 +361,7 @@ public class TransactionService {
         if (tx.getDeletedAt() != null) {
             throw new BusinessException("TRANSACTION_NOT_FOUND", "Transaction not found", HttpStatus.NOT_FOUND);
         }
+        var before = transactionAuditService.snapshot(tx);
         TransactionType requestedType = requireManualType(req.getType());
         if (requestedType != tx.getTransactionType()) {
             throw new BusinessException("TRANSACTION_TYPE_IMMUTABLE", "Transaction type cannot be changed");
@@ -389,6 +398,7 @@ public class TransactionService {
             detail.setSourceWallet(source);
             detail.setDestinationWallet(destination);
             transferDetailRepository.save(detail);
+            transactionAuditService.record(tx, userId, TransactionAuditAction.UPDATE, before, transactionAuditService.snapshot(tx));
             return mapToResponse(tx);
         }
 
@@ -396,7 +406,9 @@ public class TransactionService {
         Category category = resolveCategoryForUpdate(workspaceId, tx.getCategory(), req.getCategoryId(), tx.getTransactionType(), true, newStatus, postingNow);
         tx.setWallet(wallet);
         tx.setCategory(category);
-        return mapToResponse(transactionRepository.save(tx));
+        tx = transactionRepository.save(tx);
+        transactionAuditService.record(tx, userId, TransactionAuditAction.UPDATE, before, transactionAuditService.snapshot(tx));
+        return mapToResponse(tx);
     }
 
     @Transactional
@@ -406,10 +418,12 @@ public class TransactionService {
         if (tx.getDeletedAt() != null) {
             return;
         }
+        var before = transactionAuditService.snapshot(tx);
         Instant now = Instant.now();
         tx.setDeletedAt(now);
         tx.setUpdatedAt(now);
-        transactionRepository.save(tx);
+        tx = transactionRepository.save(tx);
+        transactionAuditService.record(tx, userId, TransactionAuditAction.DELETE, before, transactionAuditService.snapshot(tx));
     }
 
     @Transactional
@@ -419,6 +433,7 @@ public class TransactionService {
         if (tx.getDeletedAt() == null) {
             throw new BusinessException("TRANSACTION_NOT_DELETED", "Transaction is not deleted");
         }
+        var before = transactionAuditService.snapshot(tx);
         validateReferencesUsableForRestore(workspaceId, tx);
         if (tx.getTransactionType() == TransactionType.TRANSFER) {
             TransferDetail detail = transferDetailRepository.findById(tx.getId())
@@ -429,7 +444,9 @@ public class TransactionService {
         }
         tx.setDeletedAt(null);
         tx.setUpdatedAt(Instant.now());
-        return mapToResponse(transactionRepository.save(tx));
+        tx = transactionRepository.save(tx);
+        transactionAuditService.record(tx, userId, TransactionAuditAction.RESTORE, before, transactionAuditService.snapshot(tx));
+        return mapToResponse(tx);
     }
 
     private Workspace findWorkspace(UUID workspaceId) {
