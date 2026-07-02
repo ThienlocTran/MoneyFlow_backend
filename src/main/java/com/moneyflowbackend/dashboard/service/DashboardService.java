@@ -6,6 +6,7 @@ import com.moneyflowbackend.dashboard.dto.*;
 import com.moneyflowbackend.transaction.model.TransactionStatus;
 import com.moneyflowbackend.transaction.model.TransactionType;
 import com.moneyflowbackend.wallet.model.Wallet;
+import com.moneyflowbackend.wallet.service.WalletService;
 import com.moneyflowbackend.workspace.model.Workspace;
 import com.moneyflowbackend.workspace.repository.WorkspaceRepository;
 import com.moneyflowbackend.workspace.service.WorkspaceService;
@@ -23,7 +24,13 @@ import java.time.YearMonth;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 public class DashboardService {
@@ -31,14 +38,16 @@ public class DashboardService {
 
     private final WorkspaceService workspaceService;
     private final WorkspaceRepository workspaceRepository;
+    private final WalletService walletService;
     private final Clock clock;
 
     @PersistenceContext
     private EntityManager entityManager;
 
-    public DashboardService(WorkspaceService workspaceService, WorkspaceRepository workspaceRepository, Clock clock) {
+    public DashboardService(WorkspaceService workspaceService, WorkspaceRepository workspaceRepository, WalletService walletService, Clock clock) {
         this.workspaceService = workspaceService;
         this.workspaceRepository = workspaceRepository;
+        this.walletService = walletService;
         this.clock = clock;
     }
 
@@ -56,23 +65,38 @@ public class DashboardService {
 
         Totals currentTotals = totals(workspaceId, current.from(), current.to());
         Totals previousTotals = totals(workspaceId, previous.from(), previous.to());
+        List<DashboardCategoryResponse> expenseByCategory = categoryBreakdown(workspaceId, current.from(), current.to(), TransactionType.EXPENSE, currentTotals.expense());
+        List<DashboardJarResponse> expenseByJar = jarBreakdown(workspaceId, current.from(), current.to(), currentTotals.expense());
 
         return DashboardResponse.builder()
                 .period(DashboardPeriodResponse.builder()
                         .month(selectedMonth.toString())
                         .dateFrom(current.from())
                         .dateTo(current.to())
+                        .startDate(current.from())
+                        .endDate(current.to())
                         .comparisonMode(mode.name())
+                        .build())
+                .summary(DashboardSummaryBlockResponse.builder()
+                        .income(currentTotals.income())
+                        .expense(currentTotals.expense())
+                        .net(currentTotals.net())
+                        .transactionCount(currentTotals.count())
                         .build())
                 .walletTotal(walletTotal(workspaceId))
                 .income(currentTotals.income())
                 .expense(currentTotals.expense())
                 .netCashFlow(currentTotals.net())
                 .transactionCount(currentTotals.count())
-                .comparison(comparison(currentTotals, previousTotals))
-                .expenseByCategory(categoryBreakdown(workspaceId, current.from(), current.to(), TransactionType.EXPENSE, currentTotals.expense()))
-                .expenseByJar(jarBreakdown(workspaceId, current.from(), current.to(), currentTotals.expense()))
+                .comparison(comparison(currentTotals, previousTotals, previous))
+                .categoryBreakdown(expenseByCategory)
+                .jarBreakdown(expenseByJar)
+                .expenseByCategory(expenseByCategory)
+                .expenseByJar(expenseByJar)
                 .incomeByCategory(categoryBreakdown(workspaceId, current.from(), current.to(), TransactionType.INCOME, currentTotals.income()))
+                .topIncreases(topCategoryChanges(workspaceId, current, previous, true))
+                .topDecreases(topCategoryChanges(workspaceId, current, previous, false))
+                .walletBalances(walletBalances(workspaceId, userId))
                 .recentTransactions(recentTransactions(workspaceId, current.from(), current.to()))
                 .build();
     }
@@ -250,8 +274,10 @@ public class DashboardService {
     private List<DashboardRecentTransactionResponse> recentTransactions(UUID workspaceId, LocalDate from, LocalDate to) {
         List<Object[]> rows = entityManager.createQuery(
                 "SELECT t.id, t.transactionType, t.transactionStatus, t.amount, t.transactionDate, t.transactionTime, " +
-                        "t.description, w.id, w.name, c.id, c.name " +
+                        "t.description, w.id, w.name, c.id, c.name, sw.name, dw.name " +
                         "FROM Transaction t LEFT JOIN t.wallet w LEFT JOIN t.category c " +
+                        "LEFT JOIN TransferDetail td ON td.transaction = t " +
+                        "LEFT JOIN td.sourceWallet sw LEFT JOIN td.destinationWallet dw " +
                         "WHERE t.workspace.id = :workspaceId " + postedFilter() +
                         "AND t.transactionDate BETWEEN :from AND :to " +
                         "ORDER BY t.transactionDate DESC, t.transactionTime DESC, t.createdAt DESC")
@@ -272,34 +298,124 @@ public class DashboardService {
                 .walletName((String) row[8])
                 .categoryId((UUID) row[9])
                 .categoryName((String) row[10])
+                .sourceWalletName((String) row[11])
+                .destinationWalletName((String) row[12])
                 .build()).toList();
     }
 
+    private List<DashboardWalletBalanceResponse> walletBalances(UUID workspaceId, UUID userId) {
+        return walletService.list(workspaceId, userId).stream()
+                .map(wallet -> DashboardWalletBalanceResponse.builder()
+                        .walletId(wallet.getId())
+                        .walletName(wallet.getName())
+                        .walletType(wallet.getType())
+                        .currentBalance(wallet.getCurrentBalance())
+                        .active(wallet.isActive())
+                        .includeInTotal(wallet.isIncludeInTotal())
+                        .defaultWallet(wallet.isDefault())
+                        .build())
+                .toList();
+    }
+
+    private List<DashboardCategoryChangeResponse> topCategoryChanges(UUID workspaceId, Period current, Period previous, boolean increases) {
+        Map<UUID, CategoryAmount> currentByCategory = categoryAmounts(workspaceId, current.from(), current.to());
+        Map<UUID, CategoryAmount> previousByCategory = categoryAmounts(workspaceId, previous.from(), previous.to());
+        Set<UUID> categoryIds = new HashSet<>(currentByCategory.keySet());
+        categoryIds.addAll(previousByCategory.keySet());
+
+        return categoryIds.stream()
+                .map(id -> categoryChange(currentByCategory.get(id), previousByCategory.get(id)))
+                .filter(Objects::nonNull)
+                .filter(change -> increases
+                        ? change.getDelta().compareTo(BigDecimal.ZERO) > 0
+                        : change.getDelta().compareTo(BigDecimal.ZERO) < 0)
+                .sorted((left, right) -> increases
+                        ? right.getDelta().abs().compareTo(left.getDelta().abs())
+                        : right.getDelta().abs().compareTo(left.getDelta().abs()))
+                .limit(5)
+                .toList();
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<UUID, CategoryAmount> categoryAmounts(UUID workspaceId, LocalDate from, LocalDate to) {
+        List<Object[]> rows = entityManager.createQuery(
+                "SELECT c.id, c.name, j.id, j.name, SUM(t.amount) " +
+                        "FROM Transaction t JOIN t.category c LEFT JOIN c.jar j " +
+                        "WHERE t.workspace.id = :workspaceId " + postedFilter() +
+                        "AND t.transactionDate BETWEEN :from AND :to " +
+                        "AND t.transactionType = :type " +
+                        "GROUP BY c.id, c.name, j.id, j.name")
+                .setParameter("workspaceId", workspaceId)
+                .setParameter("from", from)
+                .setParameter("to", to)
+                .setParameter("type", TransactionType.EXPENSE)
+                .getResultList();
+        return rows.stream()
+                .map(row -> new CategoryAmount((UUID) row[0], (String) row[1], (UUID) row[2], (String) row[3], (BigDecimal) row[4]))
+                .collect(Collectors.toMap(CategoryAmount::categoryId, Function.identity()));
+    }
+
+    private DashboardCategoryChangeResponse categoryChange(CategoryAmount current, CategoryAmount previous) {
+        CategoryAmount category = current != null ? current : previous;
+        if (category == null) return null;
+        BigDecimal currentAmount = current == null ? BigDecimal.ZERO : current.amount();
+        BigDecimal previousAmount = previous == null ? BigDecimal.ZERO : previous.amount();
+        BigDecimal delta = currentAmount.subtract(previousAmount);
+        if (delta.compareTo(BigDecimal.ZERO) == 0) return null;
+        Change change = change(currentAmount, previousAmount);
+        return DashboardCategoryChangeResponse.builder()
+                .categoryId(category.categoryId())
+                .categoryName(category.categoryName())
+                .jarId(category.jarId())
+                .jarName(category.jarName())
+                .currentAmount(currentAmount)
+                .previousAmount(previousAmount)
+                .delta(delta)
+                .percent(change.value())
+                .newCategory(change.isNew())
+                .build();
+    }
+
     private DashboardComparisonResponse comparison(Totals current, Totals previous) {
+        return comparison(current, previous, null);
+    }
+
+    private DashboardComparisonResponse comparison(Totals current, Totals previous, Period previousPeriod) {
+        Change incomeChange = change(current.income(), previous.income());
+        Change expenseChange = change(current.expense(), previous.expense());
+        Change netChange = change(current.net(), previous.net());
         return DashboardComparisonResponse.builder()
                 .currentAmount(current.expense())
                 .previousAmount(previous.expense())
-                .percentageDifference(change(current.expense(), previous.expense()).valueOrZero())
+                .percentageDifference(expenseChange.valueOrZero())
                 .status(status(current.expense(), previous.expense()))
+                .previousStartDate(previousPeriod == null ? null : previousPeriod.from())
+                .previousEndDate(previousPeriod == null ? null : previousPeriod.to())
                 .previousIncome(previous.income())
                 .previousExpense(previous.expense())
                 .previousNetCashFlow(previous.net())
-                .incomePercent(change(current.income(), previous.income()).value())
-                .expensePercent(change(current.expense(), previous.expense()).value())
-                .netPercent(change(current.net(), previous.net()).value())
-                .incomeLabel(change(current.income(), previous.income()).label())
-                .expenseLabel(change(current.expense(), previous.expense()).label())
-                .netLabel(change(current.net(), previous.net()).label())
+                .incomeDelta(current.income().subtract(previous.income()))
+                .expenseDelta(current.expense().subtract(previous.expense()))
+                .netDelta(current.net().subtract(previous.net()))
+                .incomePercent(incomeChange.value())
+                .expensePercent(expenseChange.value())
+                .netPercent(netChange.value())
+                .incomeNew(incomeChange.isNew())
+                .expenseNew(expenseChange.isNew())
+                .netNew(netChange.isNew())
+                .incomeLabel(incomeChange.label())
+                .expenseLabel(expenseChange.label())
+                .netLabel(netChange.label())
                 .build();
     }
 
     private Change change(BigDecimal current, BigDecimal previous) {
         if (previous.compareTo(BigDecimal.ZERO) == 0) {
-            return new Change(null, current.compareTo(BigDecimal.ZERO) == 0 ? "Khong co du lieu" : "Phat sinh moi");
+            return new Change(null, current.compareTo(BigDecimal.ZERO) == 0 ? "Không có dữ liệu" : "Phát sinh mới", current.compareTo(BigDecimal.ZERO) > 0);
         }
         double pct = current.subtract(previous).divide(previous.abs(), 4, RoundingMode.HALF_UP)
                 .multiply(BigDecimal.valueOf(100)).doubleValue();
-        return new Change(pct, null);
+        return new Change(pct, null, false);
     }
 
     private String status(BigDecimal current, BigDecimal previous) {
@@ -364,7 +480,8 @@ public class DashboardService {
     private enum ComparisonMode { SAME_PERIOD, FULL_MONTH }
     private record Period(LocalDate from, LocalDate to) {}
     private record Totals(BigDecimal income, BigDecimal expense, BigDecimal net, long count) {}
-    private record Change(Double value, String label) {
+    private record CategoryAmount(UUID categoryId, String categoryName, UUID jarId, String jarName, BigDecimal amount) {}
+    private record Change(Double value, String label, boolean isNew) {
         double valueOrZero() { return value == null ? 0.0 : Math.abs(value); }
     }
 }
