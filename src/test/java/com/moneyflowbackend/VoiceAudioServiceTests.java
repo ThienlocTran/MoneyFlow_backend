@@ -47,6 +47,8 @@ class VoiceAudioServiceTests {
         assertBusinessCode(
                 () -> ctx.service().uploadAudio(ctx.voiceRecord().getId(), file, 12, ctx.user().getId()),
                 "STORAGE_NOT_CONFIGURED");
+        assertThat(ctx.voiceRecord().getOriginalTranscript()).isEqualTo("an sang 35k");
+        assertThat(ctx.voiceRecord().getVoiceStatus()).isEqualTo(VoiceRecordStatus.STORAGE_FAILED);
     }
 
     @Test
@@ -67,6 +69,16 @@ class VoiceAudioServiceTests {
         assertBusinessCode(
                 () -> ctx.service().uploadAudio(ctx.voiceRecord().getId(), file, 12, ctx.user().getId()),
                 "AUDIO_FILE_EMPTY");
+    }
+
+    @Test
+    void uploadRejectsOversizedFile() {
+        TestContext ctx = context(new DisabledVoiceAudioStorageService());
+        MockMultipartFile file = new MockMultipartFile("file", "voice.webm", "audio/webm", new byte[10485761]);
+
+        assertBusinessCode(
+                () -> ctx.service().uploadAudio(ctx.voiceRecord().getId(), file, 12, ctx.user().getId()),
+                "AUDIO_FILE_TOO_LARGE");
     }
 
     @Test
@@ -91,11 +103,38 @@ class VoiceAudioServiceTests {
         assertThat(response.getVoiceAudioStatus()).isEqualTo("AUDIO_STORED");
         assertThat(response.getRetentionUntil()).isEqualTo(LocalDate.of(2026, 7, 15));
         assertThat(ctx.voiceRecord().getStoragePublicId()).isEqualTo("stored/workspaces/" + ctx.workspace().getId() + "/voice/" + ctx.voiceRecord().getId());
-        assertThat(ctx.voiceRecord().getAudioUrl()).isEqualTo("private://voice");
+        assertThat(ctx.voiceRecord().getAudioUrl()).isEqualTo("test:authenticated");
         assertThat(ctx.voiceRecord().getMimeType()).isEqualTo("audio/webm");
         assertThat(ctx.voiceRecord().getFileSizeBytes()).isEqualTo(3);
         assertThat(ctx.voiceRecord().getDurationSeconds()).isEqualTo(12);
         assertThat(ctx.voiceRecord().getVoiceStatus()).isEqualTo(VoiceRecordStatus.AUDIO_STORED);
+    }
+
+    @Test
+    void providerFailureMarksStorageFailedWithoutDeletingTranscript() {
+        TestContext ctx = context(new FailingStorageService());
+        MockMultipartFile file = new MockMultipartFile("file", "voice.webm", "audio/webm", new byte[] {1, 2, 3});
+
+        assertBusinessCode(
+                () -> ctx.service().uploadAudio(ctx.voiceRecord().getId(), file, 12, ctx.user().getId()),
+                "AUDIO_STORAGE_FAILED");
+
+        assertThat(ctx.voiceRecord().getStoragePublicId()).isNull();
+        assertThat(ctx.voiceRecord().getOriginalTranscript()).isEqualTo("an sang 35k");
+        assertThat(ctx.voiceRecord().getVoiceStatus()).isEqualTo(VoiceRecordStatus.STORAGE_FAILED);
+    }
+
+    @Test
+    void playbackUrlDoesNotExposePermanentPublicUrl() {
+        TestContext ctx = context(new FakeStorageService());
+        ctx.voiceRecord().setStoragePublicId("stored/audio");
+        ctx.voiceRecord().setMimeType("audio/webm");
+
+        var response = ctx.service().playbackUrl(ctx.voiceRecord().getId(), ctx.user().getId());
+
+        assertThat(response.getPlaybackUrl()).startsWith("https://signed.example/");
+        assertThat(response.getPlaybackUrl()).doesNotContain("res.cloudinary.com/public");
+        assertThat(response.getExpiresAt()).isEqualTo(Instant.parse("2026-06-15T01:05:00Z"));
     }
 
     @Test
@@ -178,7 +217,8 @@ class VoiceAudioServiceTests {
                 workspaceMemberRepository,
                 storageService,
                 CLOCK,
-                10,
+                10485760,
+                "audio/webm,audio/mp4,audio/mpeg,audio/wav",
                 30);
         return new TestContext(service, voiceRecordRepository, voiceRecord, workspace, user);
     }
@@ -205,7 +245,7 @@ class VoiceAudioServiceTests {
 
         @Override
         public StoredVoiceAudio upload(String objectKey, org.springframework.web.multipart.MultipartFile file) {
-            return new StoredVoiceAudio("stored/" + objectKey, "private://voice");
+            return new StoredVoiceAudio("test", "stored/" + objectKey, "authenticated");
         }
 
         @Override
@@ -216,6 +256,28 @@ class VoiceAudioServiceTests {
         @Override
         public void delete(String storagePublicId) {
             deletedPublicId = storagePublicId;
+        }
+    }
+
+    private static final class FailingStorageService implements VoiceAudioStorageService {
+        @Override
+        public boolean isEnabled() {
+            return true;
+        }
+
+        @Override
+        public StoredVoiceAudio upload(String objectKey, org.springframework.web.multipart.MultipartFile file) {
+            throw new BusinessException("AUDIO_STORAGE_FAILED", "Storage failed");
+        }
+
+        @Override
+        public VoiceAudioPlayback playbackUrl(String storagePublicId, String mimeType) {
+            throw new BusinessException("AUDIO_STORAGE_FAILED", "Storage failed");
+        }
+
+        @Override
+        public void delete(String storagePublicId) {
+            throw new BusinessException("AUDIO_STORAGE_FAILED", "Storage failed");
         }
     }
 

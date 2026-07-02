@@ -2,10 +2,8 @@ package com.moneyflowbackend.voice.storage;
 
 import com.moneyflowbackend.common.exception.BusinessException;
 import org.springframework.http.HttpStatus;
-import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
-@Service
 public class DisabledVoiceAudioStorageService implements VoiceAudioStorageService {
     @Override
     public boolean isEnabled() {
