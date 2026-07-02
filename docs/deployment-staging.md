@@ -75,7 +75,7 @@ Required frontend variable:
 VITE_API_BASE_URL=https://<render-backend-staging-domain>/api
 ```
 
-The frontend service reads only `VITE_API_BASE_URL`; do not add duplicate API URL variables unless the code changes.
+The frontend service reads only `VITE_API_BASE_URL`; do not add duplicate API URL variables unless the code changes. The frontend normalizes this value, so both `https://<render-backend-staging-domain>` and `https://<render-backend-staging-domain>/api` are accepted without creating `/api/api`.
 
 ## Health Checks
 
