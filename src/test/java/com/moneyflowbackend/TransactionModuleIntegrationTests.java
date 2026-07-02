@@ -134,6 +134,12 @@ class TransactionModuleIntegrationTests {
         TransactionRequest noWalletIncome = incomeReq("1", cash, incomeCategory, "No wallet");
         noWalletIncome.setWalletId(null);
         assertBusinessCode(() -> transactionService.create(ctx.workspace().getId(), noWalletIncome, ctx.user().getId()), "WALLET_NOT_FOUND");
+        TransactionRequest plannedNoWallet = expenseReq("1", cash, expenseCategory, "Planned no wallet", TransactionStatus.PLANNED);
+        plannedNoWallet.setWalletId(null);
+        assertBusinessCode(() -> transactionService.create(ctx.workspace().getId(), plannedNoWallet, ctx.user().getId()), "WALLET_NOT_FOUND");
+        TransactionRequest plannedNoCategory = expenseReq("1", cash, expenseCategory, "Planned no category", TransactionStatus.PLANNED);
+        plannedNoCategory.setCategoryId(null);
+        assertBusinessCode(() -> transactionService.create(ctx.workspace().getId(), plannedNoCategory, ctx.user().getId()), "CATEGORY_NOT_FOUND");
 
         TransactionRequest sameWallet = transferReq("1", cash, cash, "Bad", TransactionStatus.POSTED);
         assertBusinessCode(() -> transactionService.create(ctx.workspace().getId(), sameWallet, ctx.user().getId()), "TRANSFER_SAME_WALLET");
@@ -335,6 +341,34 @@ class TransactionModuleIntegrationTests {
         transferDetailRepository.flush();
 
         assertBusinessCode(() -> transactionService.restore(ctx.workspace().getId(), transfer.getId(), ctx.user().getId()), "TRANSFER_DETAIL_NOT_FOUND");
+    }
+
+    @Test
+    void restoreRejectsInactiveWalletOrCategory() {
+        TestContext ctx = createContext("tx_restore_inactive", WorkspaceRole.OWNER);
+        Wallet cash = wallet(ctx, "Cash", WalletType.CASH, "0");
+        Wallet bank = wallet(ctx, "Bank", WalletType.BANK, "0");
+        Category expenseCategory = category(ctx, "Food", CategoryType.EXPENSE, true, false);
+
+        TransactionResponse expense = transactionService.create(ctx.workspace().getId(), expenseReq("10", cash, expenseCategory, "Food", TransactionStatus.POSTED), ctx.user().getId());
+        transactionService.delete(ctx.workspace().getId(), expense.getId(), ctx.user().getId());
+        cash.setActive(false);
+        walletRepository.saveAndFlush(cash);
+        assertBusinessCode(() -> transactionService.restore(ctx.workspace().getId(), expense.getId(), ctx.user().getId()), "WALLET_INACTIVE");
+
+        cash.setActive(true);
+        walletRepository.saveAndFlush(cash);
+        expenseCategory.setActive(false);
+        categoryRepository.saveAndFlush(expenseCategory);
+        assertBusinessCode(() -> transactionService.restore(ctx.workspace().getId(), expense.getId(), ctx.user().getId()), "CATEGORY_INACTIVE");
+
+        expenseCategory.setActive(true);
+        categoryRepository.saveAndFlush(expenseCategory);
+        TransactionResponse transfer = transactionService.create(ctx.workspace().getId(), transferReq("5", cash, bank, "Move", TransactionStatus.POSTED), ctx.user().getId());
+        transactionService.delete(ctx.workspace().getId(), transfer.getId(), ctx.user().getId());
+        bank.setActive(false);
+        walletRepository.saveAndFlush(bank);
+        assertBusinessCode(() -> transactionService.restore(ctx.workspace().getId(), transfer.getId(), ctx.user().getId()), "WALLET_INACTIVE");
     }
 
     private TestContext createContext(String prefix, WorkspaceRole role) {

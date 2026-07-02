@@ -339,8 +339,8 @@ public class TransactionService {
             return mapToResponse(tx);
         }
 
-        Wallet wallet = resolveWallet(workspaceId, req.getWalletId(), status == TransactionStatus.POSTED, status == TransactionStatus.POSTED, "WALLET_NOT_FOUND");
-        Category category = resolveCategory(workspaceId, req.getCategoryId(), type, status == TransactionStatus.POSTED, true);
+        Wallet wallet = resolveWallet(workspaceId, req.getWalletId(), true, true, "WALLET_NOT_FOUND");
+        Category category = resolveCategory(workspaceId, req.getCategoryId(), type, true, true);
         tx.setWallet(wallet);
         tx.setCategory(category);
         return mapToResponse(transactionRepository.save(tx));
@@ -380,8 +380,8 @@ public class TransactionService {
             }
             TransferDetail detail = transferDetailRepository.findById(tx.getId())
                     .orElseThrow(() -> new BusinessException("TRANSFER_DETAIL_NOT_FOUND", "Transfer detail not found"));
-            Wallet source = resolveWalletForUpdate(workspaceId, detail.getSourceWallet(), req.getSourceWalletId(), newStatus, postingNow);
-            Wallet destination = resolveWalletForUpdate(workspaceId, detail.getDestinationWallet(), req.getDestinationWalletId(), newStatus, postingNow);
+            Wallet source = resolveWalletForUpdate(workspaceId, detail.getSourceWallet(), req.getSourceWalletId(), true, newStatus, postingNow);
+            Wallet destination = resolveWalletForUpdate(workspaceId, detail.getDestinationWallet(), req.getDestinationWalletId(), true, newStatus, postingNow);
             validateDifferentWallets(source, destination);
             tx.setWallet(source);
             tx.setCategory(null);
@@ -392,8 +392,8 @@ public class TransactionService {
             return mapToResponse(tx);
         }
 
-        Wallet wallet = resolveWalletForUpdate(workspaceId, tx.getWallet(), req.getWalletId(), newStatus, postingNow);
-        Category category = resolveCategoryForUpdate(workspaceId, tx.getCategory(), req.getCategoryId(), tx.getTransactionType(), newStatus, postingNow);
+        Wallet wallet = resolveWalletForUpdate(workspaceId, tx.getWallet(), req.getWalletId(), true, newStatus, postingNow);
+        Category category = resolveCategoryForUpdate(workspaceId, tx.getCategory(), req.getCategoryId(), tx.getTransactionType(), true, newStatus, postingNow);
         tx.setWallet(wallet);
         tx.setCategory(category);
         return mapToResponse(transactionRepository.save(tx));
@@ -419,9 +419,13 @@ public class TransactionService {
         if (tx.getDeletedAt() == null) {
             throw new BusinessException("TRANSACTION_NOT_DELETED", "Transaction is not deleted");
         }
-        validateReferencesExist(workspaceId, tx);
-        if (tx.getTransactionType() == TransactionType.TRANSFER && transferDetailRepository.findById(tx.getId()).isEmpty()) {
-            throw new BusinessException("TRANSFER_DETAIL_NOT_FOUND", "Transfer detail not found");
+        validateReferencesUsableForRestore(workspaceId, tx);
+        if (tx.getTransactionType() == TransactionType.TRANSFER) {
+            TransferDetail detail = transferDetailRepository.findById(tx.getId())
+                    .orElseThrow(() -> new BusinessException("TRANSFER_DETAIL_NOT_FOUND", "Transfer detail not found"));
+            if (tx.isAffectsWalletBalance() && (!detail.getSourceWallet().isActive() || !detail.getDestinationWallet().isActive())) {
+                throw new BusinessException("WALLET_INACTIVE", "Wallet is inactive");
+            }
         }
         tx.setDeletedAt(null);
         tx.setUpdatedAt(Instant.now());
@@ -506,8 +510,7 @@ public class TransactionService {
         return wallet;
     }
 
-    private Wallet resolveWalletForUpdate(UUID workspaceId, Wallet current, UUID requestedId, TransactionStatus status, boolean postingNow) {
-        boolean required = status == TransactionStatus.POSTED;
+    private Wallet resolveWalletForUpdate(UUID workspaceId, Wallet current, UUID requestedId, boolean required, TransactionStatus status, boolean postingNow) {
         if (requestedId == null) {
             if (required) {
                 throw new BusinessException("WALLET_NOT_FOUND", "Wallet is required");
@@ -539,8 +542,7 @@ public class TransactionService {
         return category;
     }
 
-    private Category resolveCategoryForUpdate(UUID workspaceId, Category current, UUID requestedId, TransactionType type, TransactionStatus status, boolean postingNow) {
-        boolean required = status == TransactionStatus.POSTED;
+    private Category resolveCategoryForUpdate(UUID workspaceId, Category current, UUID requestedId, TransactionType type, boolean required, TransactionStatus status, boolean postingNow) {
         if (requestedId == null) {
             if (required) {
                 throw new BusinessException("CATEGORY_NOT_FOUND", "Category is required");
@@ -592,14 +594,24 @@ public class TransactionService {
         }
     }
 
-    private void validateReferencesExist(UUID workspaceId, Transaction tx) {
+    private void validateReferencesUsableForRestore(UUID workspaceId, Transaction tx) {
         if (tx.getWallet() != null) {
-            walletRepository.findByIdAndWorkspaceId(tx.getWallet().getId(), workspaceId)
+            Wallet wallet = walletRepository.findByIdAndWorkspaceId(tx.getWallet().getId(), workspaceId)
                     .orElseThrow(() -> new BusinessException("WALLET_NOT_FOUND", "Wallet not found", HttpStatus.NOT_FOUND));
+            if (tx.isAffectsWalletBalance() && !wallet.isActive()) {
+                throw new BusinessException("WALLET_INACTIVE", "Wallet is inactive");
+            }
         }
         if (tx.getCategory() != null) {
-            categoryRepository.findByIdAndWorkspaceId(tx.getCategory().getId(), workspaceId)
+            Category category = categoryRepository.findByIdAndWorkspaceId(tx.getCategory().getId(), workspaceId)
                     .orElseThrow(() -> new BusinessException("CATEGORY_NOT_FOUND", "Category not found", HttpStatus.NOT_FOUND));
+            if (!category.isActive()) {
+                throw new BusinessException("CATEGORY_INACTIVE", "Category is inactive");
+            }
+            if (category.isArchived()) {
+                throw new BusinessException("CATEGORY_ARCHIVED", "Category is archived");
+            }
+            validateCategoryType(tx.getTransactionType(), category);
         }
         if (tx.getAttributedPerson() != null) {
             workspacePersonRepository.findByIdAndWorkspaceId(tx.getAttributedPerson().getId(), workspaceId)
