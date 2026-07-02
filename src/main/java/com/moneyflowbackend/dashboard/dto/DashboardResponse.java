@@ -30,4 +30,5 @@ public class DashboardResponse {
     private List<DashboardCategoryChangeResponse> topDecreases;
     private List<DashboardWalletBalanceResponse> walletBalances;
     private List<DashboardRecentTransactionResponse> recentTransactions;
+    private List<DashboardMemberBreakdownResponse> memberBreakdown;
 }

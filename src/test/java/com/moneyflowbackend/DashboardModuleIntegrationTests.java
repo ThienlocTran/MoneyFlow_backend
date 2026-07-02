@@ -152,6 +152,134 @@ class DashboardModuleIntegrationTests {
         assertThat(defaultMonth.getPeriod().getMonth()).isEqualTo("2026-06");
     }
 
+    @Test
+    void dashboardMonthly_withoutCreatedByIncludesAllMembers() {
+        SharedDashboardContext ctx = sharedContext("dash_all");
+
+        DashboardResponse dashboard = dashboardService.getDashboard(ctx.workspace().getId(), "2026-06", "FULL_MONTH", ctx.owner().getId());
+
+        assertThat(dashboard.getIncome()).isEqualByComparingTo("3000");
+        assertThat(dashboard.getExpense()).isEqualByComparingTo("1000");
+        assertThat(dashboard.getTransactionCount()).isEqualTo(4);
+    }
+
+    @Test
+    void dashboardMonthly_withCreatedByFiltersOneMember() {
+        SharedDashboardContext ctx = sharedContext("dash_filter");
+
+        DashboardResponse dashboard = dashboardService.getDashboard(ctx.workspace().getId(), "2026-06", "FULL_MONTH", ctx.owner().getId(), ctx.member().getId());
+
+        assertThat(dashboard.getIncome()).isEqualByComparingTo("2000");
+        assertThat(dashboard.getExpense()).isEqualByComparingTo("700");
+        assertThat(dashboard.getTransactionCount()).isEqualTo(2);
+        assertThat(dashboard.getRecentTransactions()).extracting("description").containsExactly("Member expense", "Member income");
+    }
+
+    @Test
+    void dashboardMonthly_createdByMustBelongToWorkspace() {
+        SharedDashboardContext ctx = sharedContext("dash_member_guard");
+        TestContext other = context("dash_member_other", "Asia/Ho_Chi_Minh");
+
+        assertThatThrownBy(() -> dashboardService.getDashboard(ctx.workspace().getId(), "2026-06", "FULL_MONTH", ctx.owner().getId(), other.user().getId()))
+                .isInstanceOf(BusinessException.class);
+    }
+
+    @Test
+    void dashboardMonthly_memberBreakdownAggregatesByCreator() {
+        SharedDashboardContext ctx = sharedContext("dash_breakdown");
+
+        DashboardResponse dashboard = dashboardService.getDashboard(ctx.workspace().getId(), "2026-06", "FULL_MONTH", ctx.owner().getId());
+
+        assertThat(dashboard.getMemberBreakdown()).hasSize(2);
+        assertThat(dashboard.getMemberBreakdown())
+                .anySatisfy(member -> {
+                    assertThat(member.getUserId()).isEqualTo(ctx.owner().getId());
+                    assertThat(member.getIncome()).isEqualByComparingTo("1000");
+                    assertThat(member.getExpense()).isEqualByComparingTo("300");
+                    assertThat(member.getNet()).isEqualByComparingTo("700");
+                    assertThat(member.getTransactionCount()).isEqualTo(2);
+                })
+                .anySatisfy(member -> {
+                    assertThat(member.getUserId()).isEqualTo(ctx.member().getId());
+                    assertThat(member.getIncome()).isEqualByComparingTo("2000");
+                    assertThat(member.getExpense()).isEqualByComparingTo("700");
+                    assertThat(member.getNet()).isEqualByComparingTo("1300");
+                    assertThat(member.getTransactionCount()).isEqualTo(2);
+                });
+    }
+
+    @Test
+    void dashboardMonthly_memberBreakdownExcludesTransfers() {
+        SharedDashboardContext ctx = sharedContext("dash_transfer");
+
+        DashboardResponse dashboard = dashboardService.getDashboard(ctx.workspace().getId(), "2026-06", "FULL_MONTH", ctx.owner().getId());
+
+        assertThat(dashboard.getMemberBreakdown())
+                .extracting("transactionCount")
+                .containsExactlyInAnyOrder(2L, 2L);
+    }
+
+    @Test
+    void dashboardMonthly_memberBreakdownExcludesSoftDeleted() {
+        SharedDashboardContext ctx = sharedContext("dash_deleted");
+
+        DashboardResponse dashboard = dashboardService.getDashboard(ctx.workspace().getId(), "2026-06", "FULL_MONTH", ctx.owner().getId());
+
+        assertThat(dashboard.getMemberBreakdown())
+                .filteredOn(member -> member.getUserId().equals(ctx.owner().getId()))
+                .first()
+                .extracting("expense")
+                .isEqualTo(new BigDecimal("300.00"));
+    }
+
+    @Test
+    void dashboardMonthly_memberBreakdownDoesNotExposeEmail() {
+        SharedDashboardContext ctx = sharedContext("dash_privacy");
+
+        DashboardResponse dashboard = dashboardService.getDashboard(ctx.workspace().getId(), "2026-06", "FULL_MONTH", ctx.owner().getId());
+
+        assertThat(dashboard.getMemberBreakdown().getFirst()).hasNoNullFieldsOrProperties();
+        assertThat(dashboard.getMemberBreakdown().getFirst().getUsername()).doesNotContain("@");
+    }
+
+    @Test
+    void dashboardMonthly_viewerCanReadSharedDashboardIfPolicyAllows() {
+        SharedDashboardContext ctx = sharedContext("dash_viewer");
+
+        DashboardResponse dashboard = dashboardService.getDashboard(ctx.workspace().getId(), "2026-06", "FULL_MONTH", ctx.viewer().getId());
+
+        assertThat(dashboard.getIncome()).isEqualByComparingTo("3000");
+        assertThat(dashboard.getMemberBreakdown()).hasSize(2);
+    }
+
+    @Test
+    void dashboardMonthly_crossWorkspaceCreatedByBlocked() {
+        SharedDashboardContext ctx = sharedContext("dash_cross");
+        SharedDashboardContext other = sharedContext("dash_cross_other");
+
+        assertThatThrownBy(() -> dashboardService.getDashboard(ctx.workspace().getId(), "2026-06", "FULL_MONTH", ctx.owner().getId(), other.member().getId()))
+                .isInstanceOf(BusinessException.class);
+    }
+
+    @Test
+    void dashboardMonthly_personalWorkspaceStillWorks() {
+        TestContext ctx = context("dash_personal", "Asia/Ho_Chi_Minh");
+        Wallet cash = wallet(ctx, "Cash", WalletType.CASH, true, true, true, "0");
+        Category income = category(ctx, "Income", CategoryType.INCOME, null, false);
+        Category expense = category(ctx, "Expense", CategoryType.EXPENSE, null, false);
+        tx(ctx, cash, income, TransactionType.INCOME, TransactionStatus.POSTED, "1000", "2026-06-01", "09:00", false, false, "Income");
+        tx(ctx, cash, expense, TransactionType.EXPENSE, TransactionStatus.POSTED, "400", "2026-06-02", "09:00", false, false, "Expense");
+
+        DashboardResponse dashboard = dashboardService.getDashboard(ctx.workspace().getId(), "2026-06", "FULL_MONTH", ctx.user().getId(), ctx.user().getId());
+
+        assertThat(dashboard.getIncome()).isEqualByComparingTo("1000");
+        assertThat(dashboard.getExpense()).isEqualByComparingTo("400");
+        assertThat(dashboard.getMemberBreakdown()).singleElement().satisfies(member -> {
+            assertThat(member.getUserId()).isEqualTo(ctx.user().getId());
+            assertThat(member.getTransactionCount()).isEqualTo(2);
+        });
+    }
+
     private TestContext context(String prefix, String timezone) {
         String suffix = UUID.randomUUID().toString().substring(0, 8);
         User user = userRepository.save(User.builder()
@@ -202,9 +330,14 @@ class DashboardModuleIntegrationTests {
 
     private Transaction tx(TestContext ctx, Wallet wallet, Category category, TransactionType type, TransactionStatus status,
                            String amount, String date, String time, boolean deleted, boolean walletUnknown, String description) {
+        return tx(ctx, ctx.user(), wallet, category, type, status, amount, date, time, deleted, walletUnknown, description);
+    }
+
+    private Transaction tx(TestContext ctx, User createdBy, Wallet wallet, Category category, TransactionType type, TransactionStatus status,
+                           String amount, String date, String time, boolean deleted, boolean walletUnknown, String description) {
         return transactionRepository.saveAndFlush(Transaction.builder()
                 .workspace(ctx.workspace())
-                .createdByUser(ctx.user())
+                .createdByUser(createdBy)
                 .wallet(wallet)
                 .category(category)
                 .transactionType(type)
@@ -232,5 +365,34 @@ class DashboardModuleIntegrationTests {
                 .build());
     }
 
+    private SharedDashboardContext sharedContext(String prefix) {
+        TestContext ctx = context(prefix, "Asia/Ho_Chi_Minh");
+        User member = userRepository.save(User.builder()
+                .username(prefix + "_member_" + UUID.randomUUID().toString().substring(0, 8))
+                .email(prefix + "_member@example.com")
+                .fullName("Shared Member")
+                .build());
+        User viewer = userRepository.save(User.builder()
+                .username(prefix + "_viewer_" + UUID.randomUUID().toString().substring(0, 8))
+                .email(prefix + "_viewer@example.com")
+                .fullName("Shared Viewer")
+                .build());
+        workspaceMemberRepository.save(WorkspaceMember.builder().workspace(ctx.workspace()).user(member).role(WorkspaceRole.EDITOR).build());
+        workspaceMemberRepository.save(WorkspaceMember.builder().workspace(ctx.workspace()).user(viewer).role(WorkspaceRole.VIEWER).build());
+        Wallet cash = wallet(ctx, "Cash", WalletType.CASH, true, true, true, "0");
+        Wallet bank = wallet(ctx, "Bank", WalletType.BANK, false, true, true, "0");
+        Category income = category(ctx, "Income", CategoryType.INCOME, null, false);
+        Category expense = category(ctx, "Expense", CategoryType.EXPENSE, jar(ctx, "NEC", "Needs", "55"), false);
+
+        tx(ctx, ctx.user(), cash, income, TransactionType.INCOME, TransactionStatus.POSTED, "1000", "2026-06-01", "09:00", false, false, "Owner income");
+        tx(ctx, ctx.user(), cash, expense, TransactionType.EXPENSE, TransactionStatus.POSTED, "300", "2026-06-02", "09:00", false, false, "Owner expense");
+        tx(ctx, member, cash, income, TransactionType.INCOME, TransactionStatus.POSTED, "2000", "2026-06-03", "09:00", false, false, "Member income");
+        tx(ctx, member, cash, expense, TransactionType.EXPENSE, TransactionStatus.POSTED, "700", "2026-06-04", "09:00", false, false, "Member expense");
+        tx(ctx, ctx.user(), cash, expense, TransactionType.EXPENSE, TransactionStatus.POSTED, "99", "2026-06-05", "09:00", true, false, "Deleted expense");
+        transfer(ctx, bank, cash, "500", "2026-06-06");
+        return new SharedDashboardContext(ctx.user(), member, viewer, ctx.workspace());
+    }
+
     private record TestContext(User user, Workspace workspace) {}
+    private record SharedDashboardContext(User owner, User member, User viewer, Workspace workspace) {}
 }

@@ -116,6 +116,17 @@ Use this checklist for the next browser UAT pass on staging. Do not use real fin
 - Confirm viewer can view but cannot perform owner-only actions.
 - Cancel or reject a pending invitation.
 
+## Shared Dashboard Member Analytics
+
+- Create a shared workspace.
+- Invite a second user.
+- Accept invitation.
+- Create transactions as two members.
+- Dashboard all members shows combined totals.
+- Dashboard member filter shows only selected member totals.
+- Member breakdown excludes transfer.
+- Viewer can view dashboard but cannot mutate transactions/settings.
+
 ## Final Checks
 
 - No fake runtime data appears.

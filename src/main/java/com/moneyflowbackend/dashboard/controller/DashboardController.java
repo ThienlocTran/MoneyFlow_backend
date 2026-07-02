@@ -32,8 +32,9 @@ public class DashboardController {
     public ResponseEntity<ApiResponse<DashboardResponse>> getDashboard(
             @PathVariable UUID workspaceId,
             @RequestParam(required = false) String month,
-            @RequestParam(defaultValue = "SAME_PERIOD") String comparisonMode) {
-        DashboardResponse res = dashboardService.getDashboard(workspaceId, month, comparisonMode, currentUserId());
+            @RequestParam(defaultValue = "SAME_PERIOD") String comparisonMode,
+            @RequestParam(required = false) UUID createdBy) {
+        DashboardResponse res = dashboardService.getDashboard(workspaceId, month, comparisonMode, currentUserId(), createdBy);
         return ResponseEntity.ok(ApiResponse.ok("Dashboard loaded", res));
     }
 
@@ -41,8 +42,9 @@ public class DashboardController {
     public ResponseEntity<ApiResponse<DashboardResponse>> getMonthlySummary(
             @PathVariable UUID workspaceId,
             @RequestParam(required = false) String month,
-            @RequestParam(defaultValue = "SAME_PERIOD") String comparisonMode) {
-        DashboardResponse res = dashboardService.getDashboard(workspaceId, month, comparisonMode, currentUserId());
+            @RequestParam(defaultValue = "SAME_PERIOD") String comparisonMode,
+            @RequestParam(required = false) UUID createdBy) {
+        DashboardResponse res = dashboardService.getDashboard(workspaceId, month, comparisonMode, currentUserId(), createdBy);
         return ResponseEntity.ok(ApiResponse.ok("Dashboard monthly loaded", res));
     }
 
