@@ -47,6 +47,7 @@ Use this checklist for the next browser UAT pass on staging. Do not use real fin
 - Search raw input/note.
 - Export CSV.
 - Confirm CSV excludes audio URL/storage key.
+- Repeated export attempts eventually return a Vietnamese rate-limit error and do not download a fake or empty file.
 - Edit a transaction.
 - Soft delete a transaction.
 - Enable deleted transaction filter.
@@ -93,7 +94,16 @@ Use this checklist for the next browser UAT pass on staging. Do not use real fin
 - Confirm voice transaction works when audio storage is disabled.
 - Confirm the saved transaction remains available if audio upload is skipped or unavailable.
 - If Cloudinary staging is configured, record short audio, confirm the transaction, and verify `Nghe lại`.
+- Repeated audio uploads eventually show a Vietnamese rate-limit/security message while preserving the saved transaction.
 - Delete stored audio from the transaction UI and confirm the transaction remains.
+
+## Security hardening checks
+
+- Try repeated login/register attempts and confirm HTTP 429 shows: `Bạn thao tác quá nhanh. Vui lòng thử lại sau.`
+- Try an unauthorized workspace/invitation action and confirm the UI shows a permission message without stack traces or raw JSON.
+- Expire/remove the session token and confirm the UI shows: `Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.`
+- Confirm backend error responses do not expose Java stack traces, SQL details, database URLs, JWT parser internals, Cloudinary secrets, or signed audio URLs.
+- Confirm response headers include `X-Content-Type-Options`, `X-Frame-Options`, and `Referrer-Policy`.
 - Do not log or copy signed playback URLs.
 
 ## Shared Workspaces

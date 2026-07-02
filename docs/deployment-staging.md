@@ -2,6 +2,14 @@
 
 This checklist prepares a non-production staging environment from the `release/staging-moneyflow-core` branch. Do not commit real credentials, database URLs, JWT secrets, Cloudinary secrets, or `.env` files.
 
+Security hardening requirements:
+
+- Set `CORS_ALLOWED_ORIGINS` to explicit staging frontend origin(s). Do not use `*` with credentials.
+- Keep rate limiting enabled with defaults unless staging load testing needs temporary lower/higher values.
+- Leave `app.security.rate-limit.trust-forwarded-for=false` unless the proxy chain is trusted and documented.
+- Confirm logs do not include Authorization headers, tokens, database URLs, Cloudinary secrets, signed audio URLs, or storage public ids.
+- In-memory rate limits are acceptable for the single-instance staging MVP; use shared/platform limits before multi-instance scaling.
+
 ## Branches
 
 - Backend repository: deploy `release/staging-moneyflow-core`.
