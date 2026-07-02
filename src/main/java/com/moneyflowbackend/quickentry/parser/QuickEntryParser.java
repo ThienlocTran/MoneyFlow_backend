@@ -20,14 +20,19 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @Component
 public class QuickEntryParser {
-    private static final Set<String> INCOME_WORDS = Set.of("thu", "nhan", "luong", "thuong", "duoc tang", "hoan tien", "gia dinh gui");
-    private static final Set<String> EXPENSE_WORDS = Set.of("chi", "mua", "tra", "dong", "an", "uong", "xang", "cafe");
-    private static final Pattern TRANSFER_PATTERN = Pattern.compile("\\b(chuyen|chuyen tien|transfer|tu .+ (sang|qua) .+)\\b");
+    private static final Set<String> INCOME_WORDS = Set.of(
+            "thu", "nhan", "luong", "thuong", "me cho", "ba cho", "duoc cho", "duoc tang",
+            "hoan tien", "gia dinh gui");
+    private static final Set<String> EXPENSE_WORDS = Set.of(
+            "chi", "mua", "tra", "dong", "dong tien", "thanh toan", "an", "uong", "cafe",
+            "ca phe", "xang", "gui xe");
+    private static final Pattern TRANSFER_PATTERN = Pattern.compile("\\b(chuyen|chuyen tien|chuyen khoan|transfer|tu .+ (sang|qua) .+)\\b");
     private static final Pattern FROM_TO = Pattern.compile("\\btu\\s+(.+?)\\s+(?:sang|qua)\\s+(.+)$");
     private static final Pattern TO_ONLY = Pattern.compile("^(.+?)\\s+(?:sang|qua)\\s+(.+)$");
     private static final Pattern WALLET_HINT = Pattern.compile("\\b(vi|wallet|tk|tai khoan|bank|ngan hang)\\b");
@@ -46,6 +51,16 @@ public class QuickEntryParser {
             List<CategoryKeyword> keywords,
             List<Category> categories,
             List<Wallet> wallets) {
+        return parse(rawInput, workspace, keywords, categories, wallets, null);
+    }
+
+    public QuickEntryPreviewResponse parse(
+            String rawInput,
+            Workspace workspace,
+            List<CategoryKeyword> keywords,
+            List<Category> categories,
+            List<Wallet> wallets,
+            UUID suggestedWalletId) {
         String display = VietnameseTextNormalizer.compact(rawInput);
         String normalized = VietnameseTextNormalizer.comparable(rawInput);
         String quickAmountUnit = workspace == null ? null : workspace.getQuickAmountUnit();
@@ -156,9 +171,11 @@ public class QuickEntryParser {
                     missing.add("WALLET");
                     warnings.add("UNKNOWN_WALLET");
                 } else {
-                    wallet = defaultWallet(wallets).orElse(null);
+                    wallet = preferredWallet(wallets, suggestedWalletId).orElse(null);
                     if (wallet == null) {
                         missing.add("WALLET");
+                    } else if (suggestedWalletId != null && wallet.getId().equals(suggestedWalletId)) {
+                        warnings.add("SUGGESTED_WALLET_USED");
                     } else {
                         warnings.add("DEFAULT_WALLET_USED");
                     }
@@ -216,6 +233,9 @@ public class QuickEntryParser {
         }
         boolean income = INCOME_WORDS.stream().anyMatch(word -> containsWordOrPhrase(normalized, word));
         boolean expense = EXPENSE_WORDS.stream().anyMatch(word -> containsWordOrPhrase(normalized, word));
+        if (income && expense) {
+            return null;
+        }
         if (income != expense) {
             return income ? TransactionType.INCOME : TransactionType.EXPENSE;
         }
@@ -366,9 +386,19 @@ public class QuickEntryParser {
         return aliases.stream().filter(alias -> !alias.text().isBlank()).toList();
     }
 
-    private Optional<Wallet> defaultWallet(List<Wallet> wallets) {
-        return (wallets == null ? List.<Wallet>of() : wallets).stream()
+    private Optional<Wallet> preferredWallet(List<Wallet> wallets, UUID suggestedWalletId) {
+        List<Wallet> activeWallets = (wallets == null ? List.<Wallet>of() : wallets).stream()
                 .filter(Wallet::isActive)
+                .toList();
+        if (suggestedWalletId != null) {
+            Optional<Wallet> suggested = activeWallets.stream()
+                    .filter(wallet -> wallet.getId().equals(suggestedWalletId))
+                    .findFirst();
+            if (suggested.isPresent()) {
+                return suggested;
+            }
+        }
+        return activeWallets.stream()
                 .filter(Wallet::isDefault)
                 .findFirst();
     }
@@ -456,7 +486,10 @@ public class QuickEntryParser {
     }
 
     private boolean containsWordOrPhrase(String normalized, String phrase) {
-        return findPhrase(normalized, phrase).isPresent();
+        if (normalized == null || normalized.isBlank() || phrase == null || phrase.isBlank()) {
+            return false;
+        }
+        return Pattern.compile("(?<!\\S)" + Pattern.quote(phrase) + "(?!\\S)").matcher(normalized).find();
     }
 
     private int safePriority(CategoryKeyword keyword) {

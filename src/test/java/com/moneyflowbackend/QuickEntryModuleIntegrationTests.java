@@ -151,6 +151,29 @@ class QuickEntryModuleIntegrationTests {
     }
 
     @Test
+    void parseSuggestsRecentActiveWalletBeforeDefaultAndIgnoresInactiveWallet() {
+        TestContext ctx = createContext("qe_wallet_suggest", WorkspaceRole.OWNER);
+        Wallet cash = wallet(ctx, "Tien mat", WalletType.CASH, true, "0");
+        Wallet bank = wallet(ctx, "MB Bank", WalletType.BANK, false, "0");
+        Category food = category(ctx, "Food", CategoryType.EXPENSE, true, false, false);
+        keyword(ctx, food, "an sang", 10);
+
+        var explicitBank = quickEntryService.parse(ctx.workspace().getId(), "an sang 40k mb", ctx.user().getId());
+        quickEntryService.confirm(ctx.workspace().getId(), confirm(explicitBank), ctx.user().getId());
+
+        var suggested = quickEntryService.parse(ctx.workspace().getId(), "an sang 35k", ctx.user().getId());
+        assertThat(suggested.getWalletId()).isEqualTo(bank.getId());
+        assertThat(suggested.getWarnings()).contains("SUGGESTED_WALLET_USED");
+
+        bank.setActive(false);
+        walletRepository.saveAndFlush(bank);
+
+        var fallback = quickEntryService.parse(ctx.workspace().getId(), "an sang 35k", ctx.user().getId());
+        assertThat(fallback.getWalletId()).isEqualTo(cash.getId());
+        assertThat(fallback.getWarnings()).contains("DEFAULT_WALLET_USED");
+    }
+
+    @Test
     void voiceConfirmValidationStillRejectsMissingWalletInactiveWalletAndCategoryMismatch() {
         TestContext ctx = createContext("qe_voice_rules", WorkspaceRole.OWNER);
         Wallet cash = wallet(ctx, "Tien mat", WalletType.CASH, true, "0");

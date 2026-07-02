@@ -64,6 +64,43 @@ class QuickEntryParserTests {
     }
 
     @Test
+    void parsesVietnameseAmountDateAndIntentCorpus() {
+        Fixture f = fixture();
+        var expense = parser.parse("hôm qua cà phê 1,5tr tiền mặt", f.workspace(),
+                List.of(keyword(f.workspace(), f.food(), "cà phê", 20)), f.categories(), f.wallets());
+        var income = parser.parse("mẹ cho 500k mb", f.workspace(),
+                List.of(keyword(f.workspace(), f.salary(), "mẹ cho", 20)), f.categories(), f.wallets());
+
+        assertThat(expense.getType()).isEqualTo(TransactionType.EXPENSE);
+        assertThat(expense.getAmount()).isEqualByComparingTo("1500000");
+        assertThat(expense.getTransactionDate()).isEqualTo(LocalDate.of(2026, 6, 14));
+        assertThat(income.getType()).isEqualTo(TransactionType.INCOME);
+        assertThat(income.getAmount()).isEqualByComparingTo("500000");
+    }
+
+    @Test
+    void suggestedWalletBeatsDefaultWhenWalletIsUnclear() {
+        Fixture f = fixture();
+        var preview = parser.parse("an sang 35k", f.workspace(), f.keywords(), f.categories(), f.wallets(), f.bank().getId());
+
+        assertThat(preview.getWalletId()).isEqualTo(f.bank().getId());
+        assertThat(preview.getWarnings()).contains("SUGGESTED_WALLET_USED");
+        assertThat(preview.isReadyToConfirm()).isTrue();
+    }
+
+    @Test
+    void conflictingIntentAndCategoryTypeDoesNotGuess() {
+        Fixture f = fixture();
+        var preview = parser.parse("lương ăn sáng 35k", f.workspace(), f.keywords(), f.categories(), f.wallets());
+
+        assertThat(preview.getType()).isNull();
+        assertThat(preview.getCategoryId()).isNull();
+        assertThat(preview.getWarnings()).contains("CATEGORY_TYPE_MISMATCH");
+        assertThat(preview.getMissingFields()).contains("TYPE", "CATEGORY");
+        assertThat(preview.isReadyToConfirm()).isFalse();
+    }
+
+    @Test
     void parsesTransferWalletsAndRejectsSameWallet() {
         Fixture f = fixture();
         var preview = parser.parse("chuyen 500k tu MB Bank sang Tien mat", f.workspace(), f.keywords(), f.categories(), f.wallets());

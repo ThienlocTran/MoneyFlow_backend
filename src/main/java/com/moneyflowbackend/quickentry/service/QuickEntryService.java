@@ -119,7 +119,15 @@ public class QuickEntryService {
         if (raw.trim().isEmpty()) {
             throw new BusinessException("QUICK_ENTRY_TEXT_REQUIRED", "Quick entry text is required");
         }
-        return parser.parse(raw, workspace, keywords(workspaceId), activeCategories(workspaceId), activeWallets(workspaceId));
+        List<CategoryKeyword> keywords = keywords(workspaceId);
+        List<Category> categories = activeCategories(workspaceId);
+        List<Wallet> wallets = activeWallets(workspaceId);
+        QuickEntryPreviewResponse preview = parser.parse(raw, workspace, keywords, categories, wallets);
+        UUID suggestedWalletId = suggestedWalletId(workspaceId, userId, preview);
+        if (suggestedWalletId == null || preview.getMatchedWalletText() != null || suggestedWalletId.equals(preview.getWalletId())) {
+            return preview;
+        }
+        return parser.parse(raw, workspace, keywords, categories, wallets, suggestedWalletId);
     }
 
     @Transactional
@@ -300,6 +308,16 @@ public class QuickEntryService {
 
     private UUID defaultWalletId(UUID workspaceId) {
         return walletRepository.findByWorkspaceIdAndIsDefaultTrueAndIsActiveTrue(workspaceId)
+                .map(Wallet::getId)
+                .orElse(null);
+    }
+
+    private UUID suggestedWalletId(UUID workspaceId, UUID userId, QuickEntryPreviewResponse preview) {
+        if (preview.getType() != TransactionType.INCOME && preview.getType() != TransactionType.EXPENSE) {
+            return null;
+        }
+        return transactionRepository.findRecentActiveWalletSuggestions(workspaceId, userId, preview.getType()).stream()
+                .findFirst()
                 .map(Wallet::getId)
                 .orElse(null);
     }
