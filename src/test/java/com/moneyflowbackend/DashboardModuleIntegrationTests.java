@@ -5,11 +5,13 @@ import com.moneyflowbackend.auth.repository.UserRepository;
 import com.moneyflowbackend.category.model.Category;
 import com.moneyflowbackend.category.model.CategoryType;
 import com.moneyflowbackend.category.repository.CategoryRepository;
+import com.moneyflowbackend.common.exception.BusinessException;
 import com.moneyflowbackend.dashboard.dto.DashboardResponse;
 import com.moneyflowbackend.dashboard.service.DashboardService;
 import com.moneyflowbackend.jar.model.Jar;
 import com.moneyflowbackend.jar.repository.JarRepository;
 import com.moneyflowbackend.transaction.model.Transaction;
+import com.moneyflowbackend.transaction.model.TransactionSourceType;
 import com.moneyflowbackend.transaction.model.TransactionStatus;
 import com.moneyflowbackend.transaction.model.TransactionType;
 import com.moneyflowbackend.transaction.model.TransferDetail;
@@ -41,6 +43,7 @@ import java.time.ZoneOffset;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @SpringBootTest
 @ActiveProfiles("test")
@@ -66,7 +69,7 @@ class DashboardModuleIntegrationTests {
     }
 
     @Test
-    void dashboardAggregatesPostedAnalyticsRowsWhileWalletTotalUsesKnownWalletLedger() {
+    void dashboardMonthly_excludesTransfersAndDeletedTransactions_includesHistoricalMigrationAndUsesWalletLedger() {
         TestContext ctx = context("dash_core", "Asia/Ho_Chi_Minh");
         TestContext other = context("dash_other", "Asia/Ho_Chi_Minh");
         Wallet cash = wallet(ctx, "Cash", WalletType.CASH, true, true, true, "1000000");
@@ -84,6 +87,7 @@ class DashboardModuleIntegrationTests {
         tx(ctx, cash, salary, TransactionType.INCOME, TransactionStatus.POSTED, "5000000", "2026-06-02", "09:00", false, false, "Salary");
         tx(ctx, cash, food, TransactionType.EXPENSE, TransactionStatus.POSTED, "700000", "2026-06-03", "12:00", false, false, "Lunch");
         tx(ctx, bank, course, TransactionType.EXPENSE, TransactionStatus.POSTED, "300000", "2026-06-04", "13:00", false, false, "Course");
+        tx(ctx, cash, food, TransactionType.EXPENSE, TransactionStatus.POSTED, "1000000", "2026-05-04", "13:00", false, true, "Previous food");
         tx(ctx, cash, food, TransactionType.EXPENSE, TransactionStatus.PLANNED, "500000", "2026-06-05", "14:00", false, false, "Planned");
         tx(ctx, cash, food, TransactionType.EXPENSE, TransactionStatus.POSTED, "111111", "2026-06-06", "15:00", true, false, "Deleted");
         tx(ctx, cash, food, TransactionType.EXPENSE, TransactionStatus.POSTED, "222222", "2026-06-07", "16:00", false, true, "Unknown wallet");
@@ -93,18 +97,31 @@ class DashboardModuleIntegrationTests {
         DashboardResponse dashboard = dashboardService.getDashboard(ctx.workspace().getId(), "2026-06", "FULL_MONTH", ctx.user().getId());
 
         assertThat(dashboard.getIncome()).isEqualByComparingTo("5000000");
+        assertThat(dashboard.getSummary().getIncome()).isEqualByComparingTo("5000000");
+        assertThat(dashboard.getSummary().getExpense()).isEqualByComparingTo("1222222");
+        assertThat(dashboard.getSummary().getNet()).isEqualByComparingTo("3777778");
+        assertThat(dashboard.getSummary().getTransactionCount()).isEqualTo(4);
         assertThat(dashboard.getExpense()).isEqualByComparingTo("1222222");
         assertThat(dashboard.getNetCashFlow()).isEqualByComparingTo("3777778");
         assertThat(dashboard.getTransactionCount()).isEqualTo(4);
         assertThat(dashboard.getWalletTotal()).isEqualByComparingTo("7000000");
         assertThat(dashboard.getExpenseByCategory()).extracting("categoryName").containsExactly("Food", "Old Course");
+        assertThat(dashboard.getCategoryBreakdown()).extracting("categoryName").containsExactly("Food", "Old Course");
         assertThat(dashboard.getExpenseByJar()).extracting("jarCode").containsExactly("NEC", "EDU");
+        assertThat(dashboard.getJarBreakdown()).extracting("jarCode").containsExactly("NEC", "EDU");
         assertThat(dashboard.getIncomeByCategory().getFirst().getAmount()).isEqualByComparingTo("5000000");
+        assertThat(dashboard.getWalletBalances()).extracting("walletName").contains("Cash", "Bank");
+        assertThat(dashboard.getTopIncreases()).extracting("categoryName").contains("Old Course");
+        assertThat(dashboard.getTopDecreases()).extracting("categoryName").contains("Food");
         assertThat(dashboard.getRecentTransactions()).extracting("description").containsExactly("Transfer", "Unknown wallet", "Course", "Lunch", "Salary");
+        assertThat(dashboard.getRecentTransactions().getFirst().getSourceWalletName()).isEqualTo("Bank");
+        assertThat(dashboard.getRecentTransactions().getFirst().getDestinationWalletName()).isEqualTo("Cash");
+        assertThatThrownBy(() -> dashboardService.getDashboard(ctx.workspace().getId(), "2026-06", "FULL_MONTH", other.user().getId()))
+                .isInstanceOf(BusinessException.class);
     }
 
     @Test
-    void comparisonModesHandleSamePeriodFullMonthPreviousZeroAndTimezoneDefaultMonth() {
+    void dashboardMonthly_samePeriodComparisonUsesFixedClockAndPreviousZeroMarksNew() {
         TestContext ctx = context("dash_compare", "Asia/Ho_Chi_Minh");
         Wallet cash = wallet(ctx, "Cash", WalletType.CASH, true, true, true, "0");
         Category income = category(ctx, "Income", CategoryType.INCOME, null, false);
@@ -118,14 +135,20 @@ class DashboardModuleIntegrationTests {
 
         DashboardResponse same = dashboardService.getDashboard(ctx.workspace().getId(), "2026-06", "SAME_PERIOD", ctx.user().getId());
         DashboardResponse full = dashboardService.getDashboard(ctx.workspace().getId(), "2026-06", "FULL_MONTH", ctx.user().getId());
+        DashboardResponse previousZero = dashboardService.getDashboard(ctx.workspace().getId(), "2026-05", "FULL_MONTH", ctx.user().getId());
         DashboardResponse zero = dashboardService.getDashboard(ctx.workspace().getId(), "2026-04", "FULL_MONTH", ctx.user().getId());
         DashboardResponse defaultMonth = dashboardService.getDashboard(ctx.workspace().getId(), null, null, ctx.user().getId());
 
         assertThat(same.getPeriod().getDateTo()).isEqualTo(LocalDate.of(2026, 6, 15));
+        assertThat(same.getComparison().getPreviousStartDate()).isEqualTo(LocalDate.of(2026, 5, 1));
+        assertThat(same.getComparison().getPreviousEndDate()).isEqualTo(LocalDate.of(2026, 5, 15));
         assertThat(same.getComparison().getPreviousExpense()).isEqualByComparingTo("100");
         assertThat(full.getComparison().getPreviousExpense()).isEqualByComparingTo("1000");
+        assertThat(previousZero.getComparison().isIncomeNew()).isTrue();
+        assertThat(previousZero.getComparison().isExpenseNew()).isTrue();
         assertThat(zero.getComparison().getExpensePercent()).isNull();
-        assertThat(zero.getComparison().getExpenseLabel()).isEqualTo("Khong co du lieu");
+        assertThat(zero.getComparison().getExpenseLabel()).isEqualTo("Không có dữ liệu");
+        assertThat(zero.getComparison().isExpenseNew()).isFalse();
         assertThat(defaultMonth.getPeriod().getMonth()).isEqualTo("2026-06");
     }
 
@@ -194,6 +217,7 @@ class DashboardModuleIntegrationTests {
                 .walletUnknown(walletUnknown)
                 .historical(walletUnknown)
                 .affectsWalletBalance(!walletUnknown)
+                .sourceType(walletUnknown ? TransactionSourceType.EXCEL_MIGRATION : TransactionSourceType.MANUAL)
                 .deletedAt(deleted ? Instant.now() : null)
                 .build());
     }
