@@ -163,6 +163,24 @@ class WalletModuleIntegrationTests {
     }
 
     @Test
+    void walletDeleteRejectsWalletWithTransactionsAndAllowsUnusedWallet() {
+        TestContext ctx = createContext("wallet_delete", WorkspaceRole.OWNER);
+        WalletResponse usedRes = walletService.create(ctx.workspace().getId(), walletRequest("Used", WalletType.CASH, BigDecimal.ZERO, null, false, true), ctx.user().getId());
+        WalletResponse unusedRes = walletService.create(ctx.workspace().getId(), walletRequest("Unused", WalletType.BANK, BigDecimal.ZERO, null, false, true), ctx.user().getId());
+        Wallet used = walletRepository.findById(usedRes.getId()).orElseThrow();
+
+        transaction(ctx, used, TransactionType.INCOME, TransactionStatus.POSTED, "100", LocalDate.of(2026, 6, 1), false, false);
+
+        assertThatThrownBy(() -> walletService.delete(ctx.workspace().getId(), used.getId(), ctx.user().getId()))
+                .isInstanceOf(BusinessException.class)
+                .extracting("code")
+                .isEqualTo("WALLET_HAS_TRANSACTIONS");
+
+        walletService.delete(ctx.workspace().getId(), unusedRes.getId(), ctx.user().getId());
+        assertThat(walletRepository.findById(unusedRes.getId())).isEmpty();
+    }
+
+    @Test
     void authorizationAndWorkspaceScopingAreEnforced() {
         TestContext owner = createContext("wallet_auth_owner", WorkspaceRole.OWNER);
         TestContext viewer = createContext("wallet_auth_viewer", WorkspaceRole.VIEWER);
