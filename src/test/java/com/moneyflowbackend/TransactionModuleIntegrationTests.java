@@ -36,6 +36,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.util.UUID;
 
@@ -287,6 +288,57 @@ class TransactionModuleIntegrationTests {
         assertThat(transactionService.list(owner.workspace().getId(), null, null, null, null, null, null, null, null, null, false, 0, 20, null, viewer.user().getId()).getContent()).hasSize(2);
         assertBusinessCode(() -> transactionService.create(owner.workspace().getId(), incomeReq("1", cash, incomeCategory, "viewer"), viewer.user().getId()), "FORBIDDEN");
         assertBusinessCode(() -> transactionService.list(owner.workspace().getId(), null, null, null, null, null, null, null, null, null, false, 0, 20, null, outsider.user().getId()), "WORKSPACE_ACCESS_DENIED");
+    }
+
+    @Test
+    void transactionFiltersSearchDeletedAndExportWorkSafely() {
+        TestContext owner = createContext("tx_filter_export", WorkspaceRole.OWNER);
+        TestContext editor = createContext("tx_filter_export_editor", WorkspaceRole.EDITOR);
+        TestContext viewer = createContext("tx_filter_export_viewer", WorkspaceRole.VIEWER);
+        TestContext outsider = createContext("tx_filter_export_outsider", WorkspaceRole.OWNER);
+        workspaceMemberRepository.save(WorkspaceMember.builder().workspace(owner.workspace()).user(editor.user()).role(WorkspaceRole.EDITOR).build());
+        workspaceMemberRepository.save(WorkspaceMember.builder().workspace(owner.workspace()).user(viewer.user()).role(WorkspaceRole.VIEWER).build());
+        Wallet cash = wallet(owner, "Cash", WalletType.CASH, "0");
+        Category food = category(owner, "Food", CategoryType.EXPENSE, true, false);
+
+        TransactionRequest manualReq = expenseReq("12.50", cash, food, "Comma, quote \" meal", TransactionStatus.POSTED);
+        manualReq.setTransactionDate(LocalDate.of(2026, 7, 2));
+        manualReq.setNote("Comma, quote \" meal\nline two");
+        TransactionResponse manual = transactionService.create(owner.workspace().getId(), manualReq, owner.user().getId());
+
+        TransactionRequest quickReq = expenseReq("9", cash, food, "Quick lunch", TransactionStatus.POSTED);
+        quickReq.setTransactionDate(LocalDate.of(2026, 7, 3));
+        TransactionResponse quick = transactionService.createWithSource(owner.workspace().getId(), quickReq, editor.user().getId(),
+                TransactionSourceType.QUICK_TEXT, "raw noodles from quick text", null);
+
+        TransactionRequest deletedReq = expenseReq("5", cash, food, "Deleted", TransactionStatus.POSTED);
+        deletedReq.setTransactionDate(LocalDate.of(2026, 7, 4));
+        TransactionResponse deleted = transactionService.create(owner.workspace().getId(), deletedReq, owner.user().getId());
+        transactionService.delete(owner.workspace().getId(), deleted.getId(), owner.user().getId());
+
+        assertThat(transactionService.list(owner.workspace().getId(), LocalDate.of(2026, 7, 1), LocalDate.of(2026, 7, 31),
+                null, null, null, null, null, null, TransactionSourceType.QUICK_TEXT, null, null, false, 0, 20, null, owner.user().getId()).getContent())
+                .extracting(TransactionResponse::getId).containsExactly(quick.getId());
+        assertThat(transactionService.list(owner.workspace().getId(), null, null, null, null, null, null, null, null,
+                "raw noodles", false, 0, 20, null, owner.user().getId()).getContent())
+                .extracting(TransactionResponse::getId).containsExactly(quick.getId());
+        assertThat(transactionService.list(owner.workspace().getId(), null, null, null, null, null, null, null, null,
+                TransactionSourceType.QUICK_TEXT, editor.user().getId(), null, false, 0, 500, null, owner.user().getId()).getSize())
+                .isEqualTo(100);
+        assertThat(transactionService.list(owner.workspace().getId(), null, null, null, null, null, null, null, null,
+                null, null, null, true, 0, 20, null, editor.user().getId()).getContent())
+                .extracting(TransactionResponse::getId).contains(deleted.getId());
+        assertBusinessCode(() -> transactionService.list(owner.workspace().getId(), null, null, null, null, null, null, null,
+                null, null, null, null, true, 0, 20, null, viewer.user().getId()), "FORBIDDEN");
+
+        String csv = new String(transactionService.exportCsv(owner.workspace().getId(), LocalDate.of(2026, 7, 1), LocalDate.of(2026, 7, 31),
+                null, null, null, null, null, null, null, null, "quote", false, owner.user().getId()), StandardCharsets.UTF_8);
+        assertThat(csv).startsWith("\uFEFFtransactionDate,type,amount");
+        assertThat(csv).contains("\"Comma, quote \"\" meal\nline two\"");
+        assertThat(csv).doesNotContain("storagePublicId", "playbackUrl", "audioUrl", "password", "refreshToken");
+
+        assertBusinessCode(() -> transactionService.exportCsv(outsider.workspace().getId(), null, null, null, null, null, null,
+                null, null, null, null, null, false, owner.user().getId()), "WORKSPACE_ACCESS_DENIED");
     }
 
     @Test

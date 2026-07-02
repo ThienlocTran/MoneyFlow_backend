@@ -40,6 +40,13 @@ Use this checklist for the next browser UAT pass on staging. Do not use real fin
 - Create one income transaction using staging-only values.
 - Create one expense transaction using staging-only values.
 - Create one transfer between two staging wallets.
+- Filter by month.
+- Filter by type.
+- Filter by wallet.
+- Filter by category.
+- Search raw input/note.
+- Export CSV.
+- Confirm CSV excludes audio URL/storage key.
 - Edit a transaction.
 - Soft delete a transaction.
 - Enable deleted transaction filter.

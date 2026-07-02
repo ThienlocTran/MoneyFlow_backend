@@ -43,6 +43,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.DateTimeException;
 import java.time.Instant;
@@ -57,6 +58,7 @@ import java.util.UUID;
 @Service
 public class TransactionService {
     private static final String FALLBACK_ZONE = "Asia/Ho_Chi_Minh";
+    private static final int EXPORT_LIMIT = 5000;
 
     private static final Set<TransactionType> MANUAL_TYPES = Set.of(
             TransactionType.INCOME,
@@ -147,16 +149,120 @@ public class TransactionService {
             int size,
             String sort,
             UUID userId) {
-        requireActiveMember(workspaceId, userId);
+        return list(workspaceId, dateFrom, dateTo, type, status, walletId, categoryId, jarId,
+                attributedPersonId, sourceType, null, search, includeDeleted, page, size, sort, userId);
+    }
+
+    @Transactional(readOnly = true)
+    public TransactionPageResponse list(
+            UUID workspaceId,
+            LocalDate dateFrom,
+            LocalDate dateTo,
+            TransactionType type,
+            TransactionStatus status,
+            UUID walletId,
+            UUID categoryId,
+            UUID jarId,
+            UUID attributedPersonId,
+            TransactionSourceType sourceType,
+            UUID createdBy,
+            String search,
+            boolean includeDeleted,
+            int page,
+            int size,
+            String sort,
+            UUID userId) {
+        WorkspaceMember member = requireActiveMember(workspaceId, userId);
         if (dateFrom != null && dateTo != null && dateFrom.isAfter(dateTo)) {
             throw new BusinessException("INVALID_DATE_RANGE", "Invalid date range");
         }
+        validateIncludeDeleted(includeDeleted, member);
 
         int pageNumber = Math.max(page, 0);
         int pageSize = Math.min(Math.max(size, 1), 100);
         Pageable pageable = PageRequest.of(pageNumber, pageSize, parseSort(sort));
+        Specification<Transaction> spec = buildListSpec(workspaceId, dateFrom, dateTo, type, status, walletId,
+                categoryId, jarId, attributedPersonId, sourceType, createdBy, search, includeDeleted);
 
-        Specification<Transaction> spec = (root, query, cb) -> {
+        Page<TransactionResponse> result = transactionRepository.findAll(spec, pageable).map(this::mapToResponse);
+        return TransactionPageResponse.builder()
+                .content(result.getContent())
+                .page(result.getNumber())
+                .size(result.getSize())
+                .totalElements(result.getTotalElements())
+                .totalPages(result.getTotalPages())
+                .first(result.isFirst())
+                .last(result.isLast())
+                .build();
+    }
+
+    @Transactional(readOnly = true)
+    public byte[] exportCsv(
+            UUID workspaceId,
+            LocalDate dateFrom,
+            LocalDate dateTo,
+            TransactionType type,
+            TransactionStatus status,
+            UUID walletId,
+            UUID categoryId,
+            UUID jarId,
+            UUID attributedPersonId,
+            TransactionSourceType sourceType,
+            UUID createdBy,
+            String search,
+            boolean includeDeleted,
+            UUID userId) {
+        WorkspaceMember member = requireActiveMember(workspaceId, userId);
+        if (dateFrom != null && dateTo != null && dateFrom.isAfter(dateTo)) {
+            throw new BusinessException("INVALID_DATE_RANGE", "Invalid date range");
+        }
+        validateIncludeDeleted(includeDeleted, member);
+
+        Specification<Transaction> spec = buildListSpec(workspaceId, dateFrom, dateTo, type, status, walletId,
+                categoryId, jarId, attributedPersonId, sourceType, createdBy, search, includeDeleted);
+        List<TransactionResponse> rows = transactionRepository
+                .findAll(spec, PageRequest.of(0, EXPORT_LIMIT, parseSort(null)))
+                .map(this::mapToResponse)
+                .getContent();
+
+        StringBuilder csv = new StringBuilder("\uFEFF");
+        csv.append("transactionDate,type,amount,walletName,transferSourceWalletName,transferDestinationWalletName,categoryName,jarName,sourceType,createdByUsername,note,rawInput,isDeleted,createdAt,updatedAt\n");
+        for (TransactionResponse row : rows) {
+            csv.append(csv(row.getTransactionDate()))
+                    .append(',').append(csv(row.getType()))
+                    .append(',').append(csv(row.getAmount()))
+                    .append(',').append(csv(row.getWalletName()))
+                    .append(',').append(csv(row.getSourceWalletName()))
+                    .append(',').append(csv(row.getDestinationWalletName()))
+                    .append(',').append(csv(row.getCategoryName()))
+                    .append(',').append(csv(row.getCategory() == null ? null : row.getCategory().getJarName()))
+                    .append(',').append(csv(row.getSourceType()))
+                    .append(',').append(csv(row.getCreatedBy() == null ? null : row.getCreatedBy().getUsername()))
+                    .append(',').append(csv(row.getNote()))
+                    .append(',').append(csv(row.getRawInput()))
+                    .append(',').append(csv(row.getDeletedAt() != null))
+                    .append(',').append(csv(row.getCreatedAt()))
+                    .append(',').append(csv(row.getUpdatedAt()))
+                    .append('\n');
+        }
+        return csv.toString().getBytes(StandardCharsets.UTF_8);
+    }
+
+    private Specification<Transaction> buildListSpec(
+            UUID workspaceId,
+            LocalDate dateFrom,
+            LocalDate dateTo,
+            TransactionType type,
+            TransactionStatus status,
+            UUID walletId,
+            UUID categoryId,
+            UUID jarId,
+            UUID attributedPersonId,
+            TransactionSourceType sourceType,
+            UUID createdBy,
+            String search,
+            boolean includeDeleted) {
+        return (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
             predicates.add(cb.equal(root.get("workspace").get("id"), workspaceId));
             if (!includeDeleted) {
@@ -186,6 +292,9 @@ public class TransactionService {
             if (sourceType != null) {
                 predicates.add(cb.equal(root.get("sourceType"), sourceType));
             }
+            if (createdBy != null) {
+                predicates.add(cb.equal(root.get("createdByUser").get("id"), createdBy));
+            }
             if (walletId != null) {
                 Join<Transaction, Wallet> walletJoin = root.join("wallet", JoinType.LEFT);
                 Subquery<UUID> transferSubquery = query.subquery(UUID.class);
@@ -204,21 +313,11 @@ public class TransactionService {
                 String pattern = "%" + search.trim().toLowerCase(Locale.ROOT) + "%";
                 predicates.add(cb.or(
                         cb.like(cb.lower(root.<String>get("description")), pattern),
-                        cb.like(cb.lower(root.<String>get("note")), pattern)));
+                        cb.like(cb.lower(root.<String>get("note")), pattern),
+                        cb.like(cb.lower(root.<String>get("rawInput")), pattern)));
             }
             return cb.and(predicates.toArray(Predicate[]::new));
         };
-
-        Page<TransactionResponse> result = transactionRepository.findAll(spec, pageable).map(this::mapToResponse);
-        return TransactionPageResponse.builder()
-                .content(result.getContent())
-                .page(result.getNumber())
-                .size(result.getSize())
-                .totalElements(result.getTotalElements())
-                .totalPages(result.getTotalPages())
-                .first(result.isFirst())
-                .last(result.isLast())
-                .build();
     }
 
     @Transactional(readOnly = true)
@@ -474,6 +573,12 @@ public class TransactionService {
         return member;
     }
 
+    private void validateIncludeDeleted(boolean includeDeleted, WorkspaceMember member) {
+        if (includeDeleted && member.getRole() == WorkspaceRole.VIEWER) {
+            throw new BusinessException("FORBIDDEN", "Viewer cannot include deleted transactions", HttpStatus.FORBIDDEN);
+        }
+    }
+
     private TransactionType requireManualType(TransactionType type) {
         if (type == null || !MANUAL_TYPES.contains(type)) {
             throw new BusinessException("INVALID_TRANSACTION_TYPE", "Invalid transaction type");
@@ -667,6 +772,14 @@ public class TransactionService {
 
     private String normalizeText(String value) {
         return value == null ? null : value.trim();
+    }
+
+    private String csv(Object value) {
+        if (value == null) {
+            return "";
+        }
+        String text = value.toString();
+        return "\"" + text.replace("\"", "\"\"") + "\"";
     }
 
     private TransactionResponse mapToResponse(Transaction tx) {
