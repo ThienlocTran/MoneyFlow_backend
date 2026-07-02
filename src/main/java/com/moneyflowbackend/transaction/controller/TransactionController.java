@@ -23,6 +23,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.util.UUID;
 
 @RestController
@@ -42,6 +43,7 @@ public class TransactionController {
             @RequestParam(required = false) LocalDate dateTo,
             @RequestParam(required = false) LocalDate from,
             @RequestParam(required = false) LocalDate to,
+            @RequestParam(required = false) String month,
             @RequestParam(required = false) TransactionType type,
             @RequestParam(required = false) TransactionStatus status,
             @RequestParam(required = false) UUID walletId,
@@ -56,10 +58,17 @@ public class TransactionController {
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(required = false) String sort) {
         UUID userId = currentUserId();
+        LocalDate effectiveFrom = dateFrom != null ? dateFrom : from;
+        LocalDate effectiveTo = dateTo != null ? dateTo : to;
+        if (month != null && !month.isBlank()) {
+            YearMonth yearMonth = YearMonth.parse(month.trim());
+            effectiveFrom = yearMonth.atDay(1);
+            effectiveTo = yearMonth.atEndOfMonth();
+        }
         TransactionPageResponse res = transactionService.list(
                 workspaceId,
-                dateFrom != null ? dateFrom : from,
-                dateTo != null ? dateTo : to,
+                effectiveFrom,
+                effectiveTo,
                 type,
                 status,
                 walletId,
@@ -111,6 +120,13 @@ public class TransactionController {
     }
 
     @PostMapping("/{transactionId}/restore")
+    public ResponseEntity<ApiResponse<TransactionResponse>> restorePost(
+            @PathVariable UUID workspaceId,
+            @PathVariable UUID transactionId) {
+        return restore(workspaceId, transactionId);
+    }
+
+    @PutMapping("/{transactionId}/restore")
     public ResponseEntity<ApiResponse<TransactionResponse>> restore(
             @PathVariable UUID workspaceId,
             @PathVariable UUID transactionId) {
