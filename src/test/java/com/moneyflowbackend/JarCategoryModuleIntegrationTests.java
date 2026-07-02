@@ -89,8 +89,10 @@ class JarCategoryModuleIntegrationTests {
     void jarCrudAllocationReorderStatusAndAuthRulesWork() {
         TestContext owner = createContext("jar_owner", WorkspaceRole.OWNER);
         TestContext viewer = createContext("jar_viewer", WorkspaceRole.VIEWER);
+        TestContext editor = createContext("jar_editor", WorkspaceRole.EDITOR);
         TestContext outsider = createContext("jar_outsider", WorkspaceRole.OWNER);
         workspaceMemberRepository.save(WorkspaceMember.builder().workspace(owner.workspace()).user(viewer.user()).role(WorkspaceRole.VIEWER).build());
+        workspaceMemberRepository.save(WorkspaceMember.builder().workspace(owner.workspace()).user(editor.user()).role(WorkspaceRole.EDITOR).build());
 
         JarResponse jar = jarService.create(owner.workspace().getId(), jarRequest("CUSTOM", "Custom", "25"), owner.user().getId());
         JarResponse second = jarService.create(owner.workspace().getId(), jarRequest("SECOND", "Second", "40"), owner.user().getId());
@@ -141,6 +143,8 @@ class JarCategoryModuleIntegrationTests {
 
         assertThat(jarService.list(owner.workspace().getId(), false, viewer.user().getId()).getJars()).hasSize(2);
         assertThatThrownBy(() -> jarService.create(owner.workspace().getId(), jarRequest("VIEW", "Viewer", "1"), viewer.user().getId()))
+                .isInstanceOf(BusinessException.class).extracting("code").isEqualTo("FORBIDDEN");
+        assertThatThrownBy(() -> jarService.create(owner.workspace().getId(), jarRequest("EDIT", "Editor", "1"), editor.user().getId()))
                 .isInstanceOf(BusinessException.class).extracting("code").isEqualTo("FORBIDDEN");
         assertThatThrownBy(() -> jarService.list(owner.workspace().getId(), false, outsider.user().getId()))
                 .isInstanceOf(BusinessException.class).extracting("code").isEqualTo("WORKSPACE_ACCESS_DENIED");
@@ -197,6 +201,12 @@ class JarCategoryModuleIntegrationTests {
                 .build());
         assertThatThrownBy(() -> categoryService.update(ctx.workspace().getId(), tracked.getId(), categoryRequest("Tracked", "INCOME", null), ctx.user().getId()))
                 .isInstanceOf(BusinessException.class).extracting("code").isEqualTo("CATEGORY_TYPE_CHANGE_NOT_ALLOWED");
+        assertThatThrownBy(() -> categoryService.delete(ctx.workspace().getId(), tracked.getId(), ctx.user().getId()))
+                .isInstanceOf(BusinessException.class).extracting("code").isEqualTo("CATEGORY_IN_USE");
+
+        CategoryResponse unused = categoryService.create(ctx.workspace().getId(), categoryRequest("Unused", "EXPENSE", jar.getId()), ctx.user().getId());
+        categoryService.delete(ctx.workspace().getId(), unused.getId(), ctx.user().getId());
+        assertThat(categoryRepository.findById(unused.getId())).isEmpty();
     }
 
     @Test

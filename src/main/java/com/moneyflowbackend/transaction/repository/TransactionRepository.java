@@ -29,4 +29,14 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID>,
     long countWalletUsage(
             @Param("workspaceId") UUID workspaceId,
             @Param("walletId") UUID walletId);
+
+    @Query("""
+            SELECT COUNT(t) FROM Transaction t
+            JOIN t.category c
+            WHERE t.workspace.id = :workspaceId
+              AND c.jar.id = :jarId
+            """)
+    long countJarUsage(
+            @Param("workspaceId") UUID workspaceId,
+            @Param("jarId") UUID jarId);
 }
