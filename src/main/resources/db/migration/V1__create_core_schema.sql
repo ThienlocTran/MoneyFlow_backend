@@ -200,7 +200,7 @@ CREATE TABLE voice_records (
     original_transcript TEXT,
     edited_transcript TEXT,
     voice_status VARCHAR(20) NOT NULL DEFAULT 'DRAFT'
-        CHECK (voice_status IN ('DRAFT', 'UPLOADED', 'AUDIO_STORED', 'TRANSCRIBED', 'PARSED', 'CONFIRMED', 'STORAGE_FAILED', 'FAILED', 'AUDIO_DELETED', 'DELETED')),
+        CHECK (voice_status IN ('DRAFT', 'UPLOADED', 'TRANSCRIBED', 'PARSED', 'CONFIRMED', 'FAILED', 'DELETED')),
     retention_until DATE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     deleted_at TIMESTAMPTZ
