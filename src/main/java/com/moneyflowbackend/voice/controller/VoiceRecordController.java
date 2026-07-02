@@ -7,6 +7,7 @@ import com.moneyflowbackend.voice.service.VoiceAudioService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -39,6 +40,18 @@ public class VoiceRecordController {
     public ResponseEntity<ApiResponse<VoiceAudioPlaybackResponse>> playbackUrl(@PathVariable UUID voiceRecordId) {
         VoiceAudioPlaybackResponse res = voiceAudioService.playbackUrl(voiceRecordId, currentUserId());
         return ResponseEntity.ok(ApiResponse.ok("Voice audio playback URL created", res));
+    }
+
+    @GetMapping("/{voiceRecordId}/playback")
+    public ResponseEntity<ApiResponse<VoiceAudioPlaybackResponse>> playback(@PathVariable UUID voiceRecordId) {
+        VoiceAudioPlaybackResponse res = voiceAudioService.playbackUrl(voiceRecordId, currentUserId());
+        return ResponseEntity.ok(ApiResponse.ok("Voice audio playback URL created", res));
+    }
+
+    @DeleteMapping("/{voiceRecordId}/audio")
+    public ResponseEntity<ApiResponse<VoiceAudioUploadResponse>> deleteAudio(@PathVariable UUID voiceRecordId) {
+        VoiceAudioUploadResponse res = voiceAudioService.deleteVoiceAudio(voiceRecordId, currentUserId());
+        return ResponseEntity.ok(ApiResponse.ok("Voice audio deleted", res));
     }
 
     private UUID currentUserId() {
