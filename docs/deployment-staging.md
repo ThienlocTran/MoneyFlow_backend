@@ -57,6 +57,7 @@ MONEYFLOW_AUDIO_STORAGE_PROVIDER=disabled
 MONEYFLOW_AUDIO_FOLDER=moneyflow/staging/voice
 MONEYFLOW_AUDIO_MAX_BYTES=10485760
 MONEYFLOW_AUDIO_ALLOWED_TYPES=audio/webm,audio/mp4,audio/mpeg,audio/wav
+GOOGLE_CLIENT_ID=
 ```
 
 Optional Cloudinary staging variables, required only when `MONEYFLOW_AUDIO_STORAGE_PROVIDER=cloudinary`:
@@ -83,9 +84,10 @@ Required frontend variable:
 
 ```text
 VITE_API_BASE_URL=https://<render-backend-staging-domain>/api
+VITE_GOOGLE_CLIENT_ID=
 ```
 
-The frontend service reads only `VITE_API_BASE_URL`; do not add duplicate API URL variables unless the code changes. The frontend normalizes this value, so both `https://<render-backend-staging-domain>` and `https://<render-backend-staging-domain>/api` are accepted without creating `/api/api`.
+The frontend normalizes `VITE_API_BASE_URL`, so both `https://<render-backend-staging-domain>` and `https://<render-backend-staging-domain>/api` are accepted without creating `/api/api`. `VITE_GOOGLE_CLIENT_ID` must match backend `GOOGLE_CLIENT_ID` for Google Identity Services credential-token login.
 
 ## Health Checks
 
@@ -105,6 +107,10 @@ GET https://<backend-staging-domain>/api/public/health/ready
 - Frontend loads the staging bundle.
 - API base URL points to the staging backend.
 - Login page renders.
+- Local email/username login succeeds.
+- Google login succeeds when `GOOGLE_CLIENT_ID` and `VITE_GOOGLE_CLIENT_ID` are configured.
+- New Google users receive a personal workspace and can update username in settings.
+- Invites can find Google-created users by username without exposing email in search.
 - No Excel import.
 - No transaction creation.
 - No mutation of real financial data.

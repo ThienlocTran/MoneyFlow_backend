@@ -18,6 +18,11 @@ Use this checklist for the next browser UAT pass on staging. Do not use real fin
 - Log in.
 - Refresh the page and confirm the session is still valid.
 - Log out and confirm protected pages redirect to login.
+- Log in with local email/username and password.
+- Log in with Google on a configured staging/local OAuth client.
+- Create or use a new Google user and confirm a personal workspace is created.
+- Confirm a Google-created user can update username in Settings.
+- Invite a Google-created user by username and confirm search results show id/username/display name/avatar only, not email.
 
 ## Workspace Switch
 
