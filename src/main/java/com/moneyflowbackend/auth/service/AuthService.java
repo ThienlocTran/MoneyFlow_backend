@@ -1,6 +1,8 @@
 package com.moneyflowbackend.auth.service;
 
 import com.moneyflowbackend.auth.dto.*;
+import com.moneyflowbackend.auth.google.GoogleTokenPayload;
+import com.moneyflowbackend.auth.google.GoogleTokenVerifier;
 import com.moneyflowbackend.auth.model.*;
 import com.moneyflowbackend.auth.repository.*;
 import com.moneyflowbackend.category.model.Category;
@@ -26,13 +28,17 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 @Service
 public class AuthService {
 
     private static final String INVALID_CREDENTIALS_MESSAGE = "Email/username hoặc mật khẩu không chính xác.";
+
+    private static final Pattern USERNAME_PATTERN = Pattern.compile("^[a-zA-Z0-9_.]{4,40}$");
 
     private final UserRepository userRepository;
     private final AuthAccountRepository authAccountRepository;
@@ -45,6 +51,7 @@ public class AuthService {
     private final WalletRepository walletRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider tokenProvider;
+    private final GoogleTokenVerifier googleTokenVerifier;
 
     public AuthService(
             UserRepository userRepository,
@@ -57,7 +64,8 @@ public class AuthService {
             CategoryRepository categoryRepository,
             WalletRepository walletRepository,
             PasswordEncoder passwordEncoder,
-            JwtTokenProvider tokenProvider) {
+            JwtTokenProvider tokenProvider,
+            GoogleTokenVerifier googleTokenVerifier) {
         this.userRepository = userRepository;
         this.authAccountRepository = authAccountRepository;
         this.refreshTokenRepository = refreshTokenRepository;
@@ -69,6 +77,7 @@ public class AuthService {
         this.walletRepository = walletRepository;
         this.passwordEncoder = passwordEncoder;
         this.tokenProvider = tokenProvider;
+        this.googleTokenVerifier = googleTokenVerifier;
     }
 
     @Transactional
@@ -211,6 +220,39 @@ public class AuthService {
     }
 
     @Transactional
+    public TokenResponse googleLogin(GoogleLoginRequest req) {
+        GoogleTokenPayload payload = googleTokenVerifier.verify(req.getCredential());
+        if (payload.subject() == null || payload.subject().isBlank()) {
+            throw new BusinessException("INVALID_GOOGLE_CREDENTIAL", "Google credential không hợp lệ", HttpStatus.UNAUTHORIZED);
+        }
+        if (payload.email() == null || payload.email().isBlank() || !payload.emailVerified()) {
+            throw new BusinessException("GOOGLE_EMAIL_NOT_VERIFIED", "Email Google chưa được xác thực", HttpStatus.UNAUTHORIZED);
+        }
+
+        String email = payload.email().trim().toLowerCase(Locale.ROOT);
+        AuthAccount linked = authAccountRepository.findByProviderAndProviderSubject(AuthProvider.GOOGLE, payload.subject())
+                .orElse(null);
+        if (linked != null) {
+            User user = linked.getUser();
+            ensureActiveForGoogleLogin(user);
+            return issueTokenPair(user);
+        }
+
+        User user = userRepository.findByEmailIgnoreCaseAndDeletedAtIsNull(email)
+                .orElseGet(() -> createGoogleUser(payload, email));
+        ensureActiveForGoogleLogin(user);
+
+        if (!authAccountRepository.existsByUserIdAndProvider(user.getId(), AuthProvider.GOOGLE)) {
+            authAccountRepository.save(AuthAccount.builder()
+                    .user(user)
+                    .provider(AuthProvider.GOOGLE)
+                    .providerSubject(payload.subject())
+                    .build());
+        }
+        return issueTokenPair(user);
+    }
+
+    @Transactional
     public TokenResponse login(LoginRequest req) {
         String identifier = req.getIdentifier().trim().toLowerCase();
         User user = userRepository.findByUsernameOrEmailIgnoreCaseAndDeletedAtIsNull(identifier)
@@ -290,6 +332,184 @@ public class AuthService {
         user = userRepository.save(user);
 
         return mapToUserResponse(user);
+    }
+
+    @Transactional
+    public UserResponse updateUsername(UUID userId, UsernameUpdateRequest req) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new BusinessException("USER_NOT_FOUND", "Không tìm thấy thông tin người dùng", HttpStatus.NOT_FOUND));
+        String username = normalizeUsername(req.getUsername());
+        if (!username.equalsIgnoreCase(user.getUsername())
+                && userRepository.existsByUsernameIgnoreCaseAndDeletedAtIsNull(username)) {
+            throw new BusinessException("USERNAME_ALREADY_EXISTS", "Username đã tồn tại", Map.of("username", "Username đã tồn tại"));
+        }
+        user.setUsername(username);
+        user.setUpdatedAt(Instant.now());
+        return mapToUserResponse(userRepository.save(user));
+    }
+
+    private User createGoogleUser(GoogleTokenPayload payload, String email) {
+        String fullName = payload.name() == null || payload.name().isBlank()
+                ? email.substring(0, email.indexOf('@'))
+                : payload.name().trim();
+        String username = uniqueUsernameFromEmail(email);
+        User user = userRepository.save(User.builder()
+                .username(username)
+                .email(email)
+                .fullName(fullName)
+                .avatarUrl(payload.pictureUrl())
+                .status(UserStatus.ACTIVE)
+                .build());
+        createPersonalWorkspaceForUser(user);
+        return user;
+    }
+
+    private void ensureActiveForGoogleLogin(User user) {
+        if (user.getDeletedAt() != null || user.getStatus() == UserStatus.DELETED) {
+            throw new BusinessException("INVALID_GOOGLE_CREDENTIAL", "Google credential không hợp lệ", HttpStatus.UNAUTHORIZED);
+        }
+        if (user.getStatus() == UserStatus.LOCKED) {
+            throw new BusinessException("ACCOUNT_LOCKED", "Tài khoản của bạn đã bị khóa", HttpStatus.FORBIDDEN);
+        }
+        if (user.getStatus() != UserStatus.ACTIVE) {
+            throw new BusinessException("INVALID_GOOGLE_CREDENTIAL", "Google credential không hợp lệ", HttpStatus.UNAUTHORIZED);
+        }
+    }
+
+    private String normalizeUsername(String raw) {
+        String username = raw == null ? "" : raw.trim().toLowerCase(Locale.ROOT);
+        if (!USERNAME_PATTERN.matcher(username).matches()) {
+            throw new BusinessException("INVALID_USERNAME", "Username không hợp lệ", Map.of("username", "Username không hợp lệ"));
+        }
+        return username;
+    }
+
+    private String uniqueUsernameFromEmail(String email) {
+        String localPart = email.substring(0, email.indexOf('@')).toLowerCase(Locale.ROOT);
+        String base = localPart.replaceAll("[^a-z0-9_.]", ".")
+                .replaceAll("\\.+", ".")
+                .replaceAll("^\\.+|\\.+$", "");
+        if (base.length() < 4) {
+            base = (base + "user").substring(0, 4);
+        }
+        if (base.length() > 32) {
+            base = base.substring(0, 32).replaceAll("\\.+$", "");
+        }
+        String candidate = base;
+        int suffix = 1;
+        while (userRepository.existsByUsernameIgnoreCaseAndDeletedAtIsNull(candidate)) {
+            String tail = String.valueOf(suffix++);
+            int maxBase = Math.min(base.length(), 40 - tail.length());
+            candidate = base.substring(0, maxBase) + tail;
+        }
+        return candidate;
+    }
+
+    private void createPersonalWorkspaceForUser(User user) {
+        Workspace workspace = Workspace.builder()
+                .name("Tài chính cá nhân của " + user.getFullName())
+                .workspaceType(WorkspaceType.PERSONAL)
+                .currency("VND")
+                .timezone("Asia/Ho_Chi_Minh")
+                .quickAmountUnit("THOUSAND")
+                .createdByUser(user)
+                .build();
+        workspace = workspaceRepository.save(workspace);
+
+        WorkspacePerson person = WorkspacePerson.builder()
+                .workspace(workspace)
+                .linkedUser(user)
+                .displayName(user.getFullName())
+                .personKind(PersonKind.MEMBER)
+                .isActive(true)
+                .build();
+        person = workspacePersonRepository.save(person);
+
+        workspaceMemberRepository.save(WorkspaceMember.builder()
+                .workspace(workspace)
+                .user(user)
+                .person(person)
+                .role(WorkspaceRole.OWNER)
+                .memberStatus("ACTIVE")
+                .build());
+
+        List<Jar> defaultJars = new ArrayList<>();
+        defaultJars.add(createJar(workspace, "NEC", "Thiết yếu", 55, 1));
+        defaultJars.add(createJar(workspace, "FFA", "Tự do tài chính", 10, 2));
+        defaultJars.add(createJar(workspace, "LTSS", "Tiết kiệm dài hạn", 10, 3));
+        defaultJars.add(createJar(workspace, "EDU", "Giáo dục", 10, 4));
+        defaultJars.add(createJar(workspace, "PLAY", "Hưởng thụ", 10, 5));
+        defaultJars.add(createJar(workspace, "GIVE", "Cho đi", 5, 6));
+        defaultJars = jarRepository.saveAll(defaultJars);
+
+        Jar nec = findJar(defaultJars, "NEC");
+        Jar ffa = findJar(defaultJars, "FFA");
+        Jar ltss = findJar(defaultJars, "LTSS");
+        Jar edu = findJar(defaultJars, "EDU");
+        Jar play = findJar(defaultJars, "PLAY");
+        Jar give = findJar(defaultJars, "GIVE");
+
+        List<Category> cats = new ArrayList<>();
+        cats.add(createCategory(workspace, null, "Lương", CategoryType.INCOME, "salary", 1));
+        cats.add(createCategory(workspace, null, "Gia đình chu cấp", CategoryType.INCOME, "family", 2));
+        cats.add(createCategory(workspace, null, "Freelance", CategoryType.INCOME, "freelance", 3));
+        cats.add(createCategory(workspace, null, "Kinh doanh", CategoryType.INCOME, "business", 4));
+        cats.add(createCategory(workspace, null, "Thưởng", CategoryType.INCOME, "bonus", 5));
+        cats.add(createCategory(workspace, null, "Hoàn tiền", CategoryType.INCOME, "refund", 6));
+        cats.add(createCategory(workspace, null, "Được tặng", CategoryType.INCOME, "gift", 7));
+        cats.add(createCategory(workspace, null, "Khác", CategoryType.INCOME, "other", 8));
+
+        cats.add(createCategory(workspace, nec, "Ăn uống", CategoryType.EXPENSE, "food", 9));
+        cats.add(createCategory(workspace, nec, "Xăng xe", CategoryType.EXPENSE, "car", 10));
+        cats.add(createCategory(workspace, nec, "Gửi xe", CategoryType.EXPENSE, "parking", 11));
+        cats.add(createCategory(workspace, nec, "Đi chợ", CategoryType.EXPENSE, "grocery", 12));
+        cats.add(createCategory(workspace, nec, "Tiền trọ", CategoryType.EXPENSE, "rent", 13));
+        cats.add(createCategory(workspace, nec, "Tiền điện", CategoryType.EXPENSE, "electric", 14));
+        cats.add(createCategory(workspace, nec, "Tiền nước", CategoryType.EXPENSE, "water", 15));
+        cats.add(createCategory(workspace, nec, "Internet/Wifi", CategoryType.EXPENSE, "wifi", 16));
+        cats.add(createCategory(workspace, nec, "Điện thoại/4G", CategoryType.EXPENSE, "mobile", 17));
+        cats.add(createCategory(workspace, nec, "Y tế", CategoryType.EXPENSE, "medical", 18));
+        cats.add(createCategory(workspace, nec, "Đồ dùng trong nhà", CategoryType.EXPENSE, "household", 19));
+
+        cats.add(createCategory(workspace, ffa, "Đầu tư", CategoryType.EXPENSE, "invest", 20));
+        cats.add(createCategory(workspace, ffa, "Vốn kinh doanh", CategoryType.EXPENSE, "capital", 21));
+        cats.add(createCategory(workspace, ffa, "Tài sản", CategoryType.EXPENSE, "asset", 22));
+
+        cats.add(createCategory(workspace, ltss, "Quỹ khẩn cấp", CategoryType.EXPENSE, "emergency", 23));
+        cats.add(createCategory(workspace, ltss, "Mục tiêu tiết kiệm", CategoryType.EXPENSE, "saving-goal", 24));
+        cats.add(createCategory(workspace, ltss, "Mua sắm lớn", CategoryType.EXPENSE, "big-buy", 25));
+
+        cats.add(createCategory(workspace, edu, "Học phí", CategoryType.EXPENSE, "tuition", 26));
+        cats.add(createCategory(workspace, edu, "Sách và tài liệu", CategoryType.EXPENSE, "books", 27));
+        cats.add(createCategory(workspace, edu, "Khóa học", CategoryType.EXPENSE, "courses", 28));
+        cats.add(createCategory(workspace, edu, "Học tiếng Anh", CategoryType.EXPENSE, "english", 29));
+        cats.add(createCategory(workspace, edu, "Học lập trình", CategoryType.EXPENSE, "coding", 30));
+
+        cats.add(createCategory(workspace, play, "Cafe", CategoryType.EXPENSE, "coffee", 31));
+        cats.add(createCategory(workspace, play, "Ăn ngoài", CategoryType.EXPENSE, "dining", 32));
+        cats.add(createCategory(workspace, play, "Đi chơi", CategoryType.EXPENSE, "hangout", 33));
+        cats.add(createCategory(workspace, play, "Xem phim", CategoryType.EXPENSE, "movies", 34));
+        cats.add(createCategory(workspace, play, "Game", CategoryType.EXPENSE, "games", 35));
+        cats.add(createCategory(workspace, play, "Quần áo", CategoryType.EXPENSE, "clothes", 36));
+        cats.add(createCategory(workspace, play, "Mỹ phẩm", CategoryType.EXPENSE, "makeup", 37));
+        cats.add(createCategory(workspace, play, "Du lịch", CategoryType.EXPENSE, "travel", 38));
+
+        cats.add(createCategory(workspace, give, "Gia đình", CategoryType.EXPENSE, "family-help", 39));
+        cats.add(createCategory(workspace, give, "Quà tặng", CategoryType.EXPENSE, "gifts", 40));
+        cats.add(createCategory(workspace, give, "Từ thiện", CategoryType.EXPENSE, "charity", 41));
+        cats.add(createCategory(workspace, give, "Lì xì", CategoryType.EXPENSE, "lixi", 42));
+        cats.add(createCategory(workspace, give, "Hỗ trợ người khác", CategoryType.EXPENSE, "support", 43));
+        categoryRepository.saveAll(cats);
+
+        walletRepository.save(Wallet.builder()
+                .workspace(workspace)
+                .name("Tiền mặt")
+                .walletType(WalletType.CASH)
+                .openingBalance(BigDecimal.ZERO)
+                .isDefault(true)
+                .isActive(true)
+                .includeInTotal(true)
+                .build());
     }
 
     private TokenResponse issueTokenPair(User user) {
