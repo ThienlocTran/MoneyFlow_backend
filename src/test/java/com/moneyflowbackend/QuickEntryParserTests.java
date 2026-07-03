@@ -117,6 +117,38 @@ class QuickEntryParserTests {
     }
 
     @Test
+    void parsesVoiceUatPhrasesWithSameQuickTextParser() {
+        Fixture f = fixture();
+        Wallet momo = wallet("MoMo", WalletType.E_WALLET, false);
+        List<Wallet> wallets = List.of(f.cash(), f.bank(), momo);
+        List<CategoryKeyword> keywords = List.of(
+                keyword(f.workspace(), f.food(), "ăn sáng", 20),
+                keyword(f.workspace(), f.salary(), "mẹ cho", 20));
+
+        var expense = parser.parse("ăn sáng 35k tiền mặt", f.workspace(), keywords, f.categories(), wallets);
+        var income = parser.parse("mẹ cho 500k vào MB", f.workspace(), keywords, f.categories(), wallets);
+        var transfer = parser.parse("chuyển 200k từ MB sang MoMo", f.workspace(), keywords, f.categories(), wallets);
+
+        assertThat(expense.isReadyToConfirm()).isTrue();
+        assertThat(expense.getType()).isEqualTo(TransactionType.EXPENSE);
+        assertThat(expense.getAmount()).isEqualByComparingTo("35000");
+        assertThat(expense.getWalletId()).isEqualTo(f.cash().getId());
+        assertThat(expense.getCategoryId()).isEqualTo(f.food().getId());
+
+        assertThat(income.isReadyToConfirm()).isTrue();
+        assertThat(income.getType()).isEqualTo(TransactionType.INCOME);
+        assertThat(income.getAmount()).isEqualByComparingTo("500000");
+        assertThat(income.getWalletId()).isEqualTo(f.bank().getId());
+        assertThat(income.getCategoryId()).isEqualTo(f.salary().getId());
+
+        assertThat(transfer.isReadyToConfirm()).isTrue();
+        assertThat(transfer.getType()).isEqualTo(TransactionType.TRANSFER);
+        assertThat(transfer.getAmount()).isEqualByComparingTo("200000");
+        assertThat(transfer.getSourceWalletId()).isEqualTo(f.bank().getId());
+        assertThat(transfer.getDestinationWalletId()).isEqualTo(momo.getId());
+    }
+
+    @Test
     void reportsAmbiguousCategoryAndMissingFields() {
         Fixture f = fixture();
         Category otherFood = category("Other Food", CategoryType.EXPENSE);
