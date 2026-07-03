@@ -149,6 +149,61 @@ class QuickEntryParserTests {
     }
 
     @Test
+    void detectsNaturalMultiExpenseTranscriptAndPrefillsFirstAmount() {
+        Fixture f = fixture();
+        var preview = parser.parse("Hôm nay tiền ăn 15.000 Uống cà phê 15.000", f.workspace(), List.of(), f.categories(), f.wallets());
+
+        assertThat(preview.getType()).isEqualTo(TransactionType.EXPENSE);
+        assertThat(preview.getAmount()).isEqualByComparingTo("15000");
+        assertThat(preview.getMissingFields()).doesNotContain("AMOUNT");
+        assertThat(preview.getWarnings()).contains("MULTIPLE_ITEMS_DETECTED").doesNotContain("AMBIGUOUS_AMOUNT");
+        assertThat(preview.getCandidates()).hasSize(2);
+        assertThat(preview.getCandidates()).extracting("amount")
+                .containsExactly(new java.math.BigDecimal("15000"), new java.math.BigDecimal("15000"));
+        assertThat(preview.getCandidates()).extracting("description")
+                .containsExactly("Tiền ăn", "Uống cà phê");
+    }
+
+    @Test
+    void detectsNaturalMultiExpenseAmountsWithKAndBareNumbers() {
+        Fixture f = fixture();
+        var breakfast = parser.parse("ăn sáng 35k cafe 20k", f.workspace(), List.of(), f.categories(), f.wallets());
+        var food = parser.parse("tiền ăn 15000 uống nước 12000", f.workspace(), List.of(), f.categories(), f.wallets());
+
+        assertThat(breakfast.getCandidates()).extracting("amount")
+                .containsExactly(new java.math.BigDecimal("35000"), new java.math.BigDecimal("20000"));
+        assertThat(food.getCandidates()).extracting("amount")
+                .containsExactly(new java.math.BigDecimal("15000"), new java.math.BigDecimal("12000"));
+        assertThat(breakfast.getMissingFields()).doesNotContain("AMOUNT");
+        assertThat(food.getMissingFields()).doesNotContain("AMOUNT");
+    }
+
+    @Test
+    void detectsTransportMultiExpenseAmounts() {
+        Fixture f = fixture();
+        Category transport = category("Transport", CategoryType.EXPENSE);
+        var preview = parser.parse("xăng xe 50k gửi xe 5k", f.workspace(), List.of(), List.of(f.food(), f.salary(), transport), f.wallets());
+
+        assertThat(preview.getType()).isEqualTo(TransactionType.EXPENSE);
+        assertThat(preview.getCandidates()).extracting("amount")
+                .containsExactly(new java.math.BigDecimal("50000"), new java.math.BigDecimal("5000"));
+        assertThat(preview.getCandidates()).extracting("categoryName")
+                .containsExactly("Transport", "Transport");
+    }
+
+    @Test
+    void invalidTextDoesNotThrowAndDateIsNotAmount() {
+        Fixture f = fixture();
+        var invalid = parser.parse("s", f.workspace(), f.keywords(), f.categories(), f.wallets());
+        var dated = parser.parse("ngày 03/07/2026 ăn sáng 35k", f.workspace(), f.keywords(), f.categories(), f.wallets());
+
+        assertThat(invalid.getAmount()).isNull();
+        assertThat(invalid.getMissingFields()).contains("AMOUNT");
+        assertThat(dated.getAmount()).isEqualByComparingTo("35000");
+        assertThat(dated.getCandidates()).isEmpty();
+    }
+
+    @Test
     void reportsAmbiguousCategoryAndMissingFields() {
         Fixture f = fixture();
         Category otherFood = category("Other Food", CategoryType.EXPENSE);

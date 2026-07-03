@@ -32,6 +32,18 @@ public class QuickEntryParser {
     private static final Set<String> EXPENSE_WORDS = Set.of(
             "chi", "mua", "tra", "dong", "dong tien", "thanh toan", "an", "uong", "cafe",
             "ca phe", "xang", "gui xe");
+    private static final List<AliasRule> CATEGORY_ALIASES = List.of(
+            new AliasRule(CategoryType.EXPENSE, List.of("an", "an sang", "an trua", "an toi", "com", "bun", "pho", "do an", "tien an"),
+                    List.of("An uong", "An", "Food", "Food & Drink")),
+            new AliasRule(CategoryType.EXPENSE, List.of("ca phe", "cafe", "coffee", "uong ca phe", "tra sua", "nuoc", "uong nuoc"),
+                    List.of("Ca phe", "An uong", "Do uong", "Food & Drink")),
+            new AliasRule(CategoryType.EXPENSE, List.of("xang", "xang xe", "gui xe", "grab", "taxi"),
+                    List.of("Di lai", "Di chuyen", "Transport")),
+            new AliasRule(CategoryType.INCOME, List.of("luong", "thuong"),
+                    List.of("Luong", "Thu nhap")),
+            new AliasRule(CategoryType.INCOME, List.of("me cho", "duoc cho", "nhan tien"),
+                    List.of("Thu nhap khac", "Qua tang", "Thu nhap"))
+    );
     private static final Pattern TRANSFER_PATTERN = Pattern.compile("\\b(chuyen|chuyen tien|chuyen khoan|transfer|tu .+ (sang|qua) .+)\\b");
     private static final Pattern FROM_TO = Pattern.compile("\\btu\\s+(.+?)\\s+(?:sang|qua)\\s+(.+)$");
     private static final Pattern TO_ONLY = Pattern.compile("^(.+?)\\s+(?:sang|qua)\\s+(.+)$");
@@ -71,14 +83,17 @@ public class QuickEntryParser {
         List<Span> removableSpans = new ArrayList<>();
 
         QuickAmountParser.AmountParseResult amountResult = amountParser.parse(rawInput, quickAmountUnit);
+        List<QuickAmountParser.AmountCandidate> amountCandidates = amountResult.candidates();
         BigDecimal amount = null;
         QuickAmountParser.AmountCandidate amountCandidate = null;
         if (amountResult.negativeAmount() || amountResult.zeroAmount()) {
             missing.add("AMOUNT");
             warnings.add("INVALID_AMOUNT");
-        } else if (amountResult.ambiguous()) {
-            missing.add("AMOUNT");
-            warnings.add("AMBIGUOUS_AMOUNT");
+        } else if (amountCandidates.size() > 1) {
+            amountCandidate = amountCandidates.get(0);
+            amount = amountCandidate.amount();
+            removableSpans.add(new Span(amountCandidate.start(), amountCandidate.end()));
+            warnings.add("MULTIPLE_ITEMS_DETECTED");
         } else if (amountResult.single().isPresent()) {
             amountCandidate = amountResult.single().orElseThrow();
             amount = amountCandidate.amount();
@@ -106,7 +121,7 @@ public class QuickEntryParser {
         }
 
         boolean transferText = TRANSFER_PATTERN.matcher(normalized).find() || looksLikeBareWalletTransfer(normalized, display, wallets);
-        CategoryMatch categoryMatch = matchCategory(normalized, display, keywords).orElse(null);
+        CategoryMatch categoryMatch = matchCategory(normalized, display, keywords, categories).orElse(null);
         boolean ambiguousCategory = categoryMatch != null && categoryMatch.ambiguous();
         TransactionType type = inferType(normalized, transferText, categoryMatch);
         if (type == null) {
@@ -126,7 +141,7 @@ public class QuickEntryParser {
                 warnings.add("CATEGORY_TYPE_MISMATCH");
             } else {
             category = categoryMatch.category();
-            matchedKeyword = categoryMatch.keyword().getKeyword();
+            matchedKeyword = categoryMatch.keyword() == null ? categoryMatch.text() : categoryMatch.keyword().getKeyword();
             }
         } else if (type == TransactionType.INCOME || type == TransactionType.EXPENSE) {
             missing.add("CATEGORY");
@@ -183,7 +198,10 @@ public class QuickEntryParser {
             }
         }
 
-        String description = description(display, removableSpans, type, destinationWallet, amountCandidate, matchedWalletText);
+        List<QuickEntryPreviewResponse.Candidate> candidates = buildCandidates(display, amountCandidates, keywords, categories, type, removableSpans);
+        String description = amountCandidates.size() > 1
+                ? candidates.stream().findFirst().map(QuickEntryPreviewResponse.Candidate::getDescription).orElse(null)
+                : description(display, removableSpans, type, destinationWallet, amountCandidate, matchedWalletText);
         boolean ready = ready(type, amount, category, wallet, sourceWallet, destinationWallet, transactionDate, warnings, missing);
         double confidence = confidence(ready, missing, warnings);
 
@@ -212,6 +230,7 @@ public class QuickEntryParser {
                 .matchedKeyword(matchedKeyword)
                 .matchedCategoryId(category == null ? null : category.getId())
                 .matchedWalletText(matchedWalletText)
+                .candidates(candidates)
                 .build();
     }
 
@@ -261,7 +280,7 @@ public class QuickEntryParser {
         return false;
     }
 
-    private Optional<CategoryMatch> matchCategory(String normalized, String display, List<CategoryKeyword> keywords) {
+    private Optional<CategoryMatch> matchCategory(String normalized, String display, List<CategoryKeyword> keywords, List<Category> categories) {
         List<CategoryMatch> matches = new ArrayList<>();
         for (CategoryKeyword keyword : keywords == null ? List.<CategoryKeyword>of() : keywords) {
             Category category = keyword.getCategory();
@@ -289,6 +308,41 @@ public class QuickEntryParser {
             return Integer.compare(right.priority(), left.priority());
         });
         if (matches.isEmpty()) {
+            return matchAliasCategory(normalized, display, categories);
+        }
+        CategoryMatch top = matches.get(0);
+        boolean ambiguous = matches.stream()
+                .skip(1)
+                .anyMatch(match -> match.sameRank(top) && !match.category().getId().equals(top.category().getId()));
+        return Optional.of(ambiguous ? top.asAmbiguous() : top);
+    }
+
+    private Optional<CategoryMatch> matchAliasCategory(String normalized, String display, List<Category> categories) {
+        List<CategoryMatch> matches = new ArrayList<>();
+        for (AliasRule rule : CATEGORY_ALIASES) {
+            PhraseMatch aliasMatch = rule.aliases().stream()
+                    .map(alias -> findPhrase(normalized, alias).orElse(null))
+                    .filter(match -> match != null)
+                    .max(Comparator.comparingInt(match -> match.end() - match.start()))
+                    .orElse(null);
+            if (aliasMatch == null) {
+                continue;
+            }
+            Category category = findExistingCategory(categories, rule.type(), rule.categoryNames()).orElse(null);
+            if (category == null) {
+                continue;
+            }
+            int length = aliasMatch.end() - aliasMatch.start();
+            matches.add(new CategoryMatch(category, null, aliasMatch.exact(), length, 0, aliasMatch.start(), aliasMatch.end(), displayText(display, aliasMatch.start(), aliasMatch.end()), false));
+        }
+        matches.sort((left, right) -> {
+            int byExact = Boolean.compare(right.exact(), left.exact());
+            if (byExact != 0) return byExact;
+            int byLength = Integer.compare(right.length(), left.length());
+            if (byLength != 0) return byLength;
+            return Integer.compare(right.priority(), left.priority());
+        });
+        if (matches.isEmpty()) {
             return Optional.empty();
         }
         CategoryMatch top = matches.get(0);
@@ -296,6 +350,82 @@ public class QuickEntryParser {
                 .skip(1)
                 .anyMatch(match -> match.sameRank(top) && !match.category().getId().equals(top.category().getId()));
         return Optional.of(ambiguous ? top.asAmbiguous() : top);
+    }
+
+    private Optional<Category> findExistingCategory(List<Category> categories, CategoryType type, List<String> names) {
+        for (String name : names) {
+            String comparableName = VietnameseTextNormalizer.comparable(name);
+            Optional<Category> match = (categories == null ? List.<Category>of() : categories).stream()
+                    .filter(category -> category.isActive() && !category.isArchived())
+                    .filter(category -> category.getCategoryType() == type)
+                    .filter(category -> VietnameseTextNormalizer.comparable(category.getName()).equals(comparableName))
+                    .findFirst();
+            if (match.isPresent()) {
+                return match;
+            }
+        }
+        return Optional.empty();
+    }
+
+    private List<QuickEntryPreviewResponse.Candidate> buildCandidates(
+            String display,
+            List<QuickAmountParser.AmountCandidate> amountCandidates,
+            List<CategoryKeyword> keywords,
+            List<Category> categories,
+            TransactionType fallbackType,
+            List<Span> removableSpans) {
+        if (amountCandidates.size() <= 1) {
+            return List.of();
+        }
+        List<QuickEntryPreviewResponse.Candidate> candidates = new ArrayList<>();
+        for (int i = 0; i < amountCandidates.size(); i++) {
+            QuickAmountParser.AmountCandidate amountCandidate = amountCandidates.get(i);
+            String segment = amountSegment(display, amountCandidates, i);
+            String normalizedSegment = VietnameseTextNormalizer.comparable(segment);
+            CategoryMatch segmentCategory = matchCategory(normalizedSegment, segment, keywords, categories).orElse(null);
+            TransactionType segmentType = inferType(normalizedSegment, false, segmentCategory);
+            if (segmentType == null) {
+                segmentType = fallbackType == TransactionType.INCOME ? TransactionType.INCOME : TransactionType.EXPENSE;
+            }
+            Category category = segmentCategory == null || segmentCategory.ambiguous() || !categoryMatchesType(segmentCategory.category(), segmentType)
+                    ? null
+                    : segmentCategory.category();
+            String description = candidateDescription(segment, amountCandidate);
+            List<String> warnings = new ArrayList<>();
+            if (category == null && segmentType != TransactionType.TRANSFER) {
+                warnings.add("UNKNOWN_CATEGORY");
+            }
+            candidates.add(QuickEntryPreviewResponse.Candidate.builder()
+                    .description(description)
+                    .amount(amountCandidate.amount())
+                    .type(segmentType)
+                    .categoryId(category == null ? null : category.getId())
+                    .categoryName(category == null ? null : category.getName())
+                    .warnings(warnings)
+                    .build());
+        }
+        return candidates;
+    }
+
+    private String amountSegment(String display, List<QuickAmountParser.AmountCandidate> amountCandidates, int index) {
+        QuickAmountParser.AmountCandidate current = amountCandidates.get(index);
+        int start = index == 0 ? 0 : amountCandidates.get(index - 1).end();
+        int end = current.end();
+        String segment = displayText(display, start, end);
+        return segment.isBlank() ? display : segment;
+    }
+
+    private String candidateDescription(String segment, QuickAmountParser.AmountCandidate amountCandidate) {
+        String cleaned = segment == null ? "" : segment;
+        if (amountCandidate != null && amountCandidate.text() != null && !amountCandidate.text().isBlank()) {
+            cleaned = cleaned.replace(amountCandidate.text(), " ");
+        }
+        cleaned = cleaned
+                .replaceAll("(?i)\\b(hom nay|hôm nay|ngay|ngày)\\b", " ")
+                .replaceAll("\\b\\d{1,2}/\\d{1,2}(?:/\\d{2,4})?\\b", " ")
+                .replaceAll("\\s+", " ")
+                .trim();
+        return VietnameseTextNormalizer.capitalize(cleaned);
     }
 
     private TransferWallets matchTransferWallets(String normalized, String display, List<Span> removableSpans, List<Wallet> wallets) {
@@ -545,5 +675,8 @@ public class QuickEntryParser {
     }
 
     private record TransferWallets(Wallet source, Wallet destination, WalletMatch sourceMatch, WalletMatch destinationMatch) {
+    }
+
+    private record AliasRule(CategoryType type, List<String> aliases, List<String> categoryNames) {
     }
 }

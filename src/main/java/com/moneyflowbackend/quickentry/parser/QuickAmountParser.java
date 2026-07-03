@@ -16,7 +16,7 @@ public class QuickAmountParser {
     private static final Pattern COMPOSITE_MILLION = Pattern.compile("(?<![\\d])(-?\\d+(?:[.,]\\d+)?)\\s*(?:tr|trieu)\\s*(\\d{1,3})(?:\\s*(?:k|nghin|ngan))?\\b");
     private static final Pattern MILLION = Pattern.compile("(?<![\\d])(-?\\d+(?:[.,]\\d+)?)\\s*(?:tr|trieu)\\b");
     private static final Pattern THOUSAND = Pattern.compile("(?<![\\d])(-?\\d+(?:[.,]\\d+)?)\\s*(?:k|nghin|ngan)\\b");
-    private static final Pattern GROUPED = Pattern.compile("(?<![\\d/:.-])-?\\d{1,3}(?:[.,]\\d{3})+(?:\\s*(?:d|vnd))?\\b");
+    private static final Pattern GROUPED = Pattern.compile("(?<![\\d/:.-])-?\\d{1,3}(?:[.,\\s]\\d{3})+(?:\\s*(?:d|vnd))?\\b");
     private static final Pattern VND = Pattern.compile("(?<![\\d/:.-])-?\\d+(?:\\s*(?:d|vnd))\\b");
     private static final Pattern BARE = Pattern.compile("(?<![\\d/:.-])-?\\d+(?![\\d/:.-])");
     private static final Pattern NEGATIVE = Pattern.compile("(^|\\s)-\\s*\\d");
@@ -152,8 +152,8 @@ public class QuickAmountParser {
 
     private BigDecimal groupedOrInteger(String value) {
         String compacted = value.trim();
-        if (compacted.matches("\\d{1,3}([.,]\\d{3})+")) {
-            return new BigDecimal(compacted.replace(".", "").replace(",", ""));
+        if (compacted.matches("\\d{1,3}([.,\\s]\\d{3})+")) {
+            return new BigDecimal(compacted.replace(".", "").replace(",", "").replaceAll("\\s+", ""));
         }
         return new BigDecimal(compacted);
     }
