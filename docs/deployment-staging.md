@@ -74,7 +74,9 @@ Create or update the Vercel staging project:
 - Repository: MoneyFlow frontend repository.
 - Branch: `release/staging-moneyflow-core`.
 - Framework: Vite.
-- Build command: `npm run build`.
+- Install command: `pnpm install --frozen-lockfile`.
+- Build command: `pnpm run build`.
+- Root directory: `moneyflow-ui/moneyflow-ui`.
 - Output directory: `dist`.
 
 Required frontend variable:
