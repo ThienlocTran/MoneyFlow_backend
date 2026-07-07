@@ -18,6 +18,7 @@ import com.moneyflowbackend.transaction.model.TransactionType;
 import com.moneyflowbackend.transaction.model.TransferDetail;
 import com.moneyflowbackend.transaction.repository.TransactionRepository;
 import com.moneyflowbackend.transaction.repository.TransferDetailRepository;
+import com.moneyflowbackend.voice.model.VoiceRecord;
 import com.moneyflowbackend.voice.repository.VoiceRecordRepository;
 import com.moneyflowbackend.wallet.model.Wallet;
 import com.moneyflowbackend.wallet.repository.WalletRepository;
@@ -52,8 +53,11 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 public class TransactionService {
@@ -69,8 +73,8 @@ public class TransactionService {
             TransactionStatus.POSTED);
     private static final Set<String> SORT_FIELDS = Set.of(
             "transactionDate",
-            "transactionTime",
             "createdAt",
+            "updatedAt",
             "amount");
 
     private final TransactionRepository transactionRepository;
@@ -184,9 +188,9 @@ public class TransactionService {
         Specification<Transaction> spec = buildListSpec(workspaceId, dateFrom, dateTo, type, status, walletId,
                 categoryId, jarId, attributedPersonId, sourceType, createdBy, search, includeDeleted);
 
-        Page<TransactionResponse> result = transactionRepository.findAll(spec, pageable).map(this::mapToResponse);
+        Page<Transaction> result = transactionRepository.findAll(spec, pageable);
         return TransactionPageResponse.builder()
-                .content(result.getContent())
+                .content(mapToResponses(result.getContent()))
                 .page(result.getNumber())
                 .size(result.getSize())
                 .totalElements(result.getTotalElements())
@@ -220,10 +224,10 @@ public class TransactionService {
 
         Specification<Transaction> spec = buildListSpec(workspaceId, dateFrom, dateTo, type, status, walletId,
                 categoryId, jarId, attributedPersonId, sourceType, createdBy, search, includeDeleted);
-        List<TransactionResponse> rows = transactionRepository
+        List<Transaction> exportTransactions = transactionRepository
                 .findAll(spec, PageRequest.of(0, EXPORT_LIMIT, parseSort(null)))
-                .map(this::mapToResponse)
                 .getContent();
+        List<TransactionResponse> rows = mapToResponses(exportTransactions);
 
         StringBuilder csv = new StringBuilder("\uFEFF");
         csv.append("transactionDate,type,amount,walletName,transferSourceWalletName,transferDestinationWalletName,categoryName,jarName,sourceType,createdByUsername,note,rawInput,isDeleted,createdAt,updatedAt\n");
@@ -748,7 +752,6 @@ public class TransactionService {
     private Sort parseSort(String sort) {
         Sort fallback = Sort.by(
                 Sort.Order.desc("transactionDate"),
-                Sort.Order.desc("transactionTime"),
                 Sort.Order.desc("createdAt"));
         if (sort == null || sort.isBlank()) {
             return fallback;
@@ -756,7 +759,7 @@ public class TransactionService {
         List<Sort.Order> orders = new ArrayList<>();
         for (String token : sort.split(";")) {
             String[] parts = token.split(",");
-            String field = parts[0].trim();
+            String field = sortField(parts[0].trim());
             if (!SORT_FIELDS.contains(field)) {
                 continue;
             }
@@ -764,6 +767,10 @@ public class TransactionService {
             orders.add(desc ? Sort.Order.desc(field) : Sort.Order.asc(field));
         }
         return orders.isEmpty() ? fallback : Sort.by(orders);
+    }
+
+    private String sortField(String field) {
+        return "date".equals(field) ? "transactionDate" : field;
     }
 
     private String workspaceCurrency(Workspace workspace) {
@@ -782,7 +789,47 @@ public class TransactionService {
         return "\"" + text.replace("\"", "\"\"") + "\"";
     }
 
+    private List<TransactionResponse> mapToResponses(List<Transaction> transactions) {
+        if (transactions.isEmpty()) {
+            return List.of();
+        }
+        List<UUID> transferIds = transactions.stream()
+                .filter(tx -> tx.getTransactionType() == TransactionType.TRANSFER)
+                .map(Transaction::getId)
+                .toList();
+        Map<UUID, TransferDetail> transferDetails = transferIds.isEmpty()
+                ? Map.of()
+                : transferDetailRepository.findAllWithWalletsByTransactionIdIn(transferIds).stream()
+                .collect(Collectors.toMap(TransferDetail::getTransactionId, Function.identity()));
+
+        List<UUID> voiceIds = transactions.stream()
+                .map(Transaction::getVoiceRecordId)
+                .filter(id -> id != null)
+                .toList();
+        Map<UUID, VoiceRecord> voiceRecords = voiceIds.isEmpty()
+                ? Map.of()
+                : voiceRecordRepository.findAllById(voiceIds).stream()
+                .collect(Collectors.toMap(VoiceRecord::getId, Function.identity()));
+
+        return transactions.stream()
+                .map(tx -> mapToResponse(tx, transferDetails, voiceRecords))
+                .toList();
+    }
+
     private TransactionResponse mapToResponse(Transaction tx) {
+        Map<UUID, TransferDetail> transferDetails = tx.getTransactionType() == TransactionType.TRANSFER
+                ? transferDetailRepository.findById(tx.getId()).map(td -> Map.of(tx.getId(), td)).orElseGet(Map::of)
+                : Map.of();
+        Map<UUID, VoiceRecord> voiceRecords = tx.getVoiceRecordId() == null
+                ? Map.of()
+                : voiceRecordRepository.findById(tx.getVoiceRecordId()).map(vr -> Map.of(tx.getVoiceRecordId(), vr)).orElseGet(Map::of);
+        return mapToResponse(tx, transferDetails, voiceRecords);
+    }
+
+    private TransactionResponse mapToResponse(
+            Transaction tx,
+            Map<UUID, TransferDetail> transferDetails,
+            Map<UUID, VoiceRecord> voiceRecords) {
         TransactionResponse.TransactionResponseBuilder builder = TransactionResponse.builder()
                 .id(tx.getId())
                 .type(tx.getTransactionType().name())
@@ -806,10 +853,11 @@ public class TransactionService {
                 .deletedAt(tx.getDeletedAt());
 
         if (tx.getVoiceRecordId() != null) {
-            voiceRecordRepository.findById(tx.getVoiceRecordId()).ifPresent(voiceRecord -> {
+            VoiceRecord voiceRecord = voiceRecords.get(tx.getVoiceRecordId());
+            if (voiceRecord != null) {
                 builder.voiceAudioAvailable(voiceRecord.getStoragePublicId() != null);
                 builder.voiceAudioStatus(voiceRecord.getVoiceStatus().name());
-            });
+            }
         }
 
         if (tx.getCreatedByUser() != null) {
@@ -827,7 +875,8 @@ public class TransactionService {
         }
 
         if (tx.getTransactionType() == TransactionType.TRANSFER) {
-            transferDetailRepository.findById(tx.getId()).ifPresent(td -> {
+            TransferDetail td = transferDetails.get(tx.getId());
+            if (td != null) {
                 builder.sourceWalletId(td.getSourceWallet().getId());
                 builder.sourceWalletName(td.getSourceWallet().getName());
                 builder.destinationWalletId(td.getDestinationWallet().getId());
@@ -838,7 +887,7 @@ public class TransactionService {
                         .destinationWalletId(td.getDestinationWallet().getId())
                         .destinationWalletName(td.getDestinationWallet().getName())
                         .build());
-            });
+            }
             return builder.build();
         }
 

@@ -291,6 +291,51 @@ class TransactionModuleIntegrationTests {
     }
 
     @Test
+    void transactionsListUsesServerPaginationAndSafeSortContract() {
+        TestContext owner = createContext("tx_page_contract", WorkspaceRole.OWNER);
+        TestContext viewer = createContext("tx_page_contract_viewer", WorkspaceRole.VIEWER);
+        TestContext other = createContext("tx_page_contract_other", WorkspaceRole.OWNER);
+        workspaceMemberRepository.save(WorkspaceMember.builder().workspace(owner.workspace()).user(viewer.user()).role(WorkspaceRole.VIEWER).build());
+        Wallet cash = wallet(owner, "Cash", WalletType.CASH, "0");
+        Category food = category(owner, "Food", CategoryType.EXPENSE, true, false);
+        Wallet otherCash = wallet(other, "Other cash", WalletType.CASH, "0");
+        Category otherFood = category(other, "Other food", CategoryType.EXPENSE, true, false);
+
+        for (int i = 0; i < 25; i++) {
+            TransactionRequest req = expenseReq("1", cash, food, "page meal " + i, TransactionStatus.POSTED);
+            req.setTransactionDate(LocalDate.of(2026, 8, 1).plusDays(i));
+            transactionService.create(owner.workspace().getId(), req, owner.user().getId());
+        }
+        TransactionResponse deleted = transactionService.create(owner.workspace().getId(),
+                expenseReq("1", cash, food, "deleted page meal", TransactionStatus.POSTED), owner.user().getId());
+        transactionService.delete(owner.workspace().getId(), deleted.getId(), owner.user().getId());
+        transactionService.create(other.workspace().getId(),
+                expenseReq("1", otherCash, otherFood, "other workspace meal", TransactionStatus.POSTED), other.user().getId());
+
+        TransactionPageResponse firstPage = transactionService.list(owner.workspace().getId(), null, null,
+                null, null, null, null, null, null, "page meal", false, 0, 20, "date,desc;badField,asc", owner.user().getId());
+        assertThat(firstPage.getContent()).hasSize(20);
+        assertThat(firstPage.getTotalElements()).isEqualTo(25);
+        assertThat(firstPage.getTotalPages()).isEqualTo(2);
+        assertThat(firstPage.getContent()).extracting(TransactionResponse::getDescription)
+                .doesNotContain("deleted page meal", "other workspace meal");
+
+        TransactionPageResponse secondPage = transactionService.list(owner.workspace().getId(), null, null,
+                null, null, null, null, null, null, "page meal", false, 1, 20, "updatedAt,desc", owner.user().getId());
+        assertThat(secondPage.getContent()).hasSize(5);
+
+        assertThat(transactionService.list(owner.workspace().getId(), null, null,
+                null, null, null, null, null, null, "page meal", false, 0, 500, "nope,desc", owner.user().getId()).getSize())
+                .isEqualTo(100);
+        assertThat(transactionService.list(owner.workspace().getId(), null, null,
+                null, null, null, null, null, null, null, true, 0, 100, null, owner.user().getId()).getContent())
+                .extracting(TransactionResponse::getId)
+                .contains(deleted.getId());
+        assertBusinessCode(() -> transactionService.list(owner.workspace().getId(), null, null,
+                null, null, null, null, null, null, null, true, 0, 20, null, viewer.user().getId()), "FORBIDDEN");
+    }
+
+    @Test
     void transactionFiltersSearchDeletedAndExportWorkSafely() {
         TestContext owner = createContext("tx_filter_export", WorkspaceRole.OWNER);
         TestContext editor = createContext("tx_filter_export_editor", WorkspaceRole.EDITOR);
