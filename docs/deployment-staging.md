@@ -25,6 +25,16 @@ Security hardening requirements:
 4. Let Flyway apply migrations on backend startup.
 5. Do not run Flyway repair unless a human explicitly approves a recovery plan.
 
+Startup must be read-only except Flyway schema migrations. Database repair, mass update, mojibake fixer, or other corrective data jobs require explicit maintenance approval, a recent backup, and a dry-run first. If a future maintenance runner is added, require all of:
+
+```text
+SPRING_PROFILES_ACTIVE=maintenance
+MONEYFLOW_ENABLE_DB_REPAIR=true
+MONEYFLOW_DB_REPAIR_DRY_RUN=true
+```
+
+Never run repair against production without backup and approval.
+
 Required backend DB variables:
 
 ```text
