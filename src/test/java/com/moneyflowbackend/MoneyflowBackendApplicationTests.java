@@ -23,7 +23,10 @@ import com.moneyflowbackend.workspace.repository.WorkspaceMemberRepository;
 import com.moneyflowbackend.workspace.repository.WorkspacePersonRepository;
 import com.moneyflowbackend.workspace.repository.WorkspaceRepository;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.ListableBeanFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.ApplicationRunner;
+import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
@@ -60,10 +63,25 @@ class MoneyflowBackendApplicationTests {
     @Autowired WalletRepository walletRepository;
     @Autowired PasswordEncoder passwordEncoder;
     @Autowired MockMvc mockMvc;
+    @Autowired ListableBeanFactory beanFactory;
     ObjectMapper objectMapper = new ObjectMapper();
 
     @Test
     void contextLoads() {
+    }
+
+    @Test
+    void defaultStartupDoesNotRegisterDatabaseRepairRunner() {
+        // Automatic DB repair is disabled by default because production startup must not mutate data.
+        assertThat(beanFactory.getBeansOfType(CommandLineRunner.class).keySet())
+                .noneMatch(this::isDatabaseRepairBeanName);
+        assertThat(beanFactory.getBeansOfType(ApplicationRunner.class).keySet())
+                .noneMatch(this::isDatabaseRepairBeanName);
+    }
+
+    private boolean isDatabaseRepairBeanName(String beanName) {
+        String lower = beanName.toLowerCase();
+        return lower.contains("fixdb") || lower.contains("repair") || lower.contains("mojibake");
     }
 
     @Test
