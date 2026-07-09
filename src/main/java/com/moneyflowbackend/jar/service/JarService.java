@@ -123,8 +123,16 @@ public class JarService {
         requireWritableMember(workspaceId, userId);
         Jar jar = findJarInWorkspace(workspaceId, jarId);
 
-        if (!active && categoryRepository.countByWorkspaceIdAndJarIdAndIsActiveTrue(workspaceId, jarId) > 0) {
-            throw new BusinessException("JAR_HAS_ACTIVE_CATEGORIES", "Jar has active categories");
+        if (active && !jar.isActive()) {
+            BigDecimal activeTotal = jarRepository.findAllByWorkspaceIdAndIsActiveTrue(workspaceId).stream()
+                    .filter(existing -> !existing.getId().equals(jarId))
+                    .map(Jar::getAllocationPercent)
+                    .filter(value -> value != null)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+            BigDecimal requestedTotal = activeTotal.add(jar.getAllocationPercent() == null ? BigDecimal.ZERO : jar.getAllocationPercent());
+            if (requestedTotal.compareTo(ONE_HUNDRED) > 0) {
+                throw new BusinessException("JAR_ALLOCATION_EXCEEDS_100", "Active jar allocation total cannot exceed 100%");
+            }
         }
 
         jar.setActive(active);

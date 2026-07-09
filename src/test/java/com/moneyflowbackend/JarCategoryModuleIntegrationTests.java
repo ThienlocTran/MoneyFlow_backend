@@ -137,9 +137,15 @@ class JarCategoryModuleIntegrationTests {
         jarService.toggleStatus(owner.workspace().getId(), second.getId(), true, owner.user().getId());
 
         CategoryResponse category = categoryService.create(owner.workspace().getId(), categoryRequest("Food", "EXPENSE", jar.getId()), owner.user().getId());
-        assertThatThrownBy(() -> jarService.toggleStatus(owner.workspace().getId(), jar.getId(), false, owner.user().getId()))
-                .isInstanceOf(BusinessException.class).extracting("code").isEqualTo("JAR_HAS_ACTIVE_CATEGORIES");
+        jarService.toggleStatus(owner.workspace().getId(), jar.getId(), false, owner.user().getId());
+        assertThat(jarRepository.findById(jar.getId()).orElseThrow().isActive()).isFalse();
+        jarService.toggleStatus(owner.workspace().getId(), jar.getId(), true, owner.user().getId());
         assertThat(category.getJarId()).isEqualTo(jar.getId());
+
+        JarResponse excessive = jarService.create(owner.workspace().getId(), jarRequest("BIG", "Big", "96"), owner.user().getId());
+        jarService.toggleStatus(owner.workspace().getId(), excessive.getId(), false, owner.user().getId());
+        assertThatThrownBy(() -> jarService.toggleStatus(owner.workspace().getId(), excessive.getId(), true, owner.user().getId()))
+                .isInstanceOf(BusinessException.class).extracting("code").isEqualTo("JAR_ALLOCATION_EXCEEDS_100");
 
         assertThat(jarService.list(owner.workspace().getId(), false, viewer.user().getId()).getJars()).hasSize(2);
         assertThatThrownBy(() -> jarService.create(owner.workspace().getId(), jarRequest("VIEW", "Viewer", "1"), viewer.user().getId()))

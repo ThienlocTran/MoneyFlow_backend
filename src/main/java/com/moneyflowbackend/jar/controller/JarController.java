@@ -1,5 +1,6 @@
 package com.moneyflowbackend.jar.controller;
 
+import com.moneyflowbackend.common.exception.BusinessException;
 import com.moneyflowbackend.dto.ApiResponse;
 import com.moneyflowbackend.jar.dto.JarAllocationRequest;
 import com.moneyflowbackend.jar.dto.JarListResponse;
@@ -22,6 +23,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.Map;
 import java.util.UUID;
 
 @RestController
@@ -71,8 +73,13 @@ public class JarController {
     public ResponseEntity<ApiResponse<Void>> setStatus(
             @PathVariable UUID workspaceId,
             @PathVariable UUID jarId,
-            @RequestParam boolean active) {
-        jarService.toggleStatus(workspaceId, jarId, active, currentUserId());
+            @RequestParam(required = false) Boolean active,
+            @RequestBody(required = false) Map<String, Boolean> body) {
+        Boolean requestedActive = active != null ? active : body == null ? null : body.get("active");
+        if (requestedActive == null) {
+            throw new BusinessException("VALIDATION_ERROR", "Jar active status is required");
+        }
+        jarService.toggleStatus(workspaceId, jarId, requestedActive, currentUserId());
         return ResponseEntity.ok(ApiResponse.ok("Jar status updated", null));
     }
 
