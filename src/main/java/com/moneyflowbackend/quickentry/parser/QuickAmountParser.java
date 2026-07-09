@@ -20,7 +20,7 @@ public class QuickAmountParser {
     private static final Pattern VND = Pattern.compile("(?<![\\d/:.-])-?\\d+(?:\\s*(?:d|vnd))\\b");
     private static final Pattern BARE = Pattern.compile("(?<![\\d/:.-])-?\\d+(?![\\d/:.-])");
     private static final Pattern NEGATIVE = Pattern.compile("(^|\\s)-\\s*\\d");
-    private static final Pattern DATE_OR_TIME = Pattern.compile("\\b\\d{4}-\\d{1,2}-\\d{1,2}\\b|\\b\\d{1,2}/\\d{1,2}(?:/\\d{2,4})?\\b|\\b\\d{1,2}:\\d{2}\\b|\\b\\d{1,2}h\\d{0,2}\\b");
+    private static final Pattern DATE_OR_TIME = Pattern.compile("\\b\\d{4}-\\d{1,2}-\\d{1,2}\\b|\\b\\d{1,2}/\\d{1,2}(?:/\\d{2,4})?\\b|\\b\\d{1,2}:\\d{2}\\b|\\b\\d{1,2}h\\d{0,2}\\b|\\b\\d{1,2}\\s*(?:gio|h|phut)\\b(?:\\s*(?:sang|trua|chieu|toi))?");
 
     public AmountParseResult parse(String input, String quickAmountUnit) {
         String normalized = VietnameseTextNormalizer.comparable(input);

@@ -33,6 +33,14 @@ public class QuickEntryParser {
             "chi", "mua", "tra", "dong", "dong tien", "thanh toan", "an", "uong", "cafe",
             "ca phe", "xang", "gui xe");
     private static final List<AliasRule> CATEGORY_ALIASES = List.of(
+            new AliasRule(CategoryType.EXPENSE, List.of("do an ngoai", "mua do an ngoai", "an ngoai"),
+                    List.of("Mua do an ngoai")),
+            new AliasRule(CategoryType.EXPENSE, List.of("cafe", "ca phe"),
+                    List.of("Mua nuoc uong")),
+            new AliasRule(CategoryType.EXPENSE, List.of("xang", "xang xe"),
+                    List.of("Xang xe")),
+            new AliasRule(CategoryType.EXPENSE, List.of("gui xe"),
+                    List.of("Gui xe")),
             new AliasRule(CategoryType.EXPENSE, List.of("an", "an sang", "an trua", "an toi", "com", "bun", "pho", "do an", "tien an"),
                     List.of("An uong", "An", "Food", "Food & Drink")),
             new AliasRule(CategoryType.EXPENSE, List.of("ca phe", "cafe", "coffee", "uong ca phe", "tra sua", "nuoc", "uong nuoc"),
@@ -308,7 +316,42 @@ public class QuickEntryParser {
             return Integer.compare(right.priority(), left.priority());
         });
         if (matches.isEmpty()) {
-            return matchAliasCategory(normalized, display, categories);
+            return matchDirectCategory(normalized, display, categories)
+                    .or(() -> matchAliasCategory(normalized, display, categories));
+        }
+        CategoryMatch top = matches.get(0);
+        boolean ambiguous = matches.stream()
+                .skip(1)
+                .anyMatch(match -> match.sameRank(top) && !match.category().getId().equals(top.category().getId()));
+        return Optional.of(ambiguous ? top.asAmbiguous() : top);
+    }
+
+    private Optional<CategoryMatch> matchDirectCategory(String normalized, String display, List<Category> categories) {
+        List<CategoryMatch> matches = new ArrayList<>();
+        for (Category category : categories == null ? List.<Category>of() : categories) {
+            if (!category.isActive() || category.isArchived()) {
+                continue;
+            }
+            if (category.getCategoryType() != CategoryType.INCOME && category.getCategoryType() != CategoryType.EXPENSE) {
+                continue;
+            }
+            String name = VietnameseTextNormalizer.comparable(category.getName());
+            PhraseMatch phraseMatch = findPhrase(normalized, name).orElse(null);
+            if (phraseMatch == null) {
+                continue;
+            }
+            int length = phraseMatch.end() - phraseMatch.start();
+            matches.add(new CategoryMatch(category, null, phraseMatch.exact(), length, 0, phraseMatch.start(), phraseMatch.end(), displayText(display, phraseMatch.start(), phraseMatch.end()), false));
+        }
+        matches.sort((left, right) -> {
+            int byExact = Boolean.compare(right.exact(), left.exact());
+            if (byExact != 0) return byExact;
+            int byLength = Integer.compare(right.length(), left.length());
+            if (byLength != 0) return byLength;
+            return Integer.compare(left.start(), right.start());
+        });
+        if (matches.isEmpty()) {
+            return Optional.empty();
         }
         CategoryMatch top = matches.get(0);
         boolean ambiguous = matches.stream()
@@ -421,7 +464,7 @@ public class QuickEntryParser {
             cleaned = cleaned.replace(amountCandidate.text(), " ");
         }
         cleaned = cleaned
-                .replaceAll("(?i)\\b(hom nay|hôm nay|ngay|ngày)\\b", " ")
+                .replaceAll("(?i)\\b(hôm nay|hom nay|ngày|ngay|nay)\\b", " ")
                 .replaceAll("\\b\\d{1,2}/\\d{1,2}(?:/\\d{2,4})?\\b", " ")
                 .replaceAll("\\s+", " ")
                 .trim();
