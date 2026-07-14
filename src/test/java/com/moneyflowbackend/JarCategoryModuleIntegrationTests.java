@@ -1,6 +1,8 @@
 package com.moneyflowbackend;
 
+import com.moneyflowbackend.auth.dto.LoginRequest;
 import com.moneyflowbackend.auth.dto.RegisterRequest;
+import com.moneyflowbackend.auth.dto.TokenResponse;
 import com.moneyflowbackend.auth.dto.UserResponse;
 import com.moneyflowbackend.auth.model.User;
 import com.moneyflowbackend.auth.repository.UserRepository;
@@ -19,6 +21,7 @@ import com.moneyflowbackend.category.service.CategoryService;
 import com.moneyflowbackend.common.exception.BusinessException;
 import com.moneyflowbackend.jar.dto.JarAllocationRequest;
 import com.moneyflowbackend.jar.dto.JarListResponse;
+import com.moneyflowbackend.jar.dto.JarMonthlyDetailResponse;
 import com.moneyflowbackend.jar.dto.JarMonthlySummaryResponse;
 import com.moneyflowbackend.jar.dto.JarReorderRequest;
 import com.moneyflowbackend.jar.dto.JarRequest;
@@ -36,8 +39,10 @@ import com.moneyflowbackend.workspace.repository.WorkspaceMemberRepository;
 import com.moneyflowbackend.workspace.repository.WorkspaceRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -47,12 +52,16 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 
 @SpringBootTest
+@AutoConfigureMockMvc
 @ActiveProfiles("test")
 @Transactional
 class JarCategoryModuleIntegrationTests {
 
+    @Autowired MockMvc mockMvc;
     @Autowired AuthService authService;
     @Autowired UserRepository userRepository;
     @Autowired WorkspaceRepository workspaceRepository;
@@ -310,6 +319,86 @@ class JarCategoryModuleIntegrationTests {
         assertThat(summary.getJars()).extracting(JarMonthlySummaryResponse.Item::getStatus).containsOnly("NO_INCOME");
     }
 
+    @Test
+    void monthlyDetailExplainsJarTotalsAndUsesOnlyActiveMappedCategories() {
+        TestContext ctx = createContext("jar_detail", WorkspaceRole.OWNER);
+        Jar nec = jar(ctx, "NEC", "Essential", "55", 1);
+        Category income = category(ctx, "Salary", CategoryType.INCOME, null, true);
+        Category food = category(ctx, "Food", CategoryType.EXPENSE, nec, true);
+        Category rent = category(ctx, "Rent", CategoryType.EXPENSE, nec, true);
+        Category old = category(ctx, "Old PASE", CategoryType.EXPENSE, nec, false);
+
+        tx(ctx, income, TransactionType.INCOME, "1000", "2026-07-01", "Salary");
+        tx(ctx, food, TransactionType.EXPENSE, "100", "2026-07-02", "Lunch");
+        tx(ctx, food, TransactionType.EXPENSE, "50", "2026-07-03", "Coffee");
+        tx(ctx, rent, TransactionType.EXPENSE, "300", "2026-07-04", "Rent");
+        tx(ctx, old, TransactionType.EXPENSE, "999", "2026-07-05", "Historical inactive");
+
+        JarMonthlyDetailResponse detail = jarService.monthlyDetail(ctx.workspace().getId(), nec.getId(), "2026-07", ctx.user().getId());
+
+        assertThat(detail.getMonth()).isEqualTo("2026-07");
+        assertThat(detail.getJarCode()).isEqualTo("NEC");
+        assertThat(detail.getMonthlyIncome()).isEqualByComparingTo("1000");
+        assertThat(detail.getTargetAmount()).isEqualByComparingTo("550");
+        assertThat(detail.getActualAmount()).isEqualByComparingTo("450");
+        assertThat(detail.getRemainingAmount()).isEqualByComparingTo("100");
+        assertThat(detail.getOverAmount()).isEqualByComparingTo("0");
+        assertThat(detail.getStatus()).isEqualTo("OK");
+        assertThat(detail.getFormulaText()).contains("targetAmount", "actualAmount");
+        assertThat(detail.getCategoryBreakdown()).extracting(JarMonthlyDetailResponse.CategoryBreakdown::getCategoryName)
+                .containsExactly("Rent", "Food");
+        assertThat(detail.getCategoryBreakdown().get(1).getTransactionCount()).isEqualTo(2);
+        assertThat(detail.getCategoryBreakdown().get(1).getTotalAmount()).isEqualByComparingTo("150");
+        assertThat(detail.getRecentTransactions()).extracting(JarMonthlyDetailResponse.RecentTransaction::getDescription)
+                .containsExactly("Rent", "Coffee", "Lunch");
+    }
+
+    @Test
+    void monthlyDetailEndpointReturnsWrappedBreakdown() throws Exception {
+        String username = "jar_detail_api_" + UUID.randomUUID().toString().substring(0, 8);
+        UserResponse user = authService.register(registerRequest(username));
+        TokenResponse token = authService.login(loginRequest(user.getUsername()));
+        Workspace workspace = workspaceRepository.findAllByUserId(user.getId()).get(0);
+        Jar nec = jarRepository.findAllByWorkspaceIdOrderByDisplayOrderAscNameAsc(workspace.getId()).stream()
+                .filter(jar -> "NEC".equals(jar.getCode()))
+                .findFirst()
+                .orElseThrow();
+        Category income = categoryRepository.findAllByWorkspaceIdOrderByDisplayOrderAsc(workspace.getId()).stream()
+                .filter(category -> category.getCategoryType() == CategoryType.INCOME)
+                .findFirst()
+                .orElseThrow();
+        Category food = categoryRepository.findAllByWorkspaceIdOrderByDisplayOrderAsc(workspace.getId()).stream()
+                .filter(category -> category.getCategoryType() == CategoryType.EXPENSE && category.getJar() != null && nec.getId().equals(category.getJar().getId()))
+                .findFirst()
+                .orElseThrow();
+        transactionRepository.save(Transaction.builder()
+                .workspace(workspace)
+                .createdByUser(userRepository.findById(user.getId()).orElseThrow())
+                .category(income)
+                .transactionType(TransactionType.INCOME)
+                .amount(new BigDecimal("1000"))
+                .transactionDate(LocalDate.parse("2026-07-01"))
+                .build());
+        transactionRepository.save(Transaction.builder()
+                .workspace(workspace)
+                .createdByUser(userRepository.findById(user.getId()).orElseThrow())
+                .category(food)
+                .transactionType(TransactionType.EXPENSE)
+                .amount(new BigDecimal("100"))
+                .transactionDate(LocalDate.parse("2026-07-02"))
+                .description("Lunch")
+                .build());
+
+        mockMvc.perform(get("/api/workspaces/" + workspace.getId() + "/jars/" + nec.getId() + "/monthly-detail")
+                        .param("month", "2026-07")
+                        .header("Authorization", "Bearer " + token.getAccessToken()))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk())
+                .andExpect(jsonPath("$.data.month").value("2026-07"))
+                .andExpect(jsonPath("$.data.jarCode").value("NEC"))
+                .andExpect(jsonPath("$.data.categoryBreakdown[0].categoryName").value(food.getName()))
+                .andExpect(jsonPath("$.data.recentTransactions[0].description").value("Lunch"));
+    }
+
     private TestContext createContext(String prefix, WorkspaceRole role) {
         String suffix = UUID.randomUUID().toString().substring(0, 8);
         User user = userRepository.save(User.builder()
@@ -336,6 +425,13 @@ class JarCategoryModuleIntegrationTests {
         req.setEmail(prefix + "_" + suffix + "@example.com");
         req.setPassword("StrongPassword123");
         req.setFullName("Bootstrap User");
+        return req;
+    }
+
+    private LoginRequest loginRequest(String username) {
+        LoginRequest req = new LoginRequest();
+        req.setIdentifier(username);
+        req.setPassword("StrongPassword123");
         return req;
     }
 
@@ -384,6 +480,10 @@ class JarCategoryModuleIntegrationTests {
     }
 
     private void tx(TestContext ctx, Category category, TransactionType type, String amount, String date) {
+        tx(ctx, category, type, amount, date, null);
+    }
+
+    private void tx(TestContext ctx, Category category, TransactionType type, String amount, String date, String description) {
         transactionRepository.save(Transaction.builder()
                 .workspace(ctx.workspace())
                 .createdByUser(ctx.user())
@@ -391,6 +491,7 @@ class JarCategoryModuleIntegrationTests {
                 .transactionType(type)
                 .amount(new BigDecimal(amount))
                 .transactionDate(LocalDate.parse(date))
+                .description(description)
                 .build());
     }
 

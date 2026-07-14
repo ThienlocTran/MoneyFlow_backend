@@ -5,6 +5,7 @@ import com.moneyflowbackend.category.model.CategoryType;
 import com.moneyflowbackend.common.exception.BusinessException;
 import com.moneyflowbackend.jar.dto.JarAllocationRequest;
 import com.moneyflowbackend.jar.dto.JarListResponse;
+import com.moneyflowbackend.jar.dto.JarMonthlyDetailResponse;
 import com.moneyflowbackend.jar.dto.JarMonthlySummaryResponse;
 import com.moneyflowbackend.jar.dto.JarReorderRequest;
 import com.moneyflowbackend.jar.dto.JarRequest;
@@ -18,6 +19,7 @@ import com.moneyflowbackend.workspace.model.WorkspaceMember;
 import com.moneyflowbackend.workspace.model.WorkspaceRole;
 import com.moneyflowbackend.workspace.repository.WorkspaceMemberRepository;
 import com.moneyflowbackend.workspace.repository.WorkspaceRepository;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -92,6 +94,34 @@ public class JarService {
                 .inactiveUnmappedCategoryCount(categoryRepository.countInactiveOrArchivedUnmapped(workspaceId, CategoryType.EXPENSE))
                 .overallStatus(overallStatus(items))
                 .jars(items)
+                .build();
+    }
+
+    @Transactional(readOnly = true)
+    public JarMonthlyDetailResponse monthlyDetail(UUID workspaceId, UUID jarId, String rawMonth, UUID userId) {
+        requireActiveMember(workspaceId, userId);
+        Jar jar = findJarInWorkspace(workspaceId, jarId);
+        YearMonth month = parseMonth(rawMonth);
+        LocalDate startDate = month.atDay(1);
+        LocalDate endDate = month.plusMonths(1).atDay(1);
+        BigDecimal monthlyIncome = nz(transactionRepository.sumPostedByTypeInMonth(workspaceId, TransactionType.INCOME, startDate, endDate));
+        JarMonthlySummaryResponse.Item item = monthlyItem(workspaceId, jar, monthlyIncome, startDate, endDate);
+
+        return JarMonthlyDetailResponse.builder()
+                .month(month.toString())
+                .jarId(jar.getId())
+                .jarCode(jar.getCode())
+                .jarName(jar.getName())
+                .targetPercent(item.getTargetPercent())
+                .monthlyIncome(monthlyIncome)
+                .targetAmount(item.getTargetAmount())
+                .actualAmount(item.getActualAmount())
+                .remainingAmount(item.getRemainingAmount())
+                .overAmount(item.getOverAmount())
+                .status(item.getStatus())
+                .formulaText("targetAmount = monthlyIncome * targetPercent / 100; actualAmount = monthly expense where transaction.category.jar = jar")
+                .categoryBreakdown(categoryBreakdown(workspaceId, jarId, startDate, endDate))
+                .recentTransactions(recentTransactions(workspaceId, jarId, startDate, endDate))
                 .build();
     }
 
@@ -331,6 +361,30 @@ public class JarService {
         if (items.stream().allMatch(item -> "NO_INCOME".equals(item.getStatus()))) return "NO_INCOME";
         if (items.stream().allMatch(item -> "NO_DATA".equals(item.getStatus()))) return "NO_DATA";
         return "OK";
+    }
+
+    private List<JarMonthlyDetailResponse.CategoryBreakdown> categoryBreakdown(
+            UUID workspaceId, UUID jarId, LocalDate startDate, LocalDate endDate) {
+        return transactionRepository.sumPostedExpenseByJarCategoryInMonth(workspaceId, jarId, startDate, endDate).stream()
+                .map(row -> JarMonthlyDetailResponse.CategoryBreakdown.builder()
+                        .categoryId((UUID) row[0])
+                        .categoryName((String) row[1])
+                        .transactionCount((Long) row[2])
+                        .totalAmount(nz((BigDecimal) row[3]))
+                        .build())
+                .toList();
+    }
+
+    private List<JarMonthlyDetailResponse.RecentTransaction> recentTransactions(
+            UUID workspaceId, UUID jarId, LocalDate startDate, LocalDate endDate) {
+        return transactionRepository.findRecentPostedExpenseByJarInMonth(workspaceId, jarId, startDate, endDate, PageRequest.of(0, 10)).stream()
+                .map(row -> JarMonthlyDetailResponse.RecentTransaction.builder()
+                        .date((LocalDate) row[0])
+                        .categoryName((String) row[1])
+                        .description((String) row[2])
+                        .amount(nz((BigDecimal) row[3]))
+                        .build())
+                .toList();
     }
 
     private YearMonth parseMonth(String rawMonth) {

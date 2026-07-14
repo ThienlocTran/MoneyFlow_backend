@@ -2,6 +2,7 @@ package com.moneyflowbackend.transaction.repository;
 
 import com.moneyflowbackend.transaction.model.Transaction;
 import com.moneyflowbackend.transaction.model.TransactionSourceType;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
@@ -112,4 +113,48 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID>,
             @Param("jarId") UUID jarId,
             @Param("startDate") LocalDate startDate,
             @Param("endDate") LocalDate endDate);
+
+    @Query("""
+            SELECT c.id, c.name, COUNT(t), COALESCE(SUM(t.amount), 0)
+            FROM Transaction t
+            JOIN t.category c
+            WHERE t.workspace.id = :workspaceId
+              AND c.jar.id = :jarId
+              AND c.isActive = true
+              AND c.isArchived = false
+              AND t.transactionType = com.moneyflowbackend.transaction.model.TransactionType.EXPENSE
+              AND t.transactionStatus = com.moneyflowbackend.transaction.model.TransactionStatus.POSTED
+              AND t.deletedAt IS NULL
+              AND t.transactionDate >= :startDate
+              AND t.transactionDate < :endDate
+            GROUP BY c.id, c.name
+            ORDER BY COALESCE(SUM(t.amount), 0) DESC, c.name ASC
+            """)
+    List<Object[]> sumPostedExpenseByJarCategoryInMonth(
+            @Param("workspaceId") UUID workspaceId,
+            @Param("jarId") UUID jarId,
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate);
+
+    @Query("""
+            SELECT t.transactionDate, c.name, t.description, t.amount
+            FROM Transaction t
+            JOIN t.category c
+            WHERE t.workspace.id = :workspaceId
+              AND c.jar.id = :jarId
+              AND c.isActive = true
+              AND c.isArchived = false
+              AND t.transactionType = com.moneyflowbackend.transaction.model.TransactionType.EXPENSE
+              AND t.transactionStatus = com.moneyflowbackend.transaction.model.TransactionStatus.POSTED
+              AND t.deletedAt IS NULL
+              AND t.transactionDate >= :startDate
+              AND t.transactionDate < :endDate
+            ORDER BY t.transactionDate DESC, t.createdAt DESC
+            """)
+    List<Object[]> findRecentPostedExpenseByJarInMonth(
+            @Param("workspaceId") UUID workspaceId,
+            @Param("jarId") UUID jarId,
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate,
+            Pageable pageable);
 }

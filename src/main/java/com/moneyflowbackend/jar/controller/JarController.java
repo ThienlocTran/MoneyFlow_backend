@@ -4,6 +4,7 @@ import com.moneyflowbackend.common.exception.BusinessException;
 import com.moneyflowbackend.dto.ApiResponse;
 import com.moneyflowbackend.jar.dto.JarAllocationRequest;
 import com.moneyflowbackend.jar.dto.JarListResponse;
+import com.moneyflowbackend.jar.dto.JarMonthlyDetailResponse;
 import com.moneyflowbackend.jar.dto.JarMonthlySummaryResponse;
 import com.moneyflowbackend.jar.dto.JarReorderRequest;
 import com.moneyflowbackend.jar.dto.JarRequest;
@@ -51,6 +52,15 @@ public class JarController {
             @PathVariable UUID jarId) {
         JarResponse res = jarService.get(workspaceId, jarId, currentUserId());
         return ResponseEntity.ok(ApiResponse.ok("Jar loaded", res));
+    }
+
+    @GetMapping("/{jarId}/monthly-detail")
+    public ResponseEntity<ApiResponse<JarMonthlyDetailResponse>> monthlyDetail(
+            @PathVariable UUID workspaceId,
+            @PathVariable UUID jarId,
+            @RequestParam String month) {
+        JarMonthlyDetailResponse res = jarService.monthlyDetail(workspaceId, jarId, month, currentUserId());
+        return ResponseEntity.ok(ApiResponse.ok("Jar monthly detail loaded", res));
     }
 
     @PostMapping
