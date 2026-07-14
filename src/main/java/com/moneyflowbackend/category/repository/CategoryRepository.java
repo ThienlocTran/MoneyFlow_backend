@@ -30,6 +30,29 @@ public interface CategoryRepository extends JpaRepository<Category, UUID> {
             @Param("workspaceId") UUID workspaceId,
             @Param("categoryType") CategoryType categoryType);
 
+    @Query("""
+            SELECT c FROM Category c
+            LEFT JOIN FETCH c.jar
+            WHERE c.workspace.id = :workspaceId
+              AND (:includeInactive = true OR c.isActive = true)
+              AND (:includeArchived = true OR c.isArchived = false)
+              AND (:categoryType IS NULL OR c.categoryType = :categoryType)
+              AND (:jarId IS NULL OR c.jar.id = :jarId)
+              AND (:active IS NULL OR c.isActive = :active)
+              AND (:archived IS NULL OR c.isArchived = :archived)
+              AND (:quickAction IS NULL OR c.isQuickAction = :quickAction)
+            ORDER BY c.displayOrder ASC
+            """)
+    List<Category> findList(
+            @Param("workspaceId") UUID workspaceId,
+            @Param("categoryType") CategoryType categoryType,
+            @Param("jarId") UUID jarId,
+            @Param("active") Boolean active,
+            @Param("archived") Boolean archived,
+            @Param("quickAction") Boolean quickAction,
+            @Param("includeInactive") boolean includeInactive,
+            @Param("includeArchived") boolean includeArchived);
+
     boolean existsByWorkspaceIdAndCategoryTypeAndNameIgnoreCase(UUID workspaceId, CategoryType categoryType, String name);
     boolean existsByWorkspaceIdAndCategoryTypeAndNameIgnoreCaseAndIdNot(UUID workspaceId, CategoryType categoryType, String name, UUID id);
 }

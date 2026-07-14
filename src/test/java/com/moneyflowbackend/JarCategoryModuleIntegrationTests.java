@@ -215,6 +215,11 @@ class JarCategoryModuleIntegrationTests {
                 .isInstanceOf(BusinessException.class).extracting("code").isEqualTo("CATEGORY_TYPE_CHANGE_NOT_ALLOWED");
         assertThatThrownBy(() -> categoryService.delete(ctx.workspace().getId(), tracked.getId(), ctx.user().getId()))
                 .isInstanceOf(BusinessException.class).extracting("code").isEqualTo("CATEGORY_IN_USE");
+        assertThat(categoryService.list(ctx.workspace().getId(), "EXPENSE", jar.getId(), null, null, null, true, true, ctx.user().getId()))
+                .filteredOn(category -> category.getId().equals(tracked.getId()))
+                .singleElement()
+                .extracting(CategoryResponse::getUsageCount, CategoryResponse::getKeywordCount)
+                .containsExactly(1L, 0L);
 
         CategoryResponse unused = categoryService.create(ctx.workspace().getId(), categoryRequest("Unused", "EXPENSE", jar.getId()), ctx.user().getId());
         categoryService.delete(ctx.workspace().getId(), unused.getId(), ctx.user().getId());
@@ -235,6 +240,11 @@ class JarCategoryModuleIntegrationTests {
         assertThat(keyword.getKeyword()).isEqualTo("ca phe");
         assertThat(keyword.isUserLearned()).isTrue();
         assertThat(keywordService.list(ctx.workspace().getId(), food.getId(), ctx.user().getId())).extracting(CategoryKeywordResponse::getId).containsExactly(keyword.getId());
+        assertThat(categoryService.list(ctx.workspace().getId(), "EXPENSE", jar.getId(), null, null, null, false, false, ctx.user().getId()))
+                .filteredOn(category -> category.getId().equals(food.getId()))
+                .singleElement()
+                .extracting(CategoryResponse::getKeywordCount, CategoryResponse::getUsageCount)
+                .containsExactly(1L, 0L);
 
         assertThatThrownBy(() -> keywordService.create(ctx.workspace().getId(), transport.getId(), keywordRequest("CA PHE", 1), ctx.user().getId()))
                 .isInstanceOf(BusinessException.class).extracting("code").isEqualTo("KEYWORD_ALREADY_EXISTS");

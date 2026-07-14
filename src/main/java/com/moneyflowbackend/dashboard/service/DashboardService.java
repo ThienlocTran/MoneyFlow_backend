@@ -24,13 +24,7 @@ import java.time.YearMonth;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
-import java.util.Objects;
-import java.util.HashSet;
-import java.util.Set;
 import java.util.UUID;
-import java.util.function.Function;
-import java.util.stream.Collectors;
 
 @Service
 public class DashboardService {
@@ -76,6 +70,7 @@ public class DashboardService {
         List<DashboardCategoryResponse> expenseByCategory = categoryBreakdown(workspaceId, current.from(), current.to(), TransactionType.EXPENSE, currentTotals.expense(), createdBy);
         List<DashboardJarResponse> expenseByJar = jarBreakdown(workspaceId, current.from(), current.to(), currentTotals.expense(), createdBy);
         List<DashboardWalletBalanceResponse> walletBalances = walletBalances(workspaceId, userId);
+        List<DashboardCategoryChangeResponse> categoryChanges = categoryChanges(workspaceId, current, previous, createdBy);
 
         return DashboardResponse.builder()
                 .period(DashboardPeriodResponse.builder()
@@ -103,8 +98,8 @@ public class DashboardService {
                 .expenseByCategory(expenseByCategory)
                 .expenseByJar(expenseByJar)
                 .incomeByCategory(categoryBreakdown(workspaceId, current.from(), current.to(), TransactionType.INCOME, currentTotals.income(), createdBy))
-                .topIncreases(topCategoryChanges(workspaceId, current, previous, true, createdBy))
-                .topDecreases(topCategoryChanges(workspaceId, current, previous, false, createdBy))
+                .topIncreases(topCategoryChanges(categoryChanges, true))
+                .topDecreases(topCategoryChanges(categoryChanges, false))
                 .walletBalances(walletBalances)
                 .recentTransactions(recentTransactions(workspaceId, current.from(), current.to(), createdBy))
                 .memberBreakdown(memberBreakdown(workspaceId, current.from(), current.to(), createdBy))
@@ -143,37 +138,27 @@ public class DashboardService {
     }
 
     private Totals totals(UUID workspaceId, LocalDate from, LocalDate to, UUID createdBy) {
-        BigDecimal income = sumByType(workspaceId, from, to, TransactionType.INCOME, createdBy);
-        BigDecimal expense = sumByType(workspaceId, from, to, TransactionType.EXPENSE, createdBy);
         var query = entityManager.createQuery(
-                "SELECT COUNT(t) FROM Transaction t " +
+                "SELECT " +
+                        "COALESCE(SUM(CASE WHEN t.transactionType = :income THEN t.amount ELSE 0 END), 0), " +
+                        "COALESCE(SUM(CASE WHEN t.transactionType = :expense THEN t.amount ELSE 0 END), 0), " +
+                        "COUNT(t) " +
+                        "FROM Transaction t " +
                         "WHERE t.workspace.id = :workspaceId " + postedFilter() +
                         "AND t.transactionDate BETWEEN :from AND :to " +
                         "AND t.transactionType IN (:income, :expense) " +
-                        createdByFilter(createdBy), Long.class)
+                        createdByFilter(createdBy))
                 .setParameter("workspaceId", workspaceId)
                 .setParameter("from", from)
                 .setParameter("to", to)
                 .setParameter("income", TransactionType.INCOME)
                 .setParameter("expense", TransactionType.EXPENSE);
         setCreatedBy(query, createdBy);
-        Long count = query.getSingleResult();
+        Object[] row = (Object[]) query.getSingleResult();
+        BigDecimal income = (BigDecimal) row[0];
+        BigDecimal expense = (BigDecimal) row[1];
+        Long count = (Long) row[2];
         return new Totals(income, expense, income.subtract(expense), count);
-    }
-
-    private BigDecimal sumByType(UUID workspaceId, LocalDate from, LocalDate to, TransactionType type, UUID createdBy) {
-        var query = entityManager.createQuery(
-                "SELECT COALESCE(SUM(t.amount), 0) FROM Transaction t " +
-                        "WHERE t.workspace.id = :workspaceId " + postedFilter() +
-                        "AND t.transactionDate BETWEEN :from AND :to " +
-                        "AND t.transactionType = :type " +
-                        createdByFilter(createdBy), BigDecimal.class)
-                .setParameter("workspaceId", workspaceId)
-                .setParameter("from", from)
-                .setParameter("to", to)
-                .setParameter("type", type);
-        setCreatedBy(query, createdBy);
-        return query.getSingleResult();
     }
 
     private BigDecimal walletTotal(List<DashboardWalletBalanceResponse> wallets) {
@@ -297,15 +282,8 @@ public class DashboardService {
                 .toList();
     }
 
-    private List<DashboardCategoryChangeResponse> topCategoryChanges(UUID workspaceId, Period current, Period previous, boolean increases, UUID createdBy) {
-        Map<UUID, CategoryAmount> currentByCategory = categoryAmounts(workspaceId, current.from(), current.to(), createdBy);
-        Map<UUID, CategoryAmount> previousByCategory = categoryAmounts(workspaceId, previous.from(), previous.to(), createdBy);
-        Set<UUID> categoryIds = new HashSet<>(currentByCategory.keySet());
-        categoryIds.addAll(previousByCategory.keySet());
-
-        return categoryIds.stream()
-                .map(id -> categoryChange(currentByCategory.get(id), previousByCategory.get(id)))
-                .filter(Objects::nonNull)
+    private List<DashboardCategoryChangeResponse> topCategoryChanges(List<DashboardCategoryChangeResponse> changes, boolean increases) {
+        return changes.stream()
                 .filter(change -> increases
                         ? change.getDelta().compareTo(BigDecimal.ZERO) > 0
                         : change.getDelta().compareTo(BigDecimal.ZERO) < 0)
@@ -317,45 +295,46 @@ public class DashboardService {
     }
 
     @SuppressWarnings("unchecked")
-    private Map<UUID, CategoryAmount> categoryAmounts(UUID workspaceId, LocalDate from, LocalDate to, UUID createdBy) {
+    private List<DashboardCategoryChangeResponse> categoryChanges(UUID workspaceId, Period current, Period previous, UUID createdBy) {
         var query = entityManager.createQuery(
-                "SELECT c.id, c.name, j.id, j.name, SUM(t.amount) " +
+                "SELECT c.id, c.name, j.id, j.name, " +
+                        "COALESCE(SUM(CASE WHEN t.transactionDate BETWEEN :currentFrom AND :currentTo THEN t.amount ELSE 0 END), 0), " +
+                        "COALESCE(SUM(CASE WHEN t.transactionDate BETWEEN :previousFrom AND :previousTo THEN t.amount ELSE 0 END), 0) " +
                         "FROM Transaction t JOIN t.category c LEFT JOIN c.jar j " +
                         "WHERE t.workspace.id = :workspaceId " + postedFilter() +
-                        "AND t.transactionDate BETWEEN :from AND :to " +
+                        "AND t.transactionDate BETWEEN :previousFrom AND :currentTo " +
                         "AND t.transactionType = :type " +
                         createdByFilter(createdBy) +
                         "GROUP BY c.id, c.name, j.id, j.name")
                 .setParameter("workspaceId", workspaceId)
-                .setParameter("from", from)
-                .setParameter("to", to)
+                .setParameter("currentFrom", current.from())
+                .setParameter("currentTo", current.to())
+                .setParameter("previousFrom", previous.from())
+                .setParameter("previousTo", previous.to())
                 .setParameter("type", TransactionType.EXPENSE);
         setCreatedBy(query, createdBy);
         List<Object[]> rows = query.getResultList();
         return rows.stream()
-                .map(row -> new CategoryAmount((UUID) row[0], (String) row[1], (UUID) row[2], (String) row[3], (BigDecimal) row[4]))
-                .collect(Collectors.toMap(CategoryAmount::categoryId, Function.identity()));
-    }
-
-    private DashboardCategoryChangeResponse categoryChange(CategoryAmount current, CategoryAmount previous) {
-        CategoryAmount category = current != null ? current : previous;
-        if (category == null) return null;
-        BigDecimal currentAmount = current == null ? BigDecimal.ZERO : current.amount();
-        BigDecimal previousAmount = previous == null ? BigDecimal.ZERO : previous.amount();
-        BigDecimal delta = currentAmount.subtract(previousAmount);
-        if (delta.compareTo(BigDecimal.ZERO) == 0) return null;
-        Change change = change(currentAmount, previousAmount);
-        return DashboardCategoryChangeResponse.builder()
-                .categoryId(category.categoryId())
-                .categoryName(category.categoryName())
-                .jarId(category.jarId())
-                .jarName(category.jarName())
-                .currentAmount(currentAmount)
-                .previousAmount(previousAmount)
-                .delta(delta)
-                .percent(change.value())
-                .newCategory(change.isNew())
-                .build();
+                .map(row -> {
+                    BigDecimal currentAmount = (BigDecimal) row[4];
+                    BigDecimal previousAmount = (BigDecimal) row[5];
+                    BigDecimal delta = currentAmount.subtract(previousAmount);
+                    if (delta.compareTo(BigDecimal.ZERO) == 0) return null;
+                    Change change = change(currentAmount, previousAmount);
+                    return DashboardCategoryChangeResponse.builder()
+                            .categoryId((UUID) row[0])
+                            .categoryName((String) row[1])
+                            .jarId((UUID) row[2])
+                            .jarName((String) row[3])
+                            .currentAmount(currentAmount)
+                            .previousAmount(previousAmount)
+                            .delta(delta)
+                            .percent(change.value())
+                            .newCategory(change.isNew())
+                            .build();
+                })
+                .filter(change -> change != null)
+                .toList();
     }
 
     private DashboardComparisonResponse comparison(Totals current, Totals previous) {
@@ -513,7 +492,6 @@ public class DashboardService {
     private enum ComparisonMode { SAME_PERIOD, FULL_MONTH }
     private record Period(LocalDate from, LocalDate to) {}
     private record Totals(BigDecimal income, BigDecimal expense, BigDecimal net, long count) {}
-    private record CategoryAmount(UUID categoryId, String categoryName, UUID jarId, String jarName, BigDecimal amount) {}
     private record Change(Double value, String label, boolean isNew) {
         double valueOrZero() { return value == null ? 0.0 : Math.abs(value); }
     }

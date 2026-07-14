@@ -21,8 +21,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -65,16 +67,9 @@ public class CategoryService {
             UUID userId) {
         requireActiveMember(workspaceId, userId);
         CategoryType parsedType = type == null || type.isBlank() ? null : parseType(type);
-        return categoryRepository.findAllByWorkspaceIdOrderByDisplayOrderAsc(workspaceId).stream()
-                .filter(category -> includeInactive || category.isActive())
-                .filter(category -> includeArchived || !category.isArchived())
-                .filter(category -> parsedType == null || category.getCategoryType() == parsedType)
-                .filter(category -> jarId == null || (category.getJar() != null && category.getJar().getId().equals(jarId)))
-                .filter(category -> active == null || category.isActive() == active)
-                .filter(category -> archived == null || category.isArchived() == archived)
-                .filter(category -> quickAction == null || category.isQuickAction() == quickAction)
-                .map(this::mapToResponse)
-                .collect(Collectors.toList());
+        List<Category> categories = categoryRepository.findList(
+                workspaceId, parsedType, jarId, active, archived, quickAction, includeInactive, includeArchived);
+        return mapToResponses(workspaceId, categories);
     }
 
     @Transactional(readOnly = true)
@@ -300,7 +295,34 @@ public class CategoryService {
                 .orElse(0) + 1;
     }
 
+    private List<CategoryResponse> mapToResponses(UUID workspaceId, List<Category> categories) {
+        List<UUID> categoryIds = categories.stream().map(Category::getId).toList();
+        Map<UUID, Long> keywordCounts = countMap(categoryIds.isEmpty() ? List.of() : keywordRepository.countByCategoryIds(categoryIds));
+        Map<UUID, Long> usageCounts = countMap(categoryIds.isEmpty() ? List.of() : transactionRepository.countByWorkspaceIdAndCategoryIds(workspaceId, categoryIds));
+        return categories.stream()
+                .map(category -> mapToResponse(
+                        category,
+                        keywordCounts.getOrDefault(category.getId(), 0L),
+                        usageCounts.getOrDefault(category.getId(), 0L)))
+                .collect(Collectors.toList());
+    }
+
+    private Map<UUID, Long> countMap(List<Object[]> rows) {
+        Map<UUID, Long> counts = new HashMap<>();
+        for (Object[] row : rows) {
+            counts.put((UUID) row[0], (Long) row[1]);
+        }
+        return counts;
+    }
+
     private CategoryResponse mapToResponse(Category category) {
+        return mapToResponse(
+                category,
+                keywordRepository.countByCategoryId(category.getId()),
+                transactionRepository.countByWorkspaceIdAndCategoryId(category.getWorkspace().getId(), category.getId()));
+    }
+
+    private CategoryResponse mapToResponse(Category category, long keywordCount, long usageCount) {
         return CategoryResponse.builder()
                 .id(category.getId())
                 .workspaceId(category.getWorkspace().getId())
@@ -313,8 +335,8 @@ public class CategoryService {
                 .isActive(category.isActive())
                 .isArchived(category.isArchived())
                 .displayOrder(category.getDisplayOrder())
-                .keywordCount(keywordRepository.countByCategoryId(category.getId()))
-                .usageCount(transactionRepository.countByWorkspaceIdAndCategoryId(category.getWorkspace().getId(), category.getId()))
+                .keywordCount(keywordCount)
+                .usageCount(usageCount)
                 .createdAt(category.getCreatedAt())
                 .updatedAt(category.getUpdatedAt())
                 .build();

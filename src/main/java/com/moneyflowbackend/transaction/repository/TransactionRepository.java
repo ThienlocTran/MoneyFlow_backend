@@ -10,6 +10,7 @@ import org.springframework.data.repository.query.Param;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -60,6 +61,16 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID>,
     long countJarUsage(
             @Param("workspaceId") UUID workspaceId,
             @Param("jarId") UUID jarId);
+
+    @Query("""
+            SELECT t.category.id, COUNT(t) FROM Transaction t
+            WHERE t.workspace.id = :workspaceId
+              AND t.category.id IN :categoryIds
+            GROUP BY t.category.id
+            """)
+    List<Object[]> countByWorkspaceIdAndCategoryIds(
+            @Param("workspaceId") UUID workspaceId,
+            @Param("categoryIds") Collection<UUID> categoryIds);
 
     @Query("""
             SELECT COALESCE(SUM(t.amount), 0) FROM Transaction t
