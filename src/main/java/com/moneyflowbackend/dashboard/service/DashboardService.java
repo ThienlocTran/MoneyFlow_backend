@@ -5,7 +5,6 @@ import com.moneyflowbackend.common.exception.BusinessException;
 import com.moneyflowbackend.dashboard.dto.*;
 import com.moneyflowbackend.transaction.model.TransactionStatus;
 import com.moneyflowbackend.transaction.model.TransactionType;
-import com.moneyflowbackend.wallet.model.Wallet;
 import com.moneyflowbackend.wallet.service.WalletService;
 import com.moneyflowbackend.workspace.model.Workspace;
 import com.moneyflowbackend.workspace.repository.WorkspaceMemberRepository;
@@ -76,6 +75,7 @@ public class DashboardService {
         Totals previousTotals = totals(workspaceId, previous.from(), previous.to(), createdBy);
         List<DashboardCategoryResponse> expenseByCategory = categoryBreakdown(workspaceId, current.from(), current.to(), TransactionType.EXPENSE, currentTotals.expense(), createdBy);
         List<DashboardJarResponse> expenseByJar = jarBreakdown(workspaceId, current.from(), current.to(), currentTotals.expense(), createdBy);
+        List<DashboardWalletBalanceResponse> walletBalances = walletBalances(workspaceId, userId);
 
         return DashboardResponse.builder()
                 .period(DashboardPeriodResponse.builder()
@@ -92,7 +92,7 @@ public class DashboardService {
                         .net(currentTotals.net())
                         .transactionCount(currentTotals.count())
                         .build())
-                .walletTotal(walletTotal(workspaceId))
+                .walletTotal(walletTotal(walletBalances))
                 .income(currentTotals.income())
                 .expense(currentTotals.expense())
                 .netCashFlow(currentTotals.net())
@@ -105,7 +105,7 @@ public class DashboardService {
                 .incomeByCategory(categoryBreakdown(workspaceId, current.from(), current.to(), TransactionType.INCOME, currentTotals.income(), createdBy))
                 .topIncreases(topCategoryChanges(workspaceId, current, previous, true, createdBy))
                 .topDecreases(topCategoryChanges(workspaceId, current, previous, false, createdBy))
-                .walletBalances(walletBalances(workspaceId, userId))
+                .walletBalances(walletBalances)
                 .recentTransactions(recentTransactions(workspaceId, current.from(), current.to(), createdBy))
                 .memberBreakdown(memberBreakdown(workspaceId, current.from(), current.to(), createdBy))
                 .build();
@@ -176,51 +176,12 @@ public class DashboardService {
         return query.getSingleResult();
     }
 
-    private BigDecimal walletTotal(UUID workspaceId) {
-        List<Wallet> wallets = entityManager.createQuery(
-                "SELECT w FROM Wallet w WHERE w.workspace.id = :workspaceId AND w.isActive = true AND w.includeInTotal = true", Wallet.class)
-                .setParameter("workspaceId", workspaceId)
-                .getResultList();
-        return wallets.stream().map(this::walletBalance).reduce(BigDecimal.ZERO, BigDecimal::add);
-    }
-
-    private BigDecimal walletBalance(Wallet wallet) {
-        UUID walletId = wallet.getId();
-        LocalDate openingDate = wallet.getOpeningDate();
-        BigDecimal income = sumWallet(walletId, openingDate, List.of(TransactionType.INCOME, TransactionType.LOAN_COLLECTION, TransactionType.BORROWING_RECEIPT));
-        BigDecimal expense = sumWallet(walletId, openingDate, List.of(TransactionType.EXPENSE, TransactionType.LOAN_DISBURSEMENT, TransactionType.BORROWING_REPAYMENT));
-        BigDecimal transferTo = sumTransfer(walletId, openingDate, true);
-        BigDecimal transferFrom = sumTransfer(walletId, openingDate, false);
-        return wallet.getOpeningBalance().add(income).subtract(expense).add(transferTo).subtract(transferFrom);
-    }
-
-    private BigDecimal sumWallet(UUID walletId, LocalDate openingDate, List<TransactionType> types) {
-        String dateFilter = openingDate == null ? "" : "AND t.transactionDate >= :openingDate ";
-        var query = entityManager.createQuery(
-                "SELECT COALESCE(SUM(t.amount), 0) FROM Transaction t " +
-                        "WHERE t.wallet.id = :walletId " + ledgerFilter() +
-                        "AND t.transactionType IN :types " + dateFilter, BigDecimal.class)
-                .setParameter("walletId", walletId)
-                .setParameter("types", types);
-        if (openingDate != null) query.setParameter("openingDate", openingDate);
-        return query.getSingleResult();
-    }
-
-    private BigDecimal sumTransfer(UUID walletId, LocalDate openingDate, boolean incoming) {
-        String walletSide = incoming ? "destinationWallet" : "sourceWallet";
-        String dateFilter = openingDate == null ? "" : "AND td.transaction.transactionDate >= :openingDate ";
-        var query = entityManager.createQuery(
-                "SELECT COALESCE(SUM(td.transaction.amount), 0) FROM TransferDetail td " +
-                "WHERE td." + walletSide + ".id = :walletId " +
-                "AND td.transaction.transactionType = :type " +
-                "AND td.transaction.transactionStatus = :status " +
-                "AND td.transaction.deletedAt IS NULL " +
-                "AND td.transaction.affectsWalletBalance = true " + dateFilter, BigDecimal.class)
-                .setParameter("walletId", walletId)
-                .setParameter("type", TransactionType.TRANSFER)
-                .setParameter("status", TransactionStatus.POSTED);
-        if (openingDate != null) query.setParameter("openingDate", openingDate);
-        return query.getSingleResult();
+    private BigDecimal walletTotal(List<DashboardWalletBalanceResponse> wallets) {
+        return wallets.stream()
+                .filter(DashboardWalletBalanceResponse::isActive)
+                .filter(DashboardWalletBalanceResponse::isIncludeInTotal)
+                .map(DashboardWalletBalanceResponse::getCurrentBalance)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
     }
 
     @SuppressWarnings("unchecked")
@@ -305,7 +266,7 @@ public class DashboardService {
                 .setParameter("to", to);
         setCreatedBy(query, createdBy);
         List<Object[]> rows = query.setMaxResults(5).getResultList();
-        return rows.stream().map(row -> DashboardRecentTransactionResponse.builder()
+        return rows.stream().map((Object[] row) -> DashboardRecentTransactionResponse.builder()
                 .id((UUID) row[0])
                 .type(((TransactionType) row[1]).name())
                 .status(((TransactionStatus) row[2]).name())
