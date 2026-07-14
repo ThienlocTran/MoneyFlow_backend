@@ -43,7 +43,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         try {
             if (!tokenProvider.validateToken(jwt)) {
-                writeUnauthorized(response, "UNAUTHORIZED", "Token không hợp lệ hoặc đã hết hạn");
+                writeUnauthorized(response, "UNAUTHORIZED", "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.");
                 return;
             }
 
@@ -55,7 +55,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             SecurityContextHolder.getContext().setAuthentication(authentication);
         } catch (Exception ex) {
             SecurityContextHolder.clearContext();
-            writeUnauthorized(response, "UNAUTHORIZED", "Chưa xác thực");
+            writeUnauthorized(response, "UNAUTHORIZED", "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.");
             return;
         }
 

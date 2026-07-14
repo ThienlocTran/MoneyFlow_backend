@@ -1,0 +1,13 @@
+spring:
+  datasource:
+    url: ${MONEYFLOW_DB_URL:${SPRING_DATASOURCE_URL:${DB_URL}}}
+    username: ${MONEYFLOW_DB_USERNAME:${SPRING_DATASOURCE_USERNAME:${DB_USERNAME}}}
+    password: ${MONEYFLOW_DB_PASSWORD:${SPRING_DATASOURCE_PASSWORD:${DB_PASSWORD}}}
+  docker:
+    compose:
+      enabled: false
+  jpa:
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true

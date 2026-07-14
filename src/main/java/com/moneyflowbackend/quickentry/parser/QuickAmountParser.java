@@ -16,11 +16,11 @@ public class QuickAmountParser {
     private static final Pattern COMPOSITE_MILLION = Pattern.compile("(?<![\\d])(-?\\d+(?:[.,]\\d+)?)\\s*(?:tr|trieu)\\s*(\\d{1,3})(?:\\s*(?:k|nghin|ngan))?\\b");
     private static final Pattern MILLION = Pattern.compile("(?<![\\d])(-?\\d+(?:[.,]\\d+)?)\\s*(?:tr|trieu)\\b");
     private static final Pattern THOUSAND = Pattern.compile("(?<![\\d])(-?\\d+(?:[.,]\\d+)?)\\s*(?:k|nghin|ngan)\\b");
-    private static final Pattern GROUPED = Pattern.compile("(?<![\\d/:.-])-?\\d{1,3}(?:[.,]\\d{3})+(?:\\s*(?:d|vnd))?\\b");
+    private static final Pattern GROUPED = Pattern.compile("(?<![\\d/:.-])-?\\d{1,3}(?:[.,\\s]\\d{3})+(?:\\s*(?:d|vnd))?\\b");
     private static final Pattern VND = Pattern.compile("(?<![\\d/:.-])-?\\d+(?:\\s*(?:d|vnd))\\b");
     private static final Pattern BARE = Pattern.compile("(?<![\\d/:.-])-?\\d+(?![\\d/:.-])");
     private static final Pattern NEGATIVE = Pattern.compile("(^|\\s)-\\s*\\d");
-    private static final Pattern DATE_OR_TIME = Pattern.compile("\\b\\d{4}-\\d{1,2}-\\d{1,2}\\b|\\b\\d{1,2}/\\d{1,2}(?:/\\d{2,4})?\\b|\\b\\d{1,2}:\\d{2}\\b|\\b\\d{1,2}h\\d{0,2}\\b");
+    private static final Pattern DATE_OR_TIME = Pattern.compile("\\b\\d{4}-\\d{1,2}-\\d{1,2}\\b|\\b\\d{1,2}/\\d{1,2}(?:/\\d{2,4})?\\b|\\b\\d{1,2}:\\d{2}\\b|\\b\\d{1,2}h\\d{0,2}\\b|\\b\\d{1,2}\\s*(?:gio|h|phut)\\b(?:\\s*(?:sang|trua|chieu|toi))?");
 
     public AmountParseResult parse(String input, String quickAmountUnit) {
         String normalized = VietnameseTextNormalizer.comparable(input);
@@ -152,8 +152,8 @@ public class QuickAmountParser {
 
     private BigDecimal groupedOrInteger(String value) {
         String compacted = value.trim();
-        if (compacted.matches("\\d{1,3}([.,]\\d{3})+")) {
-            return new BigDecimal(compacted.replace(".", "").replace(",", ""));
+        if (compacted.matches("\\d{1,3}([.,\\s]\\d{3})+")) {
+            return new BigDecimal(compacted.replace(".", "").replace(",", "").replaceAll("\\s+", ""));
         }
         return new BigDecimal(compacted);
     }

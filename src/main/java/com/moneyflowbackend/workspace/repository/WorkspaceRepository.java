@@ -10,4 +10,6 @@ import java.util.UUID;
 public interface WorkspaceRepository extends JpaRepository<Workspace, UUID> {
     @Query("SELECT wm.workspace FROM WorkspaceMember wm WHERE wm.user.id = :userId AND wm.workspace.deletedAt IS NULL AND wm.memberStatus = 'ACTIVE' ORDER BY wm.joinedAt DESC")
     List<Workspace> findAllByUserId(@Param("userId") UUID userId);
+
+    boolean existsByIdAndDeletedAtIsNull(UUID id);
 }

@@ -6,6 +6,8 @@ import com.moneyflowbackend.category.model.Category;
 import com.moneyflowbackend.category.model.CategoryType;
 import com.moneyflowbackend.category.repository.CategoryRepository;
 import com.moneyflowbackend.common.exception.BusinessException;
+import com.moneyflowbackend.transaction.audit.TransactionAuditLogRepository;
+import com.moneyflowbackend.transaction.audit.TransactionAuditService;
 import com.moneyflowbackend.transaction.dto.TransactionPageResponse;
 import com.moneyflowbackend.transaction.dto.TransactionRequest;
 import com.moneyflowbackend.transaction.dto.TransactionResponse;
@@ -34,6 +36,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.util.UUID;
 
@@ -55,6 +58,8 @@ class TransactionModuleIntegrationTests {
     @Autowired CategoryRepository categoryRepository;
     @Autowired TransactionRepository transactionRepository;
     @Autowired TransferDetailRepository transferDetailRepository;
+    @Autowired TransactionAuditLogRepository transactionAuditLogRepository;
+    @Autowired TransactionAuditService transactionAuditService;
 
     @Test
     void incomeExpenseTransferUpdateDeleteRestoreDriveBalances() {
@@ -110,6 +115,63 @@ class TransactionModuleIntegrationTests {
     }
 
     @Test
+    void transactionMutationsWriteAuditSnapshotsAndOwnerOnlyAuditAccess() {
+        TestContext owner = createContext("tx_audit", WorkspaceRole.OWNER);
+        TestContext editor = createContext("tx_audit_editor", WorkspaceRole.EDITOR);
+        TestContext viewer = createContext("tx_audit_viewer", WorkspaceRole.VIEWER);
+        TestContext outsider = createContext("tx_audit_outsider", WorkspaceRole.OWNER);
+        workspaceMemberRepository.save(WorkspaceMember.builder().workspace(owner.workspace()).user(editor.user()).role(WorkspaceRole.EDITOR).build());
+        workspaceMemberRepository.save(WorkspaceMember.builder().workspace(owner.workspace()).user(viewer.user()).role(WorkspaceRole.VIEWER).build());
+        Wallet cash = wallet(owner, "Cash", WalletType.CASH, "0");
+        Category food = category(owner, "Food", CategoryType.EXPENSE, true, false);
+
+        TransactionResponse created = transactionService.create(owner.workspace().getId(), expenseReq("100", cash, food, "Lunch", TransactionStatus.POSTED), owner.user().getId());
+        transactionService.update(owner.workspace().getId(), created.getId(), expenseReq("150", cash, food, "Lunch updated", TransactionStatus.POSTED), owner.user().getId());
+        transactionService.delete(owner.workspace().getId(), created.getId(), owner.user().getId());
+        transactionService.restore(owner.workspace().getId(), created.getId(), owner.user().getId());
+
+        var logs = transactionAuditLogRepository.findByWorkspaceIdAndTransactionIdOrderByCreatedAtAsc(owner.workspace().getId(), created.getId());
+        assertThat(logs).hasSize(4);
+        assertThat(logs).extracting(log -> log.getAction().name())
+                .containsExactly("CREATE", "UPDATE", "DELETE", "RESTORE");
+        assertThat(logs.get(0).getBeforeData()).isNull();
+        assertThat(new BigDecimal(logs.get(0).getAfterData().get("amount").toString())).isEqualByComparingTo("100.00");
+        assertThat(logs.get(1).getBeforeData()).containsEntry("description", "Lunch");
+        assertThat(logs.get(1).getAfterData()).containsEntry("description", "Lunch updated");
+        assertThat(logs.get(2).getBeforeData()).containsEntry("deletedAt", null);
+        assertThat(logs.get(2).getAfterData().get("deletedAt")).isNotNull();
+        assertThat(logs.get(0).getAfterData()).doesNotContainKeys("audioUrl", "storagePublicId", "password", "token");
+
+        assertThat(transactionAuditService.list(owner.workspace().getId(), created.getId(), owner.user().getId()))
+                .extracting("action")
+                .containsExactly("CREATE", "UPDATE", "SOFT_DELETE", "RESTORE");
+        assertBusinessCode(() -> transactionAuditService.list(owner.workspace().getId(), created.getId(), editor.user().getId()), "FORBIDDEN");
+        assertBusinessCode(() -> transactionAuditService.list(owner.workspace().getId(), created.getId(), viewer.user().getId()), "FORBIDDEN");
+        assertBusinessCode(() -> transactionAuditService.list(owner.workspace().getId(), created.getId(), outsider.user().getId()), "WORKSPACE_ACCESS_DENIED");
+    }
+
+    @Test
+    void failedCreateAndViewerMutationsDoNotWriteAudit() {
+        TestContext owner = createContext("tx_audit_fail", WorkspaceRole.OWNER);
+        TestContext viewer = createContext("tx_audit_fail_viewer", WorkspaceRole.VIEWER);
+        workspaceMemberRepository.save(WorkspaceMember.builder().workspace(owner.workspace()).user(viewer.user()).role(WorkspaceRole.VIEWER).build());
+        Wallet cash = wallet(owner, "Cash", WalletType.CASH, "0");
+        Category food = category(owner, "Food", CategoryType.EXPENSE, true, false);
+        long before = transactionAuditLogRepository.count();
+
+        assertBusinessCode(() -> transactionService.create(owner.workspace().getId(), expenseReq("0", cash, food, "Bad", TransactionStatus.POSTED), owner.user().getId()), "INVALID_AMOUNT");
+        assertBusinessCode(() -> transactionService.create(owner.workspace().getId(), expenseReq("1", cash, food, "Viewer", TransactionStatus.POSTED), viewer.user().getId()), "FORBIDDEN");
+
+        TransactionResponse tx = transactionService.create(owner.workspace().getId(), expenseReq("1", cash, food, "Owner", TransactionStatus.POSTED), owner.user().getId());
+        assertBusinessCode(() -> transactionService.update(owner.workspace().getId(), tx.getId(), expenseReq("2", cash, food, "Viewer", TransactionStatus.POSTED), viewer.user().getId()), "FORBIDDEN");
+        assertBusinessCode(() -> transactionService.delete(owner.workspace().getId(), tx.getId(), viewer.user().getId()), "FORBIDDEN");
+        transactionService.delete(owner.workspace().getId(), tx.getId(), owner.user().getId());
+        assertBusinessCode(() -> transactionService.restore(owner.workspace().getId(), tx.getId(), viewer.user().getId()), "FORBIDDEN");
+
+        assertThat(transactionAuditLogRepository.count()).isEqualTo(before + 2);
+    }
+
+    @Test
     void validationRulesRejectInvalidManualTransactions() {
         TestContext ctx = createContext("tx_validation", WorkspaceRole.OWNER);
         TestContext other = createContext("tx_other", WorkspaceRole.OWNER);
@@ -134,6 +196,12 @@ class TransactionModuleIntegrationTests {
         TransactionRequest noWalletIncome = incomeReq("1", cash, incomeCategory, "No wallet");
         noWalletIncome.setWalletId(null);
         assertBusinessCode(() -> transactionService.create(ctx.workspace().getId(), noWalletIncome, ctx.user().getId()), "WALLET_NOT_FOUND");
+        TransactionRequest plannedNoWallet = expenseReq("1", cash, expenseCategory, "Planned no wallet", TransactionStatus.PLANNED);
+        plannedNoWallet.setWalletId(null);
+        assertBusinessCode(() -> transactionService.create(ctx.workspace().getId(), plannedNoWallet, ctx.user().getId()), "WALLET_NOT_FOUND");
+        TransactionRequest plannedNoCategory = expenseReq("1", cash, expenseCategory, "Planned no category", TransactionStatus.PLANNED);
+        plannedNoCategory.setCategoryId(null);
+        assertBusinessCode(() -> transactionService.create(ctx.workspace().getId(), plannedNoCategory, ctx.user().getId()), "CATEGORY_NOT_FOUND");
 
         TransactionRequest sameWallet = transferReq("1", cash, cash, "Bad", TransactionStatus.POSTED);
         assertBusinessCode(() -> transactionService.create(ctx.workspace().getId(), sameWallet, ctx.user().getId()), "TRANSFER_SAME_WALLET");
@@ -220,6 +288,102 @@ class TransactionModuleIntegrationTests {
         assertThat(transactionService.list(owner.workspace().getId(), null, null, null, null, null, null, null, null, null, false, 0, 20, null, viewer.user().getId()).getContent()).hasSize(2);
         assertBusinessCode(() -> transactionService.create(owner.workspace().getId(), incomeReq("1", cash, incomeCategory, "viewer"), viewer.user().getId()), "FORBIDDEN");
         assertBusinessCode(() -> transactionService.list(owner.workspace().getId(), null, null, null, null, null, null, null, null, null, false, 0, 20, null, outsider.user().getId()), "WORKSPACE_ACCESS_DENIED");
+    }
+
+    @Test
+    void transactionsListUsesServerPaginationAndSafeSortContract() {
+        TestContext owner = createContext("tx_page_contract", WorkspaceRole.OWNER);
+        TestContext viewer = createContext("tx_page_contract_viewer", WorkspaceRole.VIEWER);
+        TestContext other = createContext("tx_page_contract_other", WorkspaceRole.OWNER);
+        workspaceMemberRepository.save(WorkspaceMember.builder().workspace(owner.workspace()).user(viewer.user()).role(WorkspaceRole.VIEWER).build());
+        Wallet cash = wallet(owner, "Cash", WalletType.CASH, "0");
+        Category food = category(owner, "Food", CategoryType.EXPENSE, true, false);
+        Wallet otherCash = wallet(other, "Other cash", WalletType.CASH, "0");
+        Category otherFood = category(other, "Other food", CategoryType.EXPENSE, true, false);
+
+        for (int i = 0; i < 25; i++) {
+            TransactionRequest req = expenseReq("1", cash, food, "page meal " + i, TransactionStatus.POSTED);
+            req.setTransactionDate(LocalDate.of(2026, 8, 1).plusDays(i));
+            transactionService.create(owner.workspace().getId(), req, owner.user().getId());
+        }
+        TransactionResponse deleted = transactionService.create(owner.workspace().getId(),
+                expenseReq("1", cash, food, "deleted page meal", TransactionStatus.POSTED), owner.user().getId());
+        transactionService.delete(owner.workspace().getId(), deleted.getId(), owner.user().getId());
+        transactionService.create(other.workspace().getId(),
+                expenseReq("1", otherCash, otherFood, "other workspace meal", TransactionStatus.POSTED), other.user().getId());
+
+        TransactionPageResponse firstPage = transactionService.list(owner.workspace().getId(), null, null,
+                null, null, null, null, null, null, "page meal", false, 0, 20, "date,desc;badField,asc", owner.user().getId());
+        assertThat(firstPage.getContent()).hasSize(20);
+        assertThat(firstPage.getTotalElements()).isEqualTo(25);
+        assertThat(firstPage.getTotalPages()).isEqualTo(2);
+        assertThat(firstPage.getContent()).extracting(TransactionResponse::getDescription)
+                .doesNotContain("deleted page meal", "other workspace meal");
+
+        TransactionPageResponse secondPage = transactionService.list(owner.workspace().getId(), null, null,
+                null, null, null, null, null, null, "page meal", false, 1, 20, "updatedAt,desc", owner.user().getId());
+        assertThat(secondPage.getContent()).hasSize(5);
+
+        assertThat(transactionService.list(owner.workspace().getId(), null, null,
+                null, null, null, null, null, null, "page meal", false, 0, 500, "nope,desc", owner.user().getId()).getSize())
+                .isEqualTo(100);
+        assertThat(transactionService.list(owner.workspace().getId(), null, null,
+                null, null, null, null, null, null, null, true, 0, 100, null, owner.user().getId()).getContent())
+                .extracting(TransactionResponse::getId)
+                .contains(deleted.getId());
+        assertBusinessCode(() -> transactionService.list(owner.workspace().getId(), null, null,
+                null, null, null, null, null, null, null, true, 0, 20, null, viewer.user().getId()), "FORBIDDEN");
+    }
+
+    @Test
+    void transactionFiltersSearchDeletedAndExportWorkSafely() {
+        TestContext owner = createContext("tx_filter_export", WorkspaceRole.OWNER);
+        TestContext editor = createContext("tx_filter_export_editor", WorkspaceRole.EDITOR);
+        TestContext viewer = createContext("tx_filter_export_viewer", WorkspaceRole.VIEWER);
+        TestContext outsider = createContext("tx_filter_export_outsider", WorkspaceRole.OWNER);
+        workspaceMemberRepository.save(WorkspaceMember.builder().workspace(owner.workspace()).user(editor.user()).role(WorkspaceRole.EDITOR).build());
+        workspaceMemberRepository.save(WorkspaceMember.builder().workspace(owner.workspace()).user(viewer.user()).role(WorkspaceRole.VIEWER).build());
+        Wallet cash = wallet(owner, "Cash", WalletType.CASH, "0");
+        Category food = category(owner, "Food", CategoryType.EXPENSE, true, false);
+
+        TransactionRequest manualReq = expenseReq("12.50", cash, food, "Comma, quote \" meal", TransactionStatus.POSTED);
+        manualReq.setTransactionDate(LocalDate.of(2026, 7, 2));
+        manualReq.setNote("Comma, quote \" meal\nline two");
+        TransactionResponse manual = transactionService.create(owner.workspace().getId(), manualReq, owner.user().getId());
+
+        TransactionRequest quickReq = expenseReq("9", cash, food, "Quick lunch", TransactionStatus.POSTED);
+        quickReq.setTransactionDate(LocalDate.of(2026, 7, 3));
+        TransactionResponse quick = transactionService.createWithSource(owner.workspace().getId(), quickReq, editor.user().getId(),
+                TransactionSourceType.QUICK_TEXT, "raw noodles from quick text", null);
+
+        TransactionRequest deletedReq = expenseReq("5", cash, food, "Deleted", TransactionStatus.POSTED);
+        deletedReq.setTransactionDate(LocalDate.of(2026, 7, 4));
+        TransactionResponse deleted = transactionService.create(owner.workspace().getId(), deletedReq, owner.user().getId());
+        transactionService.delete(owner.workspace().getId(), deleted.getId(), owner.user().getId());
+
+        assertThat(transactionService.list(owner.workspace().getId(), LocalDate.of(2026, 7, 1), LocalDate.of(2026, 7, 31),
+                null, null, null, null, null, null, TransactionSourceType.QUICK_TEXT, null, null, false, 0, 20, null, owner.user().getId()).getContent())
+                .extracting(TransactionResponse::getId).containsExactly(quick.getId());
+        assertThat(transactionService.list(owner.workspace().getId(), null, null, null, null, null, null, null, null,
+                "raw noodles", false, 0, 20, null, owner.user().getId()).getContent())
+                .extracting(TransactionResponse::getId).containsExactly(quick.getId());
+        assertThat(transactionService.list(owner.workspace().getId(), null, null, null, null, null, null, null, null,
+                TransactionSourceType.QUICK_TEXT, editor.user().getId(), null, false, 0, 500, null, owner.user().getId()).getSize())
+                .isEqualTo(100);
+        assertThat(transactionService.list(owner.workspace().getId(), null, null, null, null, null, null, null, null,
+                null, null, null, true, 0, 20, null, editor.user().getId()).getContent())
+                .extracting(TransactionResponse::getId).contains(deleted.getId());
+        assertBusinessCode(() -> transactionService.list(owner.workspace().getId(), null, null, null, null, null, null, null,
+                null, null, null, null, true, 0, 20, null, viewer.user().getId()), "FORBIDDEN");
+
+        String csv = new String(transactionService.exportCsv(owner.workspace().getId(), LocalDate.of(2026, 7, 1), LocalDate.of(2026, 7, 31),
+                null, null, null, null, null, null, null, null, "quote", false, owner.user().getId()), StandardCharsets.UTF_8);
+        assertThat(csv).startsWith("\uFEFFtransactionDate,type,amount");
+        assertThat(csv).contains("\"Comma, quote \"\" meal\nline two\"");
+        assertThat(csv).doesNotContain("storagePublicId", "playbackUrl", "audioUrl", "password", "refreshToken");
+
+        assertBusinessCode(() -> transactionService.exportCsv(outsider.workspace().getId(), null, null, null, null, null, null,
+                null, null, null, null, null, false, owner.user().getId()), "WORKSPACE_ACCESS_DENIED");
     }
 
     @Test
@@ -335,6 +499,34 @@ class TransactionModuleIntegrationTests {
         transferDetailRepository.flush();
 
         assertBusinessCode(() -> transactionService.restore(ctx.workspace().getId(), transfer.getId(), ctx.user().getId()), "TRANSFER_DETAIL_NOT_FOUND");
+    }
+
+    @Test
+    void restoreRejectsInactiveWalletOrCategory() {
+        TestContext ctx = createContext("tx_restore_inactive", WorkspaceRole.OWNER);
+        Wallet cash = wallet(ctx, "Cash", WalletType.CASH, "0");
+        Wallet bank = wallet(ctx, "Bank", WalletType.BANK, "0");
+        Category expenseCategory = category(ctx, "Food", CategoryType.EXPENSE, true, false);
+
+        TransactionResponse expense = transactionService.create(ctx.workspace().getId(), expenseReq("10", cash, expenseCategory, "Food", TransactionStatus.POSTED), ctx.user().getId());
+        transactionService.delete(ctx.workspace().getId(), expense.getId(), ctx.user().getId());
+        cash.setActive(false);
+        walletRepository.saveAndFlush(cash);
+        assertBusinessCode(() -> transactionService.restore(ctx.workspace().getId(), expense.getId(), ctx.user().getId()), "WALLET_INACTIVE");
+
+        cash.setActive(true);
+        walletRepository.saveAndFlush(cash);
+        expenseCategory.setActive(false);
+        categoryRepository.saveAndFlush(expenseCategory);
+        assertBusinessCode(() -> transactionService.restore(ctx.workspace().getId(), expense.getId(), ctx.user().getId()), "CATEGORY_INACTIVE");
+
+        expenseCategory.setActive(true);
+        categoryRepository.saveAndFlush(expenseCategory);
+        TransactionResponse transfer = transactionService.create(ctx.workspace().getId(), transferReq("5", cash, bank, "Move", TransactionStatus.POSTED), ctx.user().getId());
+        transactionService.delete(ctx.workspace().getId(), transfer.getId(), ctx.user().getId());
+        bank.setActive(false);
+        walletRepository.saveAndFlush(bank);
+        assertBusinessCode(() -> transactionService.restore(ctx.workspace().getId(), transfer.getId(), ctx.user().getId()), "WALLET_INACTIVE");
     }
 
     private TestContext createContext(String prefix, WorkspaceRole role) {

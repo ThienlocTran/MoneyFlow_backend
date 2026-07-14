@@ -9,6 +9,7 @@ import com.moneyflowbackend.jar.dto.JarRequest;
 import com.moneyflowbackend.jar.dto.JarResponse;
 import com.moneyflowbackend.jar.model.Jar;
 import com.moneyflowbackend.jar.repository.JarRepository;
+import com.moneyflowbackend.transaction.repository.TransactionRepository;
 import com.moneyflowbackend.workspace.model.Workspace;
 import com.moneyflowbackend.workspace.model.WorkspaceMember;
 import com.moneyflowbackend.workspace.model.WorkspaceRole;
@@ -33,16 +34,19 @@ public class JarService {
 
     private final JarRepository jarRepository;
     private final CategoryRepository categoryRepository;
+    private final TransactionRepository transactionRepository;
     private final WorkspaceRepository workspaceRepository;
     private final WorkspaceMemberRepository workspaceMemberRepository;
 
     public JarService(
             JarRepository jarRepository,
             CategoryRepository categoryRepository,
+            TransactionRepository transactionRepository,
             WorkspaceRepository workspaceRepository,
             WorkspaceMemberRepository workspaceMemberRepository) {
         this.jarRepository = jarRepository;
         this.categoryRepository = categoryRepository;
+        this.transactionRepository = transactionRepository;
         this.workspaceRepository = workspaceRepository;
         this.workspaceMemberRepository = workspaceMemberRepository;
     }
@@ -129,6 +133,17 @@ public class JarService {
     }
 
     @Transactional
+    public void delete(UUID workspaceId, UUID jarId, UUID userId) {
+        requireOwner(workspaceId, userId);
+        Jar jar = findJarInWorkspace(workspaceId, jarId);
+        if (categoryRepository.countByWorkspaceIdAndJarIdAndIsActiveTrue(workspaceId, jarId) > 0
+                || transactionRepository.countJarUsage(workspaceId, jarId) > 0) {
+            throw new BusinessException("JAR_IN_USE", "Jar is used by categories or transactions");
+        }
+        jarRepository.delete(jar);
+    }
+
+    @Transactional
     public JarListResponse reorder(UUID workspaceId, JarReorderRequest req, UUID userId) {
         requireWritableMember(workspaceId, userId);
         Set<UUID> seen = new HashSet<>();
@@ -197,9 +212,13 @@ public class JarService {
     }
 
     private WorkspaceMember requireWritableMember(UUID workspaceId, UUID userId) {
+        return requireOwner(workspaceId, userId);
+    }
+
+    private WorkspaceMember requireOwner(UUID workspaceId, UUID userId) {
         WorkspaceMember member = requireActiveMember(workspaceId, userId);
-        if (member.getRole() == WorkspaceRole.VIEWER) {
-            throw new BusinessException("FORBIDDEN", "Viewer cannot modify jars", HttpStatus.FORBIDDEN);
+        if (member.getRole() != WorkspaceRole.OWNER) {
+            throw new BusinessException("FORBIDDEN", "Only workspace owner can modify jars", HttpStatus.FORBIDDEN);
         }
         return member;
     }
@@ -238,12 +257,16 @@ public class JarService {
     private JarResponse mapToResponse(Jar j) {
         return JarResponse.builder()
                 .id(j.getId())
+                .workspaceId(j.getWorkspace().getId())
                 .code(j.getCode())
                 .name(j.getName())
                 .allocationPercent(j.getAllocationPercent())
                 .displayOrder(j.getDisplayOrder())
                 .isActive(j.isActive())
                 .categoryCount(categoryRepository.countByWorkspaceIdAndJarIdAndIsActiveTrue(j.getWorkspace().getId(), j.getId()))
+                .usageCount(transactionRepository.countJarUsage(j.getWorkspace().getId(), j.getId()))
+                .createdAt(j.getCreatedAt())
+                .updatedAt(j.getUpdatedAt())
                 .build();
     }
 }

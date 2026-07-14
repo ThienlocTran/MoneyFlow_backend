@@ -45,4 +45,19 @@ public class QuickEntryPreviewResponse {
     private String matchedKeyword;
     private UUID matchedCategoryId;
     private String matchedWalletText;
+    @Builder.Default
+    private List<Candidate> candidates = new ArrayList<>();
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    public static class Candidate {
+        private String description;
+        private BigDecimal amount;
+        private TransactionType type;
+        private UUID categoryId;
+        private String categoryName;
+        private List<String> warnings;
+    }
 }

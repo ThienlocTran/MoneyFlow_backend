@@ -119,7 +119,15 @@ public class QuickEntryService {
         if (raw.trim().isEmpty()) {
             throw new BusinessException("QUICK_ENTRY_TEXT_REQUIRED", "Quick entry text is required");
         }
-        return parser.parse(raw, workspace, keywords(workspaceId), activeCategories(workspaceId), activeWallets(workspaceId));
+        List<CategoryKeyword> keywords = keywords(workspaceId);
+        List<Category> categories = activeCategories(workspaceId);
+        List<Wallet> wallets = activeWallets(workspaceId);
+        QuickEntryPreviewResponse preview = parser.parse(raw, workspace, keywords, categories, wallets);
+        UUID suggestedWalletId = suggestedWalletId(workspaceId, userId, preview);
+        if (suggestedWalletId == null || preview.getMatchedWalletText() != null || suggestedWalletId.equals(preview.getWalletId())) {
+            return preview;
+        }
+        return parser.parse(raw, workspace, keywords, categories, wallets, suggestedWalletId);
     }
 
     @Transactional
@@ -137,7 +145,6 @@ public class QuickEntryService {
         TransactionRequest txReq = toTransactionRequest(workspace, req, sourceType);
         learnKeywordIfRequested(workspace, req);
         if (sourceType == TransactionSourceType.VOICE) {
-            TransactionResponse response = transactionService.createWithSource(workspaceId, txReq, userId, sourceType, req.getRawInput());
             VoiceRecord voiceRecord = voiceRecordRepository.save(VoiceRecord.builder()
                     .workspace(workspace)
                     .createdByUser(userRepository.findById(userId)
@@ -151,11 +158,7 @@ public class QuickEntryService {
                     .editedTranscript(normalize(req.getRawInput()))
                     .voiceStatus(VoiceRecordStatus.CONFIRMED)
                     .build());
-            var tx = transactionRepository.findByIdAndWorkspaceId(response.getId(), workspaceId)
-                    .orElseThrow(() -> new BusinessException("TRANSACTION_NOT_FOUND", "Transaction not found", HttpStatus.NOT_FOUND));
-            tx.setVoiceRecordId(voiceRecord.getId());
-            transactionRepository.save(tx);
-            return transactionService.getDetails(workspaceId, response.getId(), false, userId);
+            return transactionService.createWithSource(workspaceId, txReq, userId, sourceType, req.getRawInput(), voiceRecord.getId());
         }
         return transactionService.createWithSource(workspaceId, txReq, userId, sourceType, req.getRawInput());
     }
@@ -305,6 +308,16 @@ public class QuickEntryService {
 
     private UUID defaultWalletId(UUID workspaceId) {
         return walletRepository.findByWorkspaceIdAndIsDefaultTrueAndIsActiveTrue(workspaceId)
+                .map(Wallet::getId)
+                .orElse(null);
+    }
+
+    private UUID suggestedWalletId(UUID workspaceId, UUID userId, QuickEntryPreviewResponse preview) {
+        if (preview.getType() != TransactionType.INCOME && preview.getType() != TransactionType.EXPENSE) {
+            return null;
+        }
+        return transactionRepository.findRecentActiveWalletSuggestions(workspaceId, userId, preview.getType()).stream()
+                .findFirst()
                 .map(Wallet::getId)
                 .orElse(null);
     }

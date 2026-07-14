@@ -35,6 +35,12 @@ public class AuthController {
         return ResponseEntity.ok(ApiResponse.ok("Đăng nhập thành công", res));
     }
 
+    @PostMapping("/public/auth/google")
+    public ResponseEntity<ApiResponse<TokenResponse>> googleLogin(@Valid @RequestBody GoogleLoginRequest req) {
+        TokenResponse res = authService.googleLogin(req);
+        return ResponseEntity.ok(ApiResponse.ok("Đăng nhập bằng Google thành công", res));
+    }
+
     @PostMapping("/public/auth/refresh")
     public ResponseEntity<ApiResponse<TokenResponse>> refresh(@Valid @RequestBody RefreshRequest req) {
         TokenResponse res = authService.refresh(req);
@@ -54,11 +60,23 @@ public class AuthController {
         return ResponseEntity.ok(ApiResponse.ok("Lấy thông tin cá nhân thành công", res));
     }
 
+    @GetMapping("/users/me")
+    public ResponseEntity<ApiResponse<UserResponse>> usersMe() {
+        return me();
+    }
+
     @PutMapping("/me")
     public ResponseEntity<ApiResponse<UserResponse>> updateMe(@Valid @RequestBody UserResponse req) {
         UUID userId = currentUserId();
         UserResponse res = authService.updateProfile(userId, req);
         return ResponseEntity.ok(ApiResponse.ok("Cập nhật thông tin cá nhân thành công", res));
+    }
+
+    @PutMapping("/users/me/username")
+    public ResponseEntity<ApiResponse<UserResponse>> updateUsername(@Valid @RequestBody UsernameUpdateRequest req) {
+        UUID userId = currentUserId();
+        UserResponse res = authService.updateUsername(userId, req);
+        return ResponseEntity.ok(ApiResponse.ok("Cập nhật tên đăng nhập thành công", res));
     }
 
     private UUID currentUserId() {
