@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Comparator;
+import java.util.Objects;
 import java.util.UUID;
 
 @RestController
@@ -26,7 +27,9 @@ public class AuthAccountController {
     public ResponseEntity<ApiResponse<AuthAccountStatusResponse>> status() {
         UUID userId = UUID.fromString(SecurityContextHolder.getContext().getAuthentication().getName());
         var providers = authAccountRepository.findAllByUserId(userId).stream()
-                .map(account -> account.getProvider().name())
+                .map(account -> account.getProvider())
+                .filter(Objects::nonNull)
+                .map(Enum::name)
                 .distinct()
                 .sorted(Comparator.naturalOrder())
                 .toList();

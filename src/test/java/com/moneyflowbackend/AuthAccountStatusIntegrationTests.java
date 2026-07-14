@@ -6,6 +6,7 @@ import com.moneyflowbackend.auth.dto.RegisterRequest;
 import com.moneyflowbackend.auth.dto.TokenResponse;
 import com.moneyflowbackend.auth.google.GoogleTokenPayload;
 import com.moneyflowbackend.auth.google.GoogleTokenVerifier;
+import com.moneyflowbackend.auth.repository.AuthAccountRepository;
 import com.moneyflowbackend.auth.service.AuthService;
 import com.moneyflowbackend.common.exception.BusinessException;
 import org.junit.jupiter.api.BeforeEach;
@@ -36,6 +37,7 @@ class AuthAccountStatusIntegrationTests {
     @Autowired AuthService authService;
     @Autowired MockMvc mockMvc;
     @Autowired FakeGoogleTokenVerifier googleVerifier;
+    @Autowired AuthAccountRepository authAccountRepository;
 
     @BeforeEach
     void resetVerifier() {
@@ -69,6 +71,22 @@ class AuthAccountStatusIntegrationTests {
                 .andExpect(jsonPath("$.data.providers[?(@ == 'GOOGLE')]").exists())
                 .andExpect(jsonPath("$.data.providerSubject").doesNotExist())
                 .andExpect(jsonPath("$.data.secret").doesNotExist());
+    }
+
+    @Test
+    void missingProviderRowsReportGoogleUnlinked() throws Exception {
+        authService.register(registerRequest("provider_missing", "provider-missing@example.com"));
+        TokenResponse token = authService.login(loginRequest("provider_missing"));
+        authAccountRepository.deleteAll(authAccountRepository.findAllByUserId(token.getUser().getId()));
+        authAccountRepository.flush();
+
+        mockMvc.perform(get("/api/me/auth-accounts")
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.googleLinked").value(false))
+                .andExpect(jsonPath("$.data.providers").isEmpty())
+                .andExpect(jsonPath("$.data.providerSubject").doesNotExist())
+                .andExpect(jsonPath("$.data.token").doesNotExist());
     }
 
     private RegisterRequest registerRequest(String username, String email) {
