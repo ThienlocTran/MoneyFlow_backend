@@ -47,7 +47,7 @@ public class ProfileAvatarService {
             throw new BusinessException("UNAUTHORIZED", "Chưa xác thực", HttpStatus.UNAUTHORIZED);
         }
 
-        String avatarUrl = storageService.upload("users/" + user.getId() + "/avatar", file);
+        String avatarUrl = storageService.upload("avatars/" + user.getId() + "/" + UUID.randomUUID(), file);
         user.setAvatarUrl(avatarUrl);
         user.setUpdatedAt(Instant.now());
         return map(userRepository.save(user));

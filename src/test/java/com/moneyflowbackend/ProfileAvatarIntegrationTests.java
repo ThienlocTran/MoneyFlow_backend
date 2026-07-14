@@ -27,6 +27,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.nio.charset.StandardCharsets;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.startsWith;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -57,7 +58,7 @@ class ProfileAvatarIntegrationTests {
                         .file(file)
                         .header("Authorization", bearer(token)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.avatarUrl").value("https://cdn.example/users/" + token.getUser().getId() + "/avatar.png"))
+                .andExpect(jsonPath("$.data.avatarUrl").value(startsWith("https://cdn.example/avatars/" + token.getUser().getId() + "/")))
                 .andExpect(jsonPath("$.data.email").value("avatar_ok@example.com"))
                 .andExpect(jsonPath("$.data.password").doesNotExist())
                 .andExpect(jsonPath("$.data.apiSecret").doesNotExist())
@@ -67,8 +68,8 @@ class ProfileAvatarIntegrationTests {
                 .getContentAsString(StandardCharsets.UTF_8);
 
         User user = userRepository.findById(token.getUser().getId()).orElseThrow();
-        assertThat(user.getAvatarUrl()).isEqualTo("https://cdn.example/users/" + token.getUser().getId() + "/avatar.png");
-        assertThat(avatarStorageService.lastObjectKey).isEqualTo("users/" + token.getUser().getId() + "/avatar");
+        assertThat(user.getAvatarUrl()).startsWith("https://cdn.example/avatars/" + token.getUser().getId() + "/");
+        assertThat(avatarStorageService.lastObjectKey).startsWith("avatars/" + token.getUser().getId() + "/");
         assertThat(body).doesNotContain("secret", "apiKey", "api_secret", "cloudinary://");
     }
 
@@ -85,7 +86,7 @@ class ProfileAvatarIntegrationTests {
         mockMvc.perform(get("/api/me")
                         .header("Authorization", bearer(token)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.avatarUrl").value("https://cdn.example/users/" + token.getUser().getId() + "/avatar.png"));
+                .andExpect(jsonPath("$.data.avatarUrl").value(startsWith("https://cdn.example/avatars/" + token.getUser().getId() + "/")));
     }
 
     @Test

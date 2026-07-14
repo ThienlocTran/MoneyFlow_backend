@@ -71,6 +71,20 @@ mvn spring-boot:run
 
 > **Important:** Never commit `.env` files with real credentials. Only `.env.example` with placeholders is committed.
 
+## Cloudinary Avatars
+
+Avatar uploads are disabled unless `MONEYFLOW_AVATAR_STORAGE_PROVIDER=cloudinary` is set with Cloudinary credentials:
+
+```properties
+MONEYFLOW_AVATAR_STORAGE_PROVIDER=cloudinary
+MONEYFLOW_CLOUDINARY_CLOUD_NAME=...
+MONEYFLOW_CLOUDINARY_API_KEY=...
+MONEYFLOW_CLOUDINARY_API_SECRET=...
+MONEYFLOW_CLOUDINARY_BASE_FOLDER=moneyflow/dev
+```
+
+Use `MONEYFLOW_CLOUDINARY_BASE_FOLDER=moneyflow/dev` for local/dev and `MONEYFLOW_CLOUDINARY_BASE_FOLDER=moneyflow/prod` for production. Never commit `.env` files, never use the prod folder locally, never use the dev folder in production, and rotate secrets if they appear in chat or logs.
+
 ## Profiles
 
 | Profile | Description | Database |

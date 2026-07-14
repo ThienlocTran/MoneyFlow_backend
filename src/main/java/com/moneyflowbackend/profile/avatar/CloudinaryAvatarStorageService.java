@@ -25,7 +25,7 @@ public class CloudinaryAvatarStorageService implements AvatarStorageService {
     private final String cloudName;
     private final String apiKey;
     private final String apiSecret;
-    private final String folder;
+    private final String baseFolder;
 
     public CloudinaryAvatarStorageService(
             HttpClient httpClient,
@@ -33,13 +33,13 @@ public class CloudinaryAvatarStorageService implements AvatarStorageService {
             String cloudName,
             String apiKey,
             String apiSecret,
-            String folder) {
+            String baseFolder) {
         this.httpClient = httpClient;
         this.clock = clock;
         this.cloudName = cloudName;
         this.apiKey = apiKey;
         this.apiSecret = apiSecret;
-        this.folder = trimSlashes(folder == null || folder.isBlank() ? "moneyflow/avatars" : folder);
+        this.baseFolder = trimSlashes(baseFolder == null || baseFolder.isBlank() ? "moneyflow/dev" : baseFolder);
     }
 
     @Override
@@ -50,7 +50,7 @@ public class CloudinaryAvatarStorageService implements AvatarStorageService {
     @Override
     public String upload(String objectKey, MultipartFile file) {
         try {
-            String publicId = folder + "/" + trimSlashes(objectKey);
+            String publicId = baseFolder + "/" + trimSlashes(objectKey);
             Map<String, String> params = signedParams(Map.of(
                     "public_id", publicId,
                     "timestamp", String.valueOf(Instant.now(clock).getEpochSecond()),
