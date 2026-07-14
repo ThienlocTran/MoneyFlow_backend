@@ -123,6 +123,16 @@ public class JarService {
         requireWritableMember(workspaceId, userId);
         Jar jar = findJarInWorkspace(workspaceId, jarId);
 
+        if (!active && jar.isActive()) {
+            if ((jar.getAllocationPercent() == null ? BigDecimal.ZERO : jar.getAllocationPercent()).compareTo(BigDecimal.ZERO) > 0) {
+                throw new BusinessException("JAR_DEACTIVATION_BREAKS_ALLOCATION", "Set jar allocation to 0 before deactivating it");
+            }
+            if (categoryRepository.countByWorkspaceIdAndJarId(workspaceId, jarId) > 0
+                    || transactionRepository.countJarUsage(workspaceId, jarId) > 0) {
+                throw new BusinessException("JAR_IN_USE", "Jar is used by categories or transactions");
+            }
+        }
+
         if (active && !jar.isActive()) {
             BigDecimal activeTotal = jarRepository.findAllByWorkspaceIdAndIsActiveTrue(workspaceId).stream()
                     .filter(existing -> !existing.getId().equals(jarId))
@@ -144,7 +154,7 @@ public class JarService {
     public void delete(UUID workspaceId, UUID jarId, UUID userId) {
         requireOwner(workspaceId, userId);
         Jar jar = findJarInWorkspace(workspaceId, jarId);
-        if (categoryRepository.countByWorkspaceIdAndJarIdAndIsActiveTrue(workspaceId, jarId) > 0
+        if (categoryRepository.countByWorkspaceIdAndJarId(workspaceId, jarId) > 0
                 || transactionRepository.countJarUsage(workspaceId, jarId) > 0) {
             throw new BusinessException("JAR_IN_USE", "Jar is used by categories or transactions");
         }
