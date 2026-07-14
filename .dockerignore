@@ -1,0 +1,13 @@
+.git
+target
+.env
+.env.*
+*.log
+reports
+_uat-reports
+.idea
+.vscode
+node_modules
+.DS_Store
+implementation_plan.md
+walkthrough.md

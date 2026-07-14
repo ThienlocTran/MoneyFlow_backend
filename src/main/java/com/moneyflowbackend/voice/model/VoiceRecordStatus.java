@@ -7,6 +7,7 @@ public enum VoiceRecordStatus {
     TRANSCRIBED,
     PARSED,
     CONFIRMED,
+    STORAGE_FAILED,
     FAILED,
     AUDIO_DELETED,
     DELETED

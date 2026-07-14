@@ -1,27 +1,39 @@
 package com.moneyflowbackend.jar.service;
 
 import com.moneyflowbackend.category.repository.CategoryRepository;
+import com.moneyflowbackend.category.model.CategoryType;
 import com.moneyflowbackend.common.exception.BusinessException;
 import com.moneyflowbackend.jar.dto.JarAllocationRequest;
 import com.moneyflowbackend.jar.dto.JarListResponse;
+import com.moneyflowbackend.jar.dto.JarMonthlyDetailResponse;
+import com.moneyflowbackend.jar.dto.JarMonthlySummaryResponse;
 import com.moneyflowbackend.jar.dto.JarReorderRequest;
 import com.moneyflowbackend.jar.dto.JarRequest;
 import com.moneyflowbackend.jar.dto.JarResponse;
 import com.moneyflowbackend.jar.model.Jar;
 import com.moneyflowbackend.jar.repository.JarRepository;
+import com.moneyflowbackend.transaction.repository.TransactionRepository;
+import com.moneyflowbackend.transaction.model.TransactionType;
 import com.moneyflowbackend.workspace.model.Workspace;
 import com.moneyflowbackend.workspace.model.WorkspaceMember;
 import com.moneyflowbackend.workspace.model.WorkspaceRole;
 import com.moneyflowbackend.workspace.repository.WorkspaceMemberRepository;
 import com.moneyflowbackend.workspace.repository.WorkspaceRepository;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.text.NumberFormat;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.YearMonth;
+import java.time.format.DateTimeParseException;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -33,16 +45,19 @@ public class JarService {
 
     private final JarRepository jarRepository;
     private final CategoryRepository categoryRepository;
+    private final TransactionRepository transactionRepository;
     private final WorkspaceRepository workspaceRepository;
     private final WorkspaceMemberRepository workspaceMemberRepository;
 
     public JarService(
             JarRepository jarRepository,
             CategoryRepository categoryRepository,
+            TransactionRepository transactionRepository,
             WorkspaceRepository workspaceRepository,
             WorkspaceMemberRepository workspaceMemberRepository) {
         this.jarRepository = jarRepository;
         this.categoryRepository = categoryRepository;
+        this.transactionRepository = transactionRepository;
         this.workspaceRepository = workspaceRepository;
         this.workspaceMemberRepository = workspaceMemberRepository;
     }
@@ -54,6 +69,73 @@ public class JarService {
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
         return buildListResponse(jars);
+    }
+
+    @Transactional(readOnly = true)
+    public JarMonthlySummaryResponse monthlySummary(UUID workspaceId, String rawMonth, UUID userId) {
+        requireActiveMember(workspaceId, userId);
+        YearMonth month = parseMonth(rawMonth);
+        LocalDate startDate = month.atDay(1);
+        LocalDate endDate = month.plusMonths(1).atDay(1);
+        BigDecimal monthlyIncome = nz(transactionRepository.sumPostedByTypeInMonth(workspaceId, TransactionType.INCOME, startDate, endDate));
+        BigDecimal monthlyExpense = nz(transactionRepository.sumPostedByTypeInMonth(workspaceId, TransactionType.EXPENSE, startDate, endDate));
+
+        List<JarMonthlySummaryResponse.Item> items = jarRepository.findAllByWorkspaceIdAndIsActiveTrueOrderByDisplayOrderAscNameAsc(workspaceId).stream()
+                .map(jar -> monthlyItem(workspaceId, jar, monthlyIncome, startDate, endDate))
+                .toList();
+
+        return JarMonthlySummaryResponse.builder()
+                .month(month.toString())
+                .monthlyIncome(monthlyIncome)
+                .monthlyExpense(monthlyExpense)
+                .jarsTotalTargetPercent(items.stream()
+                        .map(JarMonthlySummaryResponse.Item::getTargetPercent)
+                        .reduce(BigDecimal.ZERO, BigDecimal::add))
+                .jarsMappedCategoryCount(categoryRepository.countByWorkspaceIdAndCategoryTypeAndJarIsNotNullAndIsActiveTrue(workspaceId, CategoryType.EXPENSE))
+                .unmappedActiveExpenseCategoryCount(categoryRepository.countByWorkspaceIdAndCategoryTypeAndJarIsNullAndIsActiveTrueAndIsArchivedFalse(workspaceId, CategoryType.EXPENSE))
+                .inactiveUnmappedCategoryCount(categoryRepository.countInactiveOrArchivedUnmapped(workspaceId, CategoryType.EXPENSE))
+                .overallStatus(overallStatus(items))
+                .jars(items)
+                .build();
+    }
+
+    @Transactional(readOnly = true)
+    public JarMonthlyDetailResponse monthlyDetail(UUID workspaceId, UUID jarId, String rawMonth, UUID userId) {
+        requireActiveMember(workspaceId, userId);
+        Jar jar = findJarInWorkspace(workspaceId, jarId);
+        YearMonth month = parseMonth(rawMonth);
+        LocalDate startDate = month.atDay(1);
+        LocalDate endDate = month.plusMonths(1).atDay(1);
+        BigDecimal monthlyIncome = nz(transactionRepository.sumPostedByTypeInMonth(workspaceId, TransactionType.INCOME, startDate, endDate));
+        JarMonthlySummaryResponse.Item item = monthlyItem(workspaceId, jar, monthlyIncome, startDate, endDate);
+        List<JarMonthlyDetailResponse.RecentTransaction> recentExpenses = recentTransactions(workspaceId, jarId, startDate, endDate);
+
+        return JarMonthlyDetailResponse.builder()
+                .month(month.toString())
+                .workspaceId(workspaceId)
+                .jarId(jar.getId())
+                .jarCode(jar.getCode())
+                .jarName(jar.getName())
+                .targetPercent(item.getTargetPercent())
+                .monthlyIncome(monthlyIncome)
+                .targetAmount(item.getTargetAmount())
+                .actualAmount(item.getActualAmount())
+                .remainingAmount(item.getRemainingAmount())
+                .overAmount(item.getOverAmount())
+                .actualPercentOfIncome(item.getActualPercentOfIncome())
+                .status(item.getStatus())
+                .message(monthlyDetailMessage(item))
+                .formulaText("targetAmount = monthlyIncome * targetPercent / 100; actualAmount = monthly expense where transaction.category.jar = jar")
+                .formula(JarMonthlyDetailResponse.Formula.builder()
+                        .label("Ngân sách hũ = thu nhập đã ghi trong tháng × tỷ lệ hũ")
+                        .calculationText(formatVnd(monthlyIncome) + " × " + formatPercent(item.getTargetPercent()) + "% = " + formatVnd(item.getTargetAmount()))
+                        .build())
+                .incomeBreakdown(incomeBreakdown(workspaceId, monthlyIncome, startDate, endDate))
+                .categoryBreakdown(categoryBreakdown(workspaceId, jarId, item.getActualAmount(), monthlyIncome, startDate, endDate))
+                .recentTransactions(recentExpenses)
+                .recentExpenseTransactions(recentExpenses)
+                .explanation(explanation(item))
+                .build();
     }
 
     @Transactional(readOnly = true)
@@ -119,13 +201,42 @@ public class JarService {
         requireWritableMember(workspaceId, userId);
         Jar jar = findJarInWorkspace(workspaceId, jarId);
 
-        if (!active && categoryRepository.countByWorkspaceIdAndJarIdAndIsActiveTrue(workspaceId, jarId) > 0) {
-            throw new BusinessException("JAR_HAS_ACTIVE_CATEGORIES", "Jar has active categories");
+        if (!active && jar.isActive()) {
+            if ((jar.getAllocationPercent() == null ? BigDecimal.ZERO : jar.getAllocationPercent()).compareTo(BigDecimal.ZERO) > 0) {
+                throw new BusinessException("JAR_DEACTIVATION_BREAKS_ALLOCATION", "Set jar allocation to 0 before deactivating it");
+            }
+            if (categoryRepository.countByWorkspaceIdAndJarId(workspaceId, jarId) > 0
+                    || transactionRepository.countJarUsage(workspaceId, jarId) > 0) {
+                throw new BusinessException("JAR_IN_USE", "Jar is used by categories or transactions");
+            }
+        }
+
+        if (active && !jar.isActive()) {
+            BigDecimal activeTotal = jarRepository.findAllByWorkspaceIdAndIsActiveTrue(workspaceId).stream()
+                    .filter(existing -> !existing.getId().equals(jarId))
+                    .map(Jar::getAllocationPercent)
+                    .filter(value -> value != null)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+            BigDecimal requestedTotal = activeTotal.add(jar.getAllocationPercent() == null ? BigDecimal.ZERO : jar.getAllocationPercent());
+            if (requestedTotal.compareTo(ONE_HUNDRED) > 0) {
+                throw new BusinessException("JAR_ALLOCATION_EXCEEDS_100", "Active jar allocation total cannot exceed 100%");
+            }
         }
 
         jar.setActive(active);
         jar.setUpdatedAt(Instant.now());
         jarRepository.save(jar);
+    }
+
+    @Transactional
+    public void delete(UUID workspaceId, UUID jarId, UUID userId) {
+        requireOwner(workspaceId, userId);
+        Jar jar = findJarInWorkspace(workspaceId, jarId);
+        if (categoryRepository.countByWorkspaceIdAndJarId(workspaceId, jarId) > 0
+                || transactionRepository.countJarUsage(workspaceId, jarId) > 0) {
+            throw new BusinessException("JAR_IN_USE", "Jar is used by categories or transactions");
+        }
+        jarRepository.delete(jar);
     }
 
     @Transactional
@@ -193,13 +304,183 @@ public class JarService {
                 .filter(ws -> ws.getDeletedAt() == null)
                 .orElseThrow(() -> new BusinessException("WORKSPACE_NOT_FOUND", "Workspace not found", HttpStatus.NOT_FOUND));
         return workspaceMemberRepository.findByWorkspaceIdAndUserIdAndMemberStatus(workspaceId, userId, "ACTIVE")
+                .or(() -> workspaceMemberRepository.findByWorkspaceIdAndPersonLinkedUserIdAndMemberStatus(workspaceId, userId, "ACTIVE"))
                 .orElseThrow(() -> new BusinessException("WORKSPACE_ACCESS_DENIED", "Workspace access denied", HttpStatus.FORBIDDEN));
     }
 
+    private JarMonthlySummaryResponse.Item monthlyItem(
+            UUID workspaceId,
+            Jar jar,
+            BigDecimal monthlyIncome,
+            LocalDate startDate,
+            LocalDate endDate) {
+        BigDecimal targetPercent = nz(jar.getAllocationPercent());
+        BigDecimal targetAmount = monthlyIncome.multiply(targetPercent).divide(ONE_HUNDRED, 2, RoundingMode.HALF_UP);
+        BigDecimal actualAmount = nz(transactionRepository.sumPostedExpenseByJarInMonth(workspaceId, jar.getId(), startDate, endDate));
+        long txCount = transactionRepository.countPostedExpenseByJarInMonth(workspaceId, jar.getId(), startDate, endDate);
+        BigDecimal remainingAmount = targetAmount.subtract(actualAmount);
+        BigDecimal overAmount = actualAmount.subtract(targetAmount).max(BigDecimal.ZERO);
+        BigDecimal actualPercent = monthlyIncome.compareTo(BigDecimal.ZERO) > 0
+                ? actualAmount.multiply(ONE_HUNDRED).divide(monthlyIncome, 2, RoundingMode.HALF_UP)
+                : BigDecimal.ZERO;
+        String status = monthlyStatus(monthlyIncome, actualAmount, targetAmount, txCount);
+
+        return JarMonthlySummaryResponse.Item.builder()
+                .jarId(jar.getId())
+                .jarCode(jar.getCode())
+                .jarName(jar.getName())
+                .targetPercent(targetPercent)
+                .targetAmount(targetAmount)
+                .actualAmount(actualAmount)
+                .actualPercentOfIncome(actualPercent)
+                .transactionCount(txCount)
+                .categoryCount(categoryRepository.countByWorkspaceIdAndJarIdAndIsActiveTrue(workspaceId, jar.getId()))
+                .remainingAmount(remainingAmount)
+                .overAmount(overAmount)
+                .status(status)
+                .message(monthlyMessage(status, jar.getCode()))
+                .build();
+    }
+
+    private String monthlyStatus(BigDecimal monthlyIncome, BigDecimal actualAmount, BigDecimal targetAmount, long txCount) {
+        if (monthlyIncome.compareTo(BigDecimal.ZERO) <= 0) {
+            return "NO_INCOME";
+        }
+        if (txCount == 0) {
+            return "NO_DATA";
+        }
+        if (actualAmount.compareTo(targetAmount) <= 0) {
+            return "OK";
+        }
+        if (actualAmount.compareTo(targetAmount.multiply(new BigDecimal("1.1"))) <= 0) {
+            return "WARNING";
+        }
+        return "OVER";
+    }
+
+    private String monthlyMessage(String status, String jarCode) {
+        return switch (status) {
+            case "NO_INCOME" -> "No monthly income to evaluate " + jarCode;
+            case "NO_DATA" -> "No spending recorded for " + jarCode;
+            case "OK" -> jarCode + " is within target";
+            case "WARNING" -> jarCode + " is slightly over target";
+            default -> jarCode + " is over target";
+        };
+    }
+
+    private String overallStatus(List<JarMonthlySummaryResponse.Item> items) {
+        if (items.stream().anyMatch(item -> "OVER".equals(item.getStatus()))) return "OVER";
+        if (items.stream().anyMatch(item -> "WARNING".equals(item.getStatus()))) return "WARNING";
+        if (items.stream().allMatch(item -> "NO_INCOME".equals(item.getStatus()))) return "NO_INCOME";
+        if (items.stream().allMatch(item -> "NO_DATA".equals(item.getStatus()))) return "NO_DATA";
+        return "OK";
+    }
+
+    private List<JarMonthlyDetailResponse.CategoryBreakdown> categoryBreakdown(
+            UUID workspaceId, UUID jarId, BigDecimal actualAmount, BigDecimal monthlyIncome, LocalDate startDate, LocalDate endDate) {
+        return transactionRepository.sumPostedExpenseByJarCategoryInMonth(workspaceId, jarId, startDate, endDate).stream()
+                .map(row -> JarMonthlyDetailResponse.CategoryBreakdown.builder()
+                        .categoryId((UUID) row[0])
+                        .categoryName((String) row[1])
+                        .transactionCount((Long) row[2])
+                        .totalAmount(nz((BigDecimal) row[3]))
+                        .percentOfJarActual(percent(nz((BigDecimal) row[3]), actualAmount))
+                        .percentOfMonthlyIncome(percent(nz((BigDecimal) row[3]), monthlyIncome))
+                        .build())
+                .toList();
+    }
+
+    private List<JarMonthlyDetailResponse.RecentTransaction> recentTransactions(
+            UUID workspaceId, UUID jarId, LocalDate startDate, LocalDate endDate) {
+        return transactionRepository.findRecentPostedExpenseByJarInMonth(workspaceId, jarId, startDate, endDate, PageRequest.of(0, 10)).stream()
+                .map(this::transactionItem)
+                .toList();
+    }
+
+    private JarMonthlyDetailResponse.IncomeBreakdown incomeBreakdown(
+            UUID workspaceId, BigDecimal monthlyIncome, LocalDate startDate, LocalDate endDate) {
+        return JarMonthlyDetailResponse.IncomeBreakdown.builder()
+                .transactionCount(transactionRepository.countPostedIncomeInMonth(workspaceId, startDate, endDate))
+                .totalAmount(monthlyIncome)
+                .recentTransactions(transactionRepository.findRecentPostedIncomeInMonth(workspaceId, startDate, endDate, PageRequest.of(0, 10)).stream()
+                        .map(this::transactionItem)
+                        .toList())
+                .build();
+    }
+
+    private JarMonthlyDetailResponse.RecentTransaction transactionItem(Object[] row) {
+        return JarMonthlyDetailResponse.RecentTransaction.builder()
+                .id((UUID) row[0])
+                .date((LocalDate) row[1])
+                .categoryName((String) row[2])
+                .description((String) row[3])
+                .amount(nz((BigDecimal) row[4]))
+                .walletName((String) row[5])
+                .build();
+    }
+
+    private JarMonthlyDetailResponse.Explanation explanation(JarMonthlySummaryResponse.Item item) {
+        BigDecimal targetPercent = item.getTargetPercent();
+        return JarMonthlyDetailResponse.Explanation.builder()
+                .whyThisStatus("Đã chi " + formatVnd(item.getActualAmount()) + " trong khi ngân sách khuyến nghị là " + formatVnd(item.getTargetAmount()) + ".")
+                .whatChangesBudget("Khi bạn ghi thêm thu nhập trong tháng, ngân sách của hũ sẽ tăng theo tỷ lệ " + formatPercent(targetPercent) + "%.")
+                .nextAction(nextAction(item.getStatus()))
+                .build();
+    }
+
+    private String monthlyDetailMessage(JarMonthlySummaryResponse.Item item) {
+        return switch (item.getStatus()) {
+            case "NO_INCOME" -> "Chưa có thu nhập trong tháng để tính ngân sách hũ " + item.getJarName() + ".";
+            case "NO_DATA" -> "Hũ " + item.getJarName() + " chưa có khoản chi trong tháng này.";
+            case "OK" -> "Hũ " + item.getJarName() + " còn " + formatVnd(item.getRemainingAmount()) + " so với mức khuyến nghị.";
+            case "WARNING" -> "Hũ " + item.getJarName() + " đang vượt " + formatVnd(item.getOverAmount()) + " so với mức khuyến nghị.";
+            default -> "Hũ " + item.getJarName() + " đã vượt mạnh mức khuyến nghị.";
+        };
+    }
+
+    private String nextAction(String status) {
+        return switch (status) {
+            case "NO_INCOME" -> "Ghi thu nhập trong tháng để hệ thống tính ngân sách động cho từng hũ.";
+            case "NO_DATA", "OK" -> "Tiếp tục theo dõi các danh mục chi nhiều nhất trong hũ này.";
+            default -> "Kiểm tra các danh mục chi nhiều nhất hoặc ghi thêm thu nhập nếu tháng này còn doanh thu chưa nhập.";
+        };
+    }
+
+    private BigDecimal percent(BigDecimal amount, BigDecimal total) {
+        return total.compareTo(BigDecimal.ZERO) > 0
+                ? amount.multiply(ONE_HUNDRED).divide(total, 2, RoundingMode.HALF_UP)
+                : BigDecimal.ZERO;
+    }
+
+    private String formatPercent(BigDecimal value) {
+        return value.stripTrailingZeros().toPlainString();
+    }
+
+    private String formatVnd(BigDecimal amount) {
+        NumberFormat format = NumberFormat.getIntegerInstance(Locale.forLanguageTag("vi-VN"));
+        return format.format(amount.setScale(0, RoundingMode.HALF_UP)) + " đ";
+    }
+
+    private YearMonth parseMonth(String rawMonth) {
+        try {
+            return YearMonth.parse(rawMonth == null ? "" : rawMonth.trim());
+        } catch (DateTimeParseException ex) {
+            throw new BusinessException("INVALID_MONTH", "Month must use yyyy-MM format");
+        }
+    }
+
+    private BigDecimal nz(BigDecimal value) {
+        return value == null ? BigDecimal.ZERO : value;
+    }
+
     private WorkspaceMember requireWritableMember(UUID workspaceId, UUID userId) {
+        return requireOwner(workspaceId, userId);
+    }
+
+    private WorkspaceMember requireOwner(UUID workspaceId, UUID userId) {
         WorkspaceMember member = requireActiveMember(workspaceId, userId);
-        if (member.getRole() == WorkspaceRole.VIEWER) {
-            throw new BusinessException("FORBIDDEN", "Viewer cannot modify jars", HttpStatus.FORBIDDEN);
+        if (member.getRole() != WorkspaceRole.OWNER) {
+            throw new BusinessException("FORBIDDEN", "Only workspace owner can modify jars", HttpStatus.FORBIDDEN);
         }
         return member;
     }
@@ -238,12 +519,16 @@ public class JarService {
     private JarResponse mapToResponse(Jar j) {
         return JarResponse.builder()
                 .id(j.getId())
+                .workspaceId(j.getWorkspace().getId())
                 .code(j.getCode())
                 .name(j.getName())
                 .allocationPercent(j.getAllocationPercent())
                 .displayOrder(j.getDisplayOrder())
                 .isActive(j.isActive())
                 .categoryCount(categoryRepository.countByWorkspaceIdAndJarIdAndIsActiveTrue(j.getWorkspace().getId(), j.getId()))
+                .usageCount(transactionRepository.countJarUsage(j.getWorkspace().getId(), j.getId()))
+                .createdAt(j.getCreatedAt())
+                .updatedAt(j.getUpdatedAt())
                 .build();
     }
 }

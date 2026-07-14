@@ -1,12 +1,19 @@
 package com.moneyflowbackend.dashboard.controller;
 
-import com.moneyflowbackend.dto.ApiResponse;
-import com.moneyflowbackend.dashboard.dto.*;
+import com.moneyflowbackend.dashboard.dto.DashboardCategoryResponse;
+import com.moneyflowbackend.dashboard.dto.DashboardComparisonResponse;
+import com.moneyflowbackend.dashboard.dto.DashboardJarResponse;
+import com.moneyflowbackend.dashboard.dto.DashboardResponse;
 import com.moneyflowbackend.dashboard.service.DashboardService;
+import com.moneyflowbackend.dto.ApiResponse;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 import java.util.UUID;
@@ -25,22 +32,20 @@ public class DashboardController {
     public ResponseEntity<ApiResponse<DashboardResponse>> getDashboard(
             @PathVariable UUID workspaceId,
             @RequestParam(required = false) String month,
-            @RequestParam(defaultValue = "SAME_PERIOD") String comparisonMode) {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        UUID userId = UUID.fromString(auth.getName());
-        DashboardResponse res = dashboardService.getDashboard(workspaceId, month, comparisonMode, userId);
+            @RequestParam(defaultValue = "SAME_PERIOD") String comparisonMode,
+            @RequestParam(required = false) UUID createdBy) {
+        DashboardResponse res = dashboardService.getDashboard(workspaceId, month, comparisonMode, currentUserId(), createdBy);
         return ResponseEntity.ok(ApiResponse.ok("Dashboard loaded", res));
     }
 
     @GetMapping("/monthly")
-    public ResponseEntity<ApiResponse<DashboardMonthlyResponse>> getMonthlySummary(
+    public ResponseEntity<ApiResponse<DashboardResponse>> getMonthlySummary(
             @PathVariable UUID workspaceId,
-            @RequestParam int year,
-            @RequestParam int month) {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        UUID userId = UUID.fromString(auth.getName());
-        DashboardMonthlyResponse res = dashboardService.getMonthlySummary(workspaceId, year, month, userId);
-        return ResponseEntity.ok(ApiResponse.ok("Lấy tóm tắt tháng thành công", res));
+            @RequestParam(required = false) String month,
+            @RequestParam(defaultValue = "SAME_PERIOD") String comparisonMode,
+            @RequestParam(required = false) UUID createdBy) {
+        DashboardResponse res = dashboardService.getDashboard(workspaceId, month, comparisonMode, currentUserId(), createdBy);
+        return ResponseEntity.ok(ApiResponse.ok("Dashboard monthly loaded", res));
     }
 
     @GetMapping("/categories")
@@ -48,9 +53,7 @@ public class DashboardController {
             @PathVariable UUID workspaceId,
             @RequestParam int year,
             @RequestParam int month) {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        UUID userId = UUID.fromString(auth.getName());
-        List<DashboardCategoryResponse> res = dashboardService.getCategoryBreakdown(workspaceId, year, month, userId);
+        List<DashboardCategoryResponse> res = dashboardService.getCategoryBreakdown(workspaceId, year, month, currentUserId());
         return ResponseEntity.ok(ApiResponse.ok("Lấy phân tích danh mục chi tiêu thành công", res));
     }
 
@@ -59,9 +62,7 @@ public class DashboardController {
             @PathVariable UUID workspaceId,
             @RequestParam int year,
             @RequestParam int month) {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        UUID userId = UUID.fromString(auth.getName());
-        List<DashboardJarResponse> res = dashboardService.getJarBreakdown(workspaceId, year, month, userId);
+        List<DashboardJarResponse> res = dashboardService.getJarBreakdown(workspaceId, year, month, currentUserId());
         return ResponseEntity.ok(ApiResponse.ok("Lấy phân tích 6 hũ thành công", res));
     }
 
@@ -70,9 +71,12 @@ public class DashboardController {
             @PathVariable UUID workspaceId,
             @RequestParam int year,
             @RequestParam int month) {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        UUID userId = UUID.fromString(auth.getName());
-        DashboardComparisonResponse res = dashboardService.getExpenseComparison(workspaceId, year, month, userId);
+        DashboardComparisonResponse res = dashboardService.getExpenseComparison(workspaceId, year, month, currentUserId());
         return ResponseEntity.ok(ApiResponse.ok("Lấy so sánh chi tiêu với tháng trước thành công", res));
+    }
+
+    private UUID currentUserId() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        return UUID.fromString(auth.getName());
     }
 }

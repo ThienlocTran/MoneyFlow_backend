@@ -14,6 +14,7 @@ public class WorkspaceResponse {
     private UUID id;
     private String name;
     private String workspaceType;
+    private String role;
     private String currency;
     private String timezone;
     private String quickAmountUnit;

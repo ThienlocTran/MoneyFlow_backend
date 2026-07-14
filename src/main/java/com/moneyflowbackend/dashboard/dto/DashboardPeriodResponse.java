@@ -15,5 +15,7 @@ public class DashboardPeriodResponse {
     private String month;
     private LocalDate dateFrom;
     private LocalDate dateTo;
+    private LocalDate startDate;
+    private LocalDate endDate;
     private String comparisonMode;
 }

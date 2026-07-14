@@ -1,6 +1,8 @@
 package com.moneyflowbackend;
 
+import com.moneyflowbackend.auth.dto.LoginRequest;
 import com.moneyflowbackend.auth.dto.RegisterRequest;
+import com.moneyflowbackend.auth.dto.TokenResponse;
 import com.moneyflowbackend.auth.dto.UserResponse;
 import com.moneyflowbackend.auth.model.User;
 import com.moneyflowbackend.auth.repository.UserRepository;
@@ -19,6 +21,8 @@ import com.moneyflowbackend.category.service.CategoryService;
 import com.moneyflowbackend.common.exception.BusinessException;
 import com.moneyflowbackend.jar.dto.JarAllocationRequest;
 import com.moneyflowbackend.jar.dto.JarListResponse;
+import com.moneyflowbackend.jar.dto.JarMonthlyDetailResponse;
+import com.moneyflowbackend.jar.dto.JarMonthlySummaryResponse;
 import com.moneyflowbackend.jar.dto.JarReorderRequest;
 import com.moneyflowbackend.jar.dto.JarRequest;
 import com.moneyflowbackend.jar.dto.JarResponse;
@@ -35,8 +39,10 @@ import com.moneyflowbackend.workspace.repository.WorkspaceMemberRepository;
 import com.moneyflowbackend.workspace.repository.WorkspaceRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -46,12 +52,16 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 
 @SpringBootTest
+@AutoConfigureMockMvc
 @ActiveProfiles("test")
 @Transactional
 class JarCategoryModuleIntegrationTests {
 
+    @Autowired MockMvc mockMvc;
     @Autowired AuthService authService;
     @Autowired UserRepository userRepository;
     @Autowired WorkspaceRepository workspaceRepository;
@@ -89,8 +99,10 @@ class JarCategoryModuleIntegrationTests {
     void jarCrudAllocationReorderStatusAndAuthRulesWork() {
         TestContext owner = createContext("jar_owner", WorkspaceRole.OWNER);
         TestContext viewer = createContext("jar_viewer", WorkspaceRole.VIEWER);
+        TestContext editor = createContext("jar_editor", WorkspaceRole.EDITOR);
         TestContext outsider = createContext("jar_outsider", WorkspaceRole.OWNER);
         workspaceMemberRepository.save(WorkspaceMember.builder().workspace(owner.workspace()).user(viewer.user()).role(WorkspaceRole.VIEWER).build());
+        workspaceMemberRepository.save(WorkspaceMember.builder().workspace(owner.workspace()).user(editor.user()).role(WorkspaceRole.EDITOR).build());
 
         JarResponse jar = jarService.create(owner.workspace().getId(), jarRequest("CUSTOM", "Custom", "25"), owner.user().getId());
         JarResponse second = jarService.create(owner.workspace().getId(), jarRequest("SECOND", "Second", "40"), owner.user().getId());
@@ -130,17 +142,21 @@ class JarCategoryModuleIntegrationTests {
         allocations.setItems(List.of(allocation));
         assertThat(jarService.updateAllocations(owner.workspace().getId(), allocations, owner.user().getId()).isAllocationValid()).isFalse();
 
-        jarService.toggleStatus(owner.workspace().getId(), second.getId(), false, owner.user().getId());
-        assertThat(jarRepository.findById(second.getId()).orElseThrow().isActive()).isFalse();
-        jarService.toggleStatus(owner.workspace().getId(), second.getId(), true, owner.user().getId());
+        assertThatThrownBy(() -> jarService.toggleStatus(owner.workspace().getId(), second.getId(), false, owner.user().getId()))
+                .isInstanceOf(BusinessException.class).extracting("code").isEqualTo("JAR_DEACTIVATION_BREAKS_ALLOCATION");
+        JarResponse inactiveAllowed = jarService.create(owner.workspace().getId(), jarRequest("ZERO", "Zero", "0"), owner.user().getId());
+        jarService.toggleStatus(owner.workspace().getId(), inactiveAllowed.getId(), false, owner.user().getId());
+        assertThat(jarRepository.findById(inactiveAllowed.getId()).orElseThrow().isActive()).isFalse();
 
         CategoryResponse category = categoryService.create(owner.workspace().getId(), categoryRequest("Food", "EXPENSE", jar.getId()), owner.user().getId());
         assertThatThrownBy(() -> jarService.toggleStatus(owner.workspace().getId(), jar.getId(), false, owner.user().getId()))
-                .isInstanceOf(BusinessException.class).extracting("code").isEqualTo("JAR_HAS_ACTIVE_CATEGORIES");
+                .isInstanceOf(BusinessException.class).extracting("code").isEqualTo("JAR_DEACTIVATION_BREAKS_ALLOCATION");
         assertThat(category.getJarId()).isEqualTo(jar.getId());
 
         assertThat(jarService.list(owner.workspace().getId(), false, viewer.user().getId()).getJars()).hasSize(2);
         assertThatThrownBy(() -> jarService.create(owner.workspace().getId(), jarRequest("VIEW", "Viewer", "1"), viewer.user().getId()))
+                .isInstanceOf(BusinessException.class).extracting("code").isEqualTo("FORBIDDEN");
+        assertThatThrownBy(() -> jarService.create(owner.workspace().getId(), jarRequest("EDIT", "Editor", "1"), editor.user().getId()))
                 .isInstanceOf(BusinessException.class).extracting("code").isEqualTo("FORBIDDEN");
         assertThatThrownBy(() -> jarService.list(owner.workspace().getId(), false, outsider.user().getId()))
                 .isInstanceOf(BusinessException.class).extracting("code").isEqualTo("WORKSPACE_ACCESS_DENIED");
@@ -164,7 +180,7 @@ class JarCategoryModuleIntegrationTests {
         assertThatThrownBy(() -> categoryService.create(ctx.workspace().getId(), categoryRequest("lunch", "EXPENSE", jar.getId()), ctx.user().getId()))
                 .isInstanceOf(BusinessException.class).extracting("code").isEqualTo("CATEGORY_NAME_ALREADY_EXISTS");
 
-        JarResponse inactiveJar = jarService.create(ctx.workspace().getId(), jarRequest("OLD", "Old", "1"), ctx.user().getId());
+        JarResponse inactiveJar = jarService.create(ctx.workspace().getId(), jarRequest("OLD", "Old", "0"), ctx.user().getId());
         jarService.toggleStatus(ctx.workspace().getId(), inactiveJar.getId(), false, ctx.user().getId());
         assertThatThrownBy(() -> categoryService.create(ctx.workspace().getId(), categoryRequest("Old Cat", "EXPENSE", inactiveJar.getId()), ctx.user().getId()))
                 .isInstanceOf(BusinessException.class).extracting("code").isEqualTo("JAR_INACTIVE");
@@ -197,6 +213,17 @@ class JarCategoryModuleIntegrationTests {
                 .build());
         assertThatThrownBy(() -> categoryService.update(ctx.workspace().getId(), tracked.getId(), categoryRequest("Tracked", "INCOME", null), ctx.user().getId()))
                 .isInstanceOf(BusinessException.class).extracting("code").isEqualTo("CATEGORY_TYPE_CHANGE_NOT_ALLOWED");
+        assertThatThrownBy(() -> categoryService.delete(ctx.workspace().getId(), tracked.getId(), ctx.user().getId()))
+                .isInstanceOf(BusinessException.class).extracting("code").isEqualTo("CATEGORY_IN_USE");
+        assertThat(categoryService.list(ctx.workspace().getId(), "EXPENSE", jar.getId(), null, null, null, true, true, ctx.user().getId()))
+                .filteredOn(category -> category.getId().equals(tracked.getId()))
+                .singleElement()
+                .extracting(CategoryResponse::getUsageCount, CategoryResponse::getKeywordCount)
+                .containsExactly(1L, 0L);
+
+        CategoryResponse unused = categoryService.create(ctx.workspace().getId(), categoryRequest("Unused", "EXPENSE", jar.getId()), ctx.user().getId());
+        categoryService.delete(ctx.workspace().getId(), unused.getId(), ctx.user().getId());
+        assertThat(categoryRepository.findById(unused.getId())).isEmpty();
     }
 
     @Test
@@ -213,6 +240,11 @@ class JarCategoryModuleIntegrationTests {
         assertThat(keyword.getKeyword()).isEqualTo("ca phe");
         assertThat(keyword.isUserLearned()).isTrue();
         assertThat(keywordService.list(ctx.workspace().getId(), food.getId(), ctx.user().getId())).extracting(CategoryKeywordResponse::getId).containsExactly(keyword.getId());
+        assertThat(categoryService.list(ctx.workspace().getId(), "EXPENSE", jar.getId(), null, null, null, false, false, ctx.user().getId()))
+                .filteredOn(category -> category.getId().equals(food.getId()))
+                .singleElement()
+                .extracting(CategoryResponse::getKeywordCount, CategoryResponse::getUsageCount)
+                .containsExactly(1L, 0L);
 
         assertThatThrownBy(() -> keywordService.create(ctx.workspace().getId(), transport.getId(), keywordRequest("CA PHE", 1), ctx.user().getId()))
                 .isInstanceOf(BusinessException.class).extracting("code").isEqualTo("KEYWORD_ALREADY_EXISTS");
@@ -240,6 +272,191 @@ class JarCategoryModuleIntegrationTests {
                 .isInstanceOf(BusinessException.class).extracting("code").isEqualTo("FORBIDDEN");
         keywordService.delete(ctx.workspace().getId(), food.getId(), keyword.getId(), ctx.user().getId());
         assertThat(categoryKeywordRepository.findAllByWorkspaceIdAndCategoryIdOrderByPriorityDescKeywordAsc(ctx.workspace().getId(), food.getId())).isEmpty();
+    }
+
+    @Test
+    void monthlySummaryEvaluatesJarBudgetsAndCategoryMappingGaps() {
+        TestContext ctx = createContext("jar_budget", WorkspaceRole.OWNER);
+        Jar nec = jar(ctx, "NEC", "Essential", "55", 1);
+        Jar ffa = jar(ctx, "FFA", "Freedom", "10", 2);
+        Jar ltss = jar(ctx, "LTSS", "Saving", "10", 3);
+        Jar edu = jar(ctx, "EDU", "Education", "10", 4);
+        Jar play = jar(ctx, "PLAY", "Play", "10", 5);
+        Jar give = jar(ctx, "GIVE", "Give", "5", 6);
+        Category income = category(ctx, "Salary", CategoryType.INCOME, null, true);
+        Category necCat = category(ctx, "Food", CategoryType.EXPENSE, nec, true);
+        Category ffaCat = category(ctx, "Investment", CategoryType.EXPENSE, ffa, true);
+        Category playCat = category(ctx, "Fun", CategoryType.EXPENSE, play, true);
+        category(ctx, "Unmapped", CategoryType.EXPENSE, null, true);
+        category(ctx, "PASE", CategoryType.EXPENSE, null, false);
+
+        tx(ctx, income, TransactionType.INCOME, "1000", "2026-07-01");
+        tx(ctx, necCat, TransactionType.EXPENSE, "500", "2026-07-02");
+        tx(ctx, ffaCat, TransactionType.EXPENSE, "105", "2026-07-03");
+        tx(ctx, playCat, TransactionType.EXPENSE, "200", "2026-07-04");
+
+        JarMonthlySummaryResponse summary = jarService.monthlySummary(ctx.workspace().getId(), "2026-07", ctx.user().getId());
+
+        assertThat(summary.getJars()).hasSize(6).extracting(JarMonthlySummaryResponse.Item::getJarCode)
+                .containsExactly("NEC", "FFA", "LTSS", "EDU", "PLAY", "GIVE");
+        assertThat(summary.getMonthlyIncome()).isEqualByComparingTo("1000");
+        assertThat(summary.getJarsTotalTargetPercent()).isEqualByComparingTo("100");
+        assertThat(summary.getJarsMappedCategoryCount()).isEqualTo(3);
+        assertThat(summary.getUnmappedActiveExpenseCategoryCount()).isEqualTo(1);
+        assertThat(summary.getInactiveUnmappedCategoryCount()).isEqualTo(1);
+        assertThat(status(summary, "NEC")).isEqualTo("OK");
+        assertThat(status(summary, "FFA")).isEqualTo("WARNING");
+        assertThat(status(summary, "PLAY")).isEqualTo("OVER");
+        assertThat(status(summary, "LTSS")).isEqualTo("NO_DATA");
+        assertThat(summary.getOverallStatus()).isEqualTo("OVER");
+    }
+
+    @Test
+    void monthlySummaryReturnsNoIncomeWhenIncomeIsMissing() {
+        TestContext ctx = createContext("jar_no_income", WorkspaceRole.OWNER);
+        Jar nec = jar(ctx, "NEC", "Essential", "55", 1);
+        jar(ctx, "FFA", "Freedom", "10", 2);
+        jar(ctx, "LTSS", "Saving", "10", 3);
+        jar(ctx, "EDU", "Education", "10", 4);
+        jar(ctx, "PLAY", "Play", "10", 5);
+        jar(ctx, "GIVE", "Give", "5", 6);
+        Category food = category(ctx, "Food", CategoryType.EXPENSE, nec, true);
+        tx(ctx, food, TransactionType.EXPENSE, "100", "2026-07-04");
+
+        JarMonthlySummaryResponse summary = jarService.monthlySummary(ctx.workspace().getId(), "2026-07", ctx.user().getId());
+
+        assertThat(summary.getOverallStatus()).isEqualTo("NO_INCOME");
+        assertThat(summary.getJars()).extracting(JarMonthlySummaryResponse.Item::getStatus).containsOnly("NO_INCOME");
+    }
+
+    @Test
+    void monthlyDetailExplainsJarTotalsAndUsesOnlyActiveMappedCategories() {
+        TestContext ctx = createContext("jar_detail", WorkspaceRole.OWNER);
+        TestContext outsider = createContext("jar_detail_outsider", WorkspaceRole.OWNER);
+        Jar nec = jar(ctx, "NEC", "Essential", "55", 1);
+        Category income = category(ctx, "Salary", CategoryType.INCOME, null, true);
+        Category food = category(ctx, "Food", CategoryType.EXPENSE, nec, true);
+        Category rent = category(ctx, "Rent", CategoryType.EXPENSE, nec, true);
+        Category old = category(ctx, "Old PASE", CategoryType.EXPENSE, nec, false);
+        Category unmappedPase = category(ctx, "PASE", CategoryType.EXPENSE, null, false);
+
+        tx(ctx, income, TransactionType.INCOME, "250", "2026-07-01", "Salary 1");
+        tx(ctx, income, TransactionType.INCOME, "750", "2026-07-05", "Salary 2");
+        tx(ctx, food, TransactionType.EXPENSE, "100", "2026-07-02", "Lunch");
+        tx(ctx, food, TransactionType.EXPENSE, "50", "2026-07-03", "Coffee");
+        tx(ctx, rent, TransactionType.EXPENSE, "300", "2026-07-04", "Rent");
+        tx(ctx, old, TransactionType.EXPENSE, "999", "2026-07-05", "Historical inactive");
+        tx(ctx, unmappedPase, TransactionType.EXPENSE, "999", "2026-07-06", "Unmapped PASE");
+
+        JarMonthlyDetailResponse detail = jarService.monthlyDetail(ctx.workspace().getId(), nec.getId(), "2026-07", ctx.user().getId());
+
+        assertThat(detail.getMonth()).isEqualTo("2026-07");
+        assertThat(detail.getWorkspaceId()).isEqualTo(ctx.workspace().getId());
+        assertThat(detail.getJarCode()).isEqualTo("NEC");
+        assertThat(detail.getMonthlyIncome()).isEqualByComparingTo("1000");
+        assertThat(detail.getTargetAmount()).isEqualByComparingTo("550");
+        assertThat(detail.getActualAmount()).isEqualByComparingTo("450");
+        assertThat(detail.getRemainingAmount()).isEqualByComparingTo("100");
+        assertThat(detail.getOverAmount()).isEqualByComparingTo("0");
+        assertThat(detail.getActualPercentOfIncome()).isEqualByComparingTo("45");
+        assertThat(detail.getStatus()).isEqualTo("OK");
+        assertThat(detail.getMessage()).contains("Essential");
+        assertThat(detail.getFormulaText()).contains("targetAmount", "actualAmount");
+        assertThat(detail.getFormula().getLabel()).contains("Ngân sách hũ");
+        assertThat(detail.getFormula().getCalculationText()).contains("1.000", "55%", "550");
+        assertThat(detail.getIncomeBreakdown().getTransactionCount()).isEqualTo(2);
+        assertThat(detail.getIncomeBreakdown().getTotalAmount()).isEqualByComparingTo("1000");
+        assertThat(detail.getIncomeBreakdown().getRecentTransactions()).extracting(JarMonthlyDetailResponse.RecentTransaction::getDescription)
+                .containsExactly("Salary 2", "Salary 1");
+        assertThat(detail.getCategoryBreakdown()).extracting(JarMonthlyDetailResponse.CategoryBreakdown::getCategoryName)
+                .containsExactly("Rent", "Food");
+        assertThat(detail.getCategoryBreakdown().get(1).getTransactionCount()).isEqualTo(2);
+        assertThat(detail.getCategoryBreakdown().get(1).getTotalAmount()).isEqualByComparingTo("150");
+        assertThat(detail.getCategoryBreakdown().get(1).getPercentOfJarActual()).isEqualByComparingTo("33.33");
+        assertThat(detail.getCategoryBreakdown().get(1).getPercentOfMonthlyIncome()).isEqualByComparingTo("15");
+        assertThat(detail.getRecentTransactions()).extracting(JarMonthlyDetailResponse.RecentTransaction::getDescription)
+                .containsExactly("Rent", "Coffee", "Lunch");
+        assertThat(detail.getRecentExpenseTransactions()).extracting(JarMonthlyDetailResponse.RecentTransaction::getDescription)
+                .containsExactly("Rent", "Coffee", "Lunch");
+        assertThat(detail.getExplanation().getWhatChangesBudget()).contains("55%");
+        assertThatThrownBy(() -> jarService.monthlyDetail(ctx.workspace().getId(), nec.getId(), "2026-07", outsider.user().getId()))
+                .isInstanceOf(BusinessException.class).extracting("code").isEqualTo("WORKSPACE_ACCESS_DENIED");
+    }
+
+    @Test
+    void monthlyDetailStatusesFollowBudgetRules() {
+        TestContext warningCtx = createContext("jar_detail_warning", WorkspaceRole.OWNER);
+        Jar warningJar = jar(warningCtx, "NEC", "Essential", "55", 1);
+        Category warningIncome = category(warningCtx, "Salary", CategoryType.INCOME, null, true);
+        Category warningFood = category(warningCtx, "Food", CategoryType.EXPENSE, warningJar, true);
+        tx(warningCtx, warningIncome, TransactionType.INCOME, "1000", "2026-07-01");
+        tx(warningCtx, warningFood, TransactionType.EXPENSE, "600", "2026-07-02");
+
+        TestContext overCtx = createContext("jar_detail_over", WorkspaceRole.OWNER);
+        Jar overJar = jar(overCtx, "NEC", "Essential", "55", 1);
+        Category overIncome = category(overCtx, "Salary", CategoryType.INCOME, null, true);
+        Category overFood = category(overCtx, "Food", CategoryType.EXPENSE, overJar, true);
+        tx(overCtx, overIncome, TransactionType.INCOME, "1000", "2026-07-01");
+        tx(overCtx, overFood, TransactionType.EXPENSE, "700", "2026-07-02");
+
+        TestContext noIncomeCtx = createContext("jar_detail_no_income", WorkspaceRole.OWNER);
+        Jar noIncomeJar = jar(noIncomeCtx, "NEC", "Essential", "55", 1);
+        Category noIncomeFood = category(noIncomeCtx, "Food", CategoryType.EXPENSE, noIncomeJar, true);
+        tx(noIncomeCtx, noIncomeFood, TransactionType.EXPENSE, "100", "2026-07-02");
+
+        assertThat(jarService.monthlyDetail(warningCtx.workspace().getId(), warningJar.getId(), "2026-07", warningCtx.user().getId()).getStatus())
+                .isEqualTo("WARNING");
+        assertThat(jarService.monthlyDetail(overCtx.workspace().getId(), overJar.getId(), "2026-07", overCtx.user().getId()).getStatus())
+                .isEqualTo("OVER");
+        assertThat(jarService.monthlyDetail(noIncomeCtx.workspace().getId(), noIncomeJar.getId(), "2026-07", noIncomeCtx.user().getId()).getStatus())
+                .isEqualTo("NO_INCOME");
+    }
+
+    @Test
+    void monthlyDetailEndpointReturnsWrappedBreakdown() throws Exception {
+        String username = "jar_detail_api_" + UUID.randomUUID().toString().substring(0, 8);
+        UserResponse user = authService.register(registerRequest(username));
+        TokenResponse token = authService.login(loginRequest(user.getUsername()));
+        Workspace workspace = workspaceRepository.findAllByUserId(user.getId()).get(0);
+        Jar nec = jarRepository.findAllByWorkspaceIdOrderByDisplayOrderAscNameAsc(workspace.getId()).stream()
+                .filter(jar -> "NEC".equals(jar.getCode()))
+                .findFirst()
+                .orElseThrow();
+        Category income = categoryRepository.findAllByWorkspaceIdOrderByDisplayOrderAsc(workspace.getId()).stream()
+                .filter(category -> category.getCategoryType() == CategoryType.INCOME)
+                .findFirst()
+                .orElseThrow();
+        Category food = categoryRepository.findAllByWorkspaceIdOrderByDisplayOrderAsc(workspace.getId()).stream()
+                .filter(category -> category.getCategoryType() == CategoryType.EXPENSE && category.getJar() != null && nec.getId().equals(category.getJar().getId()))
+                .findFirst()
+                .orElseThrow();
+        transactionRepository.save(Transaction.builder()
+                .workspace(workspace)
+                .createdByUser(userRepository.findById(user.getId()).orElseThrow())
+                .category(income)
+                .transactionType(TransactionType.INCOME)
+                .amount(new BigDecimal("1000"))
+                .transactionDate(LocalDate.parse("2026-07-01"))
+                .build());
+        transactionRepository.save(Transaction.builder()
+                .workspace(workspace)
+                .createdByUser(userRepository.findById(user.getId()).orElseThrow())
+                .category(food)
+                .transactionType(TransactionType.EXPENSE)
+                .amount(new BigDecimal("100"))
+                .transactionDate(LocalDate.parse("2026-07-02"))
+                .description("Lunch")
+                .build());
+
+        mockMvc.perform(get("/api/workspaces/" + workspace.getId() + "/jars/" + nec.getId() + "/monthly-detail")
+                        .param("month", "2026-07")
+                        .header("Authorization", "Bearer " + token.getAccessToken()))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk())
+                .andExpect(jsonPath("$.data.month").value("2026-07"))
+                .andExpect(jsonPath("$.data.jarCode").value("NEC"))
+                .andExpect(jsonPath("$.data.incomeBreakdown.totalAmount").value(1000))
+                .andExpect(jsonPath("$.data.categoryBreakdown[0].categoryName").value(food.getName()))
+                .andExpect(jsonPath("$.data.recentExpenseTransactions[0].description").value("Lunch"));
     }
 
     private TestContext createContext(String prefix, WorkspaceRole role) {
@@ -271,6 +488,13 @@ class JarCategoryModuleIntegrationTests {
         return req;
     }
 
+    private LoginRequest loginRequest(String username) {
+        LoginRequest req = new LoginRequest();
+        req.setIdentifier(username);
+        req.setPassword("StrongPassword123");
+        return req;
+    }
+
     private JarRequest jarRequest(String code, String name, String allocation) {
         JarRequest req = new JarRequest();
         req.setCode(code);
@@ -293,6 +517,50 @@ class JarCategoryModuleIntegrationTests {
         req.setKeyword(keyword);
         req.setPriority(priority);
         return req;
+    }
+
+    private Jar jar(TestContext ctx, String code, String name, String allocation, int order) {
+        return jarRepository.save(Jar.builder()
+                .workspace(ctx.workspace())
+                .code(code)
+                .name(name)
+                .allocationPercent(new BigDecimal(allocation))
+                .displayOrder(order)
+                .build());
+    }
+
+    private Category category(TestContext ctx, String name, CategoryType type, Jar jar, boolean active) {
+        return categoryRepository.save(Category.builder()
+                .workspace(ctx.workspace())
+                .name(name)
+                .categoryType(type)
+                .jar(jar)
+                .isActive(active)
+                .build());
+    }
+
+    private void tx(TestContext ctx, Category category, TransactionType type, String amount, String date) {
+        tx(ctx, category, type, amount, date, null);
+    }
+
+    private void tx(TestContext ctx, Category category, TransactionType type, String amount, String date, String description) {
+        transactionRepository.save(Transaction.builder()
+                .workspace(ctx.workspace())
+                .createdByUser(ctx.user())
+                .category(category)
+                .transactionType(type)
+                .amount(new BigDecimal(amount))
+                .transactionDate(LocalDate.parse(date))
+                .description(description)
+                .build());
+    }
+
+    private String status(JarMonthlySummaryResponse summary, String jarCode) {
+        return summary.getJars().stream()
+                .filter(item -> jarCode.equals(item.getJarCode()))
+                .findFirst()
+                .orElseThrow()
+                .getStatus();
     }
 
     private record TestContext(User user, Workspace workspace) {
