@@ -7,6 +7,7 @@ import com.moneyflowbackend.auth.dto.TokenResponse;
 import com.moneyflowbackend.auth.service.AuthService;
 import com.moneyflowbackend.workspace.model.Workspace;
 import com.moneyflowbackend.workspace.repository.WorkspaceRepository;
+import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -16,6 +17,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.ByteBuffer;
 import java.util.UUID;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -32,6 +34,7 @@ class DebtControllerIntegrationTests {
     @Autowired AuthService authService;
     @Autowired WorkspaceRepository workspaceRepository;
     @Autowired MockMvc mockMvc;
+    @Autowired EntityManager entityManager;
 
     @Test
     void createDebtRecordPaymentsSummariesAndRejectOverpayment() throws Exception {
@@ -152,6 +155,55 @@ class DebtControllerIntegrationTests {
                 .andExpect(status().isForbidden());
     }
 
+    @Test
+    void importedPaidDebtWithoutPaymentRowsHasZeroRemainingAndEmptyHistory() throws Exception {
+        TokenResponse token = registerAndLogin("debt_imported_paid");
+        UUID workspaceId = workspaceRepository.findAllByUserId(token.getUser().getId()).get(0).getId();
+        UUID personId = toUuid(entityManager.createNativeQuery("""
+                        SELECT person_id FROM workspace_members
+                        WHERE workspace_id = :workspaceId AND user_id = :userId
+                        """)
+                .setParameter("workspaceId", workspaceId)
+                .setParameter("userId", token.getUser().getId())
+                .getSingleResult());
+        UUID debtId = UUID.randomUUID();
+        entityManager.createNativeQuery("""
+                        INSERT INTO debts (id, workspace_id, counterparty_person_id, direction, principal_amount,
+                                           opened_on, closed_on, debt_status, note, created_at, updated_at)
+                        VALUES (:id, :workspaceId, :personId, 'RECEIVABLE', 1000,
+                                DATE '2026-01-01', DATE '2026-01-10', 'PAID', 'Imported paid row', NOW(), NOW())
+                        """)
+                .setParameter("id", debtId)
+                .setParameter("workspaceId", workspaceId)
+                .setParameter("personId", personId)
+                .executeUpdate();
+
+        mockMvc.perform(get("/api/workspaces/{workspaceId}/debts", workspaceId)
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[?(@.id == '" + debtId + "')].paidAmount").value(1000))
+                .andExpect(jsonPath("$.data[?(@.id == '" + debtId + "')].remainingAmount").value(0))
+                .andExpect(jsonPath("$.data[?(@.id == '" + debtId + "')].paymentCount").value(0));
+
+        mockMvc.perform(get("/api/workspaces/{workspaceId}/debts/summary", workspaceId)
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalReceivableRemaining").value(0))
+                .andExpect(jsonPath("$.data.totalOpenDebts").value(0))
+                .andExpect(jsonPath("$.data.totalPayments").value(0));
+
+        mockMvc.perform(get("/api/workspaces/{workspaceId}/debts/by-person", workspaceId)
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].totalPaid").value(1000))
+                .andExpect(jsonPath("$.data[0].totalRemaining").value(0));
+
+        mockMvc.perform(get("/api/workspaces/{workspaceId}/debts/{debtId}/payments", workspaceId, debtId)
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data").isEmpty());
+    }
+
     private TokenResponse registerAndLogin(String prefix) {
         String suffix = UUID.randomUUID().toString().substring(0, 8);
         RegisterRequest req = new RegisterRequest();
@@ -168,5 +220,14 @@ class DebtControllerIntegrationTests {
 
     private String bearer(TokenResponse token) {
         return "Bearer " + token.getAccessToken();
+    }
+
+    private UUID toUuid(Object value) {
+        if (value instanceof UUID uuid) return uuid;
+        if (value instanceof byte[] bytes) {
+            ByteBuffer buffer = ByteBuffer.wrap(bytes);
+            return new UUID(buffer.getLong(), buffer.getLong());
+        }
+        return UUID.fromString(value.toString());
     }
 }

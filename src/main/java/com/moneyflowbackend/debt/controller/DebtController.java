@@ -183,9 +183,13 @@ public class DebtController {
                        p.display_name AS counterparty_name,
                        d.direction,
                        d.principal_amount,
-                       COALESCE(SUM(dp.amount), 0) AS paid_amount,
                        CASE
+                           WHEN d.debt_status = 'PAID' THEN d.principal_amount
                            WHEN d.debt_status = 'CANCELLED' THEN 0
+                           ELSE COALESCE(SUM(dp.amount), 0)
+                       END AS paid_amount,
+                       CASE
+                           WHEN d.debt_status IN ('PAID', 'CANCELLED') THEN 0
                            ELSE GREATEST(d.principal_amount - COALESCE(SUM(dp.amount), 0), 0)
                        END AS remaining_amount,
                        d.opened_on,
@@ -198,7 +202,8 @@ public class DebtController {
                 JOIN workspace_people p ON p.id = d.counterparty_person_id
                 LEFT JOIN debt_payments dp ON dp.debt_id = d.id
                 WHERE d.workspace_id = :workspaceId
-                GROUP BY d.id, p.display_name
+                GROUP BY d.id, p.display_name, d.direction, d.principal_amount, d.opened_on, d.due_on,
+                         d.closed_on, d.debt_status, d.note, d.created_at
                 ORDER BY d.opened_on DESC, d.created_at DESC
                 """, Tuple.class)
                 .setParameter("workspaceId", workspaceId)
