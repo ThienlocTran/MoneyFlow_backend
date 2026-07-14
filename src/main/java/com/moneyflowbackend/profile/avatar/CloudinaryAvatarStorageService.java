@@ -145,6 +145,6 @@ public class CloudinaryAvatarStorageService implements AvatarStorageService {
     }
 
     private BusinessException storageFailed() {
-        return new BusinessException("AVATAR_STORAGE_FAILED", "Không thể tải ảnh đại diện lên", HttpStatus.BAD_GATEWAY);
+        return new BusinessException("AVATAR_STORAGE_FAILED", "Tải ảnh đại diện thất bại. Vui lòng thử lại.", HttpStatus.BAD_GATEWAY);
     }
 }

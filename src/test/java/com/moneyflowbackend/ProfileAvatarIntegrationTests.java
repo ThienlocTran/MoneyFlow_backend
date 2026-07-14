@@ -6,6 +6,7 @@ import com.moneyflowbackend.auth.dto.TokenResponse;
 import com.moneyflowbackend.auth.model.User;
 import com.moneyflowbackend.auth.repository.UserRepository;
 import com.moneyflowbackend.auth.service.AuthService;
+import com.moneyflowbackend.common.exception.BusinessException;
 import com.moneyflowbackend.profile.avatar.AvatarStorageService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -15,6 +16,8 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
@@ -29,7 +32,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
-import org.springframework.http.MediaType;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -147,6 +149,34 @@ class ProfileAvatarIntegrationTests {
     }
 
     @Test
+    void missingStorageConfigReturnsClearServiceUnavailable() throws Exception {
+        avatarStorageService.enabled = false;
+        TokenResponse token = createUser("avatar_storage_missing");
+        MockMultipartFile file = new MockMultipartFile("file", "avatar.png", "image/png", new byte[] {1});
+
+        mockMvc.perform(multipart("/api/me/avatar")
+                        .file(file)
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.code").value("STORAGE_NOT_CONFIGURED"))
+                .andExpect(jsonPath("$.message").value("Dịch vụ tải ảnh chưa được cấu hình. Vui lòng kiểm tra cấu hình máy chủ."));
+    }
+
+    @Test
+    void storageProviderFailureReturnsSafeMessage() throws Exception {
+        avatarStorageService.failUpload = true;
+        TokenResponse token = createUser("avatar_storage_fail");
+        MockMultipartFile file = new MockMultipartFile("file", "avatar.png", "image/png", new byte[] {1});
+
+        mockMvc.perform(multipart("/api/me/avatar")
+                        .file(file)
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isBadGateway())
+                .andExpect(jsonPath("$.code").value("AVATAR_STORAGE_FAILED"))
+                .andExpect(jsonPath("$.message").value("Tải ảnh đại diện thất bại. Vui lòng thử lại."));
+    }
+
+    @Test
     void unauthenticatedReturnsUnauthorized() throws Exception {
         MockMultipartFile file = new MockMultipartFile("file", "avatar.jpg", "image/jpeg", new byte[] {1});
 
@@ -190,18 +220,25 @@ class ProfileAvatarIntegrationTests {
 
     static class FakeAvatarStorageService implements AvatarStorageService {
         private String lastObjectKey;
+        private boolean enabled = true;
+        private boolean failUpload;
 
         void reset() {
             lastObjectKey = null;
+            enabled = true;
+            failUpload = false;
         }
 
         @Override
         public boolean isEnabled() {
-            return true;
+            return enabled;
         }
 
         @Override
         public String upload(String objectKey, MultipartFile file) {
+            if (failUpload) {
+                throw new BusinessException("AVATAR_STORAGE_FAILED", "provider secret detail", HttpStatus.BAD_GATEWAY);
+            }
             lastObjectKey = objectKey;
             return "https://cdn.example/" + objectKey + ".png";
         }

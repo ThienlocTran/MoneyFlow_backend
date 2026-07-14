@@ -109,7 +109,8 @@ public class GlobalExceptionHandler {
         return switch (ex.getCode()) {
             case "UNAUTHORIZED" -> "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.";
             case "FORBIDDEN" -> "Bạn không có quyền thực hiện thao tác này.";
-            case "STORAGE_NOT_CONFIGURED" -> "Kho lưu trữ âm thanh chưa được cấu hình.";
+            case "STORAGE_NOT_CONFIGURED" -> "Dịch vụ tải ảnh chưa được cấu hình. Vui lòng kiểm tra cấu hình máy chủ.";
+            case "AVATAR_STORAGE_FAILED" -> "Tải ảnh đại diện thất bại. Vui lòng thử lại.";
             default -> ex.getMessage();
         };
     }

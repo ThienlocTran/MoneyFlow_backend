@@ -36,7 +36,10 @@ public class ProfileAvatarService {
     public UserResponse upload(UUID userId, MultipartFile file) {
         validate(file);
         if (!storageService.isEnabled()) {
-            throw new BusinessException("STORAGE_NOT_CONFIGURED", "Kho lưu trữ ảnh đại diện chưa được cấu hình.", HttpStatus.SERVICE_UNAVAILABLE);
+            throw new BusinessException(
+                    "STORAGE_NOT_CONFIGURED",
+                    "Dịch vụ tải ảnh chưa được cấu hình. Vui lòng kiểm tra cấu hình máy chủ.",
+                    HttpStatus.SERVICE_UNAVAILABLE);
         }
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new BusinessException("UNAUTHORIZED", "Chưa xác thực", HttpStatus.UNAUTHORIZED));
