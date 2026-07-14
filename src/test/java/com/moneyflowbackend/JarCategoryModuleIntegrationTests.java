@@ -19,6 +19,7 @@ import com.moneyflowbackend.category.service.CategoryService;
 import com.moneyflowbackend.common.exception.BusinessException;
 import com.moneyflowbackend.jar.dto.JarAllocationRequest;
 import com.moneyflowbackend.jar.dto.JarListResponse;
+import com.moneyflowbackend.jar.dto.JarMonthlySummaryResponse;
 import com.moneyflowbackend.jar.dto.JarReorderRequest;
 import com.moneyflowbackend.jar.dto.JarRequest;
 import com.moneyflowbackend.jar.dto.JarResponse;
@@ -254,6 +255,61 @@ class JarCategoryModuleIntegrationTests {
         assertThat(categoryKeywordRepository.findAllByWorkspaceIdAndCategoryIdOrderByPriorityDescKeywordAsc(ctx.workspace().getId(), food.getId())).isEmpty();
     }
 
+    @Test
+    void monthlySummaryEvaluatesJarBudgetsAndCategoryMappingGaps() {
+        TestContext ctx = createContext("jar_budget", WorkspaceRole.OWNER);
+        Jar nec = jar(ctx, "NEC", "Essential", "55", 1);
+        Jar ffa = jar(ctx, "FFA", "Freedom", "10", 2);
+        Jar ltss = jar(ctx, "LTSS", "Saving", "10", 3);
+        Jar edu = jar(ctx, "EDU", "Education", "10", 4);
+        Jar play = jar(ctx, "PLAY", "Play", "10", 5);
+        Jar give = jar(ctx, "GIVE", "Give", "5", 6);
+        Category income = category(ctx, "Salary", CategoryType.INCOME, null, true);
+        Category necCat = category(ctx, "Food", CategoryType.EXPENSE, nec, true);
+        Category ffaCat = category(ctx, "Investment", CategoryType.EXPENSE, ffa, true);
+        Category playCat = category(ctx, "Fun", CategoryType.EXPENSE, play, true);
+        category(ctx, "Unmapped", CategoryType.EXPENSE, null, true);
+        category(ctx, "PASE", CategoryType.EXPENSE, null, false);
+
+        tx(ctx, income, TransactionType.INCOME, "1000", "2026-07-01");
+        tx(ctx, necCat, TransactionType.EXPENSE, "500", "2026-07-02");
+        tx(ctx, ffaCat, TransactionType.EXPENSE, "105", "2026-07-03");
+        tx(ctx, playCat, TransactionType.EXPENSE, "200", "2026-07-04");
+
+        JarMonthlySummaryResponse summary = jarService.monthlySummary(ctx.workspace().getId(), "2026-07", ctx.user().getId());
+
+        assertThat(summary.getJars()).hasSize(6).extracting(JarMonthlySummaryResponse.Item::getJarCode)
+                .containsExactly("NEC", "FFA", "LTSS", "EDU", "PLAY", "GIVE");
+        assertThat(summary.getMonthlyIncome()).isEqualByComparingTo("1000");
+        assertThat(summary.getJarsTotalTargetPercent()).isEqualByComparingTo("100");
+        assertThat(summary.getJarsMappedCategoryCount()).isEqualTo(3);
+        assertThat(summary.getUnmappedActiveExpenseCategoryCount()).isEqualTo(1);
+        assertThat(summary.getInactiveUnmappedCategoryCount()).isEqualTo(1);
+        assertThat(status(summary, "NEC")).isEqualTo("OK");
+        assertThat(status(summary, "FFA")).isEqualTo("WARNING");
+        assertThat(status(summary, "PLAY")).isEqualTo("OVER");
+        assertThat(status(summary, "LTSS")).isEqualTo("NO_DATA");
+        assertThat(summary.getOverallStatus()).isEqualTo("OVER");
+    }
+
+    @Test
+    void monthlySummaryReturnsNoIncomeWhenIncomeIsMissing() {
+        TestContext ctx = createContext("jar_no_income", WorkspaceRole.OWNER);
+        Jar nec = jar(ctx, "NEC", "Essential", "55", 1);
+        jar(ctx, "FFA", "Freedom", "10", 2);
+        jar(ctx, "LTSS", "Saving", "10", 3);
+        jar(ctx, "EDU", "Education", "10", 4);
+        jar(ctx, "PLAY", "Play", "10", 5);
+        jar(ctx, "GIVE", "Give", "5", 6);
+        Category food = category(ctx, "Food", CategoryType.EXPENSE, nec, true);
+        tx(ctx, food, TransactionType.EXPENSE, "100", "2026-07-04");
+
+        JarMonthlySummaryResponse summary = jarService.monthlySummary(ctx.workspace().getId(), "2026-07", ctx.user().getId());
+
+        assertThat(summary.getOverallStatus()).isEqualTo("NO_INCOME");
+        assertThat(summary.getJars()).extracting(JarMonthlySummaryResponse.Item::getStatus).containsOnly("NO_INCOME");
+    }
+
     private TestContext createContext(String prefix, WorkspaceRole role) {
         String suffix = UUID.randomUUID().toString().substring(0, 8);
         User user = userRepository.save(User.builder()
@@ -305,6 +361,45 @@ class JarCategoryModuleIntegrationTests {
         req.setKeyword(keyword);
         req.setPriority(priority);
         return req;
+    }
+
+    private Jar jar(TestContext ctx, String code, String name, String allocation, int order) {
+        return jarRepository.save(Jar.builder()
+                .workspace(ctx.workspace())
+                .code(code)
+                .name(name)
+                .allocationPercent(new BigDecimal(allocation))
+                .displayOrder(order)
+                .build());
+    }
+
+    private Category category(TestContext ctx, String name, CategoryType type, Jar jar, boolean active) {
+        return categoryRepository.save(Category.builder()
+                .workspace(ctx.workspace())
+                .name(name)
+                .categoryType(type)
+                .jar(jar)
+                .isActive(active)
+                .build());
+    }
+
+    private void tx(TestContext ctx, Category category, TransactionType type, String amount, String date) {
+        transactionRepository.save(Transaction.builder()
+                .workspace(ctx.workspace())
+                .createdByUser(ctx.user())
+                .category(category)
+                .transactionType(type)
+                .amount(new BigDecimal(amount))
+                .transactionDate(LocalDate.parse(date))
+                .build());
+    }
+
+    private String status(JarMonthlySummaryResponse summary, String jarCode) {
+        return summary.getJars().stream()
+                .filter(item -> jarCode.equals(item.getJarCode()))
+                .findFirst()
+                .orElseThrow()
+                .getStatus();
     }
 
     private record TestContext(User user, Workspace workspace) {

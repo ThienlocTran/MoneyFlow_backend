@@ -7,6 +7,8 @@ import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -57,4 +59,57 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID>,
     long countJarUsage(
             @Param("workspaceId") UUID workspaceId,
             @Param("jarId") UUID jarId);
+
+    @Query("""
+            SELECT COALESCE(SUM(t.amount), 0) FROM Transaction t
+            WHERE t.workspace.id = :workspaceId
+              AND t.transactionType = :transactionType
+              AND t.transactionStatus = com.moneyflowbackend.transaction.model.TransactionStatus.POSTED
+              AND t.deletedAt IS NULL
+              AND t.transactionDate >= :startDate
+              AND t.transactionDate < :endDate
+            """)
+    BigDecimal sumPostedByTypeInMonth(
+            @Param("workspaceId") UUID workspaceId,
+            @Param("transactionType") com.moneyflowbackend.transaction.model.TransactionType transactionType,
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate);
+
+    @Query("""
+            SELECT COALESCE(SUM(t.amount), 0) FROM Transaction t
+            JOIN t.category c
+            WHERE t.workspace.id = :workspaceId
+              AND c.jar.id = :jarId
+              AND c.isActive = true
+              AND c.isArchived = false
+              AND t.transactionType = com.moneyflowbackend.transaction.model.TransactionType.EXPENSE
+              AND t.transactionStatus = com.moneyflowbackend.transaction.model.TransactionStatus.POSTED
+              AND t.deletedAt IS NULL
+              AND t.transactionDate >= :startDate
+              AND t.transactionDate < :endDate
+            """)
+    BigDecimal sumPostedExpenseByJarInMonth(
+            @Param("workspaceId") UUID workspaceId,
+            @Param("jarId") UUID jarId,
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate);
+
+    @Query("""
+            SELECT COUNT(t) FROM Transaction t
+            JOIN t.category c
+            WHERE t.workspace.id = :workspaceId
+              AND c.jar.id = :jarId
+              AND c.isActive = true
+              AND c.isArchived = false
+              AND t.transactionType = com.moneyflowbackend.transaction.model.TransactionType.EXPENSE
+              AND t.transactionStatus = com.moneyflowbackend.transaction.model.TransactionStatus.POSTED
+              AND t.deletedAt IS NULL
+              AND t.transactionDate >= :startDate
+              AND t.transactionDate < :endDate
+            """)
+    long countPostedExpenseByJarInMonth(
+            @Param("workspaceId") UUID workspaceId,
+            @Param("jarId") UUID jarId,
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate);
 }
