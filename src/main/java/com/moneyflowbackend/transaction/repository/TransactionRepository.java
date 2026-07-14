@@ -137,9 +137,10 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID>,
             @Param("endDate") LocalDate endDate);
 
     @Query("""
-            SELECT t.transactionDate, c.name, t.description, t.amount
+            SELECT t.id, t.transactionDate, c.name, t.description, t.amount, w.name
             FROM Transaction t
             JOIN t.category c
+            LEFT JOIN t.wallet w
             WHERE t.workspace.id = :workspaceId
               AND c.jar.id = :jarId
               AND c.isActive = true
@@ -154,6 +155,39 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID>,
     List<Object[]> findRecentPostedExpenseByJarInMonth(
             @Param("workspaceId") UUID workspaceId,
             @Param("jarId") UUID jarId,
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate,
+            Pageable pageable);
+
+    @Query("""
+            SELECT COUNT(t) FROM Transaction t
+            WHERE t.workspace.id = :workspaceId
+              AND t.transactionType = com.moneyflowbackend.transaction.model.TransactionType.INCOME
+              AND t.transactionStatus = com.moneyflowbackend.transaction.model.TransactionStatus.POSTED
+              AND t.deletedAt IS NULL
+              AND t.transactionDate >= :startDate
+              AND t.transactionDate < :endDate
+            """)
+    long countPostedIncomeInMonth(
+            @Param("workspaceId") UUID workspaceId,
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate);
+
+    @Query("""
+            SELECT t.id, t.transactionDate, c.name, t.description, t.amount, w.name
+            FROM Transaction t
+            LEFT JOIN t.category c
+            LEFT JOIN t.wallet w
+            WHERE t.workspace.id = :workspaceId
+              AND t.transactionType = com.moneyflowbackend.transaction.model.TransactionType.INCOME
+              AND t.transactionStatus = com.moneyflowbackend.transaction.model.TransactionStatus.POSTED
+              AND t.deletedAt IS NULL
+              AND t.transactionDate >= :startDate
+              AND t.transactionDate < :endDate
+            ORDER BY t.transactionDate DESC, t.createdAt DESC
+            """)
+    List<Object[]> findRecentPostedIncomeInMonth(
+            @Param("workspaceId") UUID workspaceId,
             @Param("startDate") LocalDate startDate,
             @Param("endDate") LocalDate endDate,
             Pageable pageable);

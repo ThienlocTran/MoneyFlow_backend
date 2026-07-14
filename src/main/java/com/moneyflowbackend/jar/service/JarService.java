@@ -26,12 +26,14 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.text.NumberFormat;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.YearMonth;
 import java.time.format.DateTimeParseException;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -106,9 +108,11 @@ public class JarService {
         LocalDate endDate = month.plusMonths(1).atDay(1);
         BigDecimal monthlyIncome = nz(transactionRepository.sumPostedByTypeInMonth(workspaceId, TransactionType.INCOME, startDate, endDate));
         JarMonthlySummaryResponse.Item item = monthlyItem(workspaceId, jar, monthlyIncome, startDate, endDate);
+        List<JarMonthlyDetailResponse.RecentTransaction> recentExpenses = recentTransactions(workspaceId, jarId, startDate, endDate);
 
         return JarMonthlyDetailResponse.builder()
                 .month(month.toString())
+                .workspaceId(workspaceId)
                 .jarId(jar.getId())
                 .jarCode(jar.getCode())
                 .jarName(jar.getName())
@@ -118,10 +122,19 @@ public class JarService {
                 .actualAmount(item.getActualAmount())
                 .remainingAmount(item.getRemainingAmount())
                 .overAmount(item.getOverAmount())
+                .actualPercentOfIncome(item.getActualPercentOfIncome())
                 .status(item.getStatus())
+                .message(monthlyDetailMessage(item))
                 .formulaText("targetAmount = monthlyIncome * targetPercent / 100; actualAmount = monthly expense where transaction.category.jar = jar")
-                .categoryBreakdown(categoryBreakdown(workspaceId, jarId, startDate, endDate))
-                .recentTransactions(recentTransactions(workspaceId, jarId, startDate, endDate))
+                .formula(JarMonthlyDetailResponse.Formula.builder()
+                        .label("Ngân sách hũ = thu nhập đã ghi trong tháng × tỷ lệ hũ")
+                        .calculationText(formatVnd(monthlyIncome) + " × " + formatPercent(item.getTargetPercent()) + "% = " + formatVnd(item.getTargetAmount()))
+                        .build())
+                .incomeBreakdown(incomeBreakdown(workspaceId, monthlyIncome, startDate, endDate))
+                .categoryBreakdown(categoryBreakdown(workspaceId, jarId, item.getActualAmount(), monthlyIncome, startDate, endDate))
+                .recentTransactions(recentExpenses)
+                .recentExpenseTransactions(recentExpenses)
+                .explanation(explanation(item))
                 .build();
     }
 
@@ -364,13 +377,15 @@ public class JarService {
     }
 
     private List<JarMonthlyDetailResponse.CategoryBreakdown> categoryBreakdown(
-            UUID workspaceId, UUID jarId, LocalDate startDate, LocalDate endDate) {
+            UUID workspaceId, UUID jarId, BigDecimal actualAmount, BigDecimal monthlyIncome, LocalDate startDate, LocalDate endDate) {
         return transactionRepository.sumPostedExpenseByJarCategoryInMonth(workspaceId, jarId, startDate, endDate).stream()
                 .map(row -> JarMonthlyDetailResponse.CategoryBreakdown.builder()
                         .categoryId((UUID) row[0])
                         .categoryName((String) row[1])
                         .transactionCount((Long) row[2])
                         .totalAmount(nz((BigDecimal) row[3]))
+                        .percentOfJarActual(percent(nz((BigDecimal) row[3]), actualAmount))
+                        .percentOfMonthlyIncome(percent(nz((BigDecimal) row[3]), monthlyIncome))
                         .build())
                 .toList();
     }
@@ -378,13 +393,72 @@ public class JarService {
     private List<JarMonthlyDetailResponse.RecentTransaction> recentTransactions(
             UUID workspaceId, UUID jarId, LocalDate startDate, LocalDate endDate) {
         return transactionRepository.findRecentPostedExpenseByJarInMonth(workspaceId, jarId, startDate, endDate, PageRequest.of(0, 10)).stream()
-                .map(row -> JarMonthlyDetailResponse.RecentTransaction.builder()
-                        .date((LocalDate) row[0])
-                        .categoryName((String) row[1])
-                        .description((String) row[2])
-                        .amount(nz((BigDecimal) row[3]))
-                        .build())
+                .map(this::transactionItem)
                 .toList();
+    }
+
+    private JarMonthlyDetailResponse.IncomeBreakdown incomeBreakdown(
+            UUID workspaceId, BigDecimal monthlyIncome, LocalDate startDate, LocalDate endDate) {
+        return JarMonthlyDetailResponse.IncomeBreakdown.builder()
+                .transactionCount(transactionRepository.countPostedIncomeInMonth(workspaceId, startDate, endDate))
+                .totalAmount(monthlyIncome)
+                .recentTransactions(transactionRepository.findRecentPostedIncomeInMonth(workspaceId, startDate, endDate, PageRequest.of(0, 10)).stream()
+                        .map(this::transactionItem)
+                        .toList())
+                .build();
+    }
+
+    private JarMonthlyDetailResponse.RecentTransaction transactionItem(Object[] row) {
+        return JarMonthlyDetailResponse.RecentTransaction.builder()
+                .id((UUID) row[0])
+                .date((LocalDate) row[1])
+                .categoryName((String) row[2])
+                .description((String) row[3])
+                .amount(nz((BigDecimal) row[4]))
+                .walletName((String) row[5])
+                .build();
+    }
+
+    private JarMonthlyDetailResponse.Explanation explanation(JarMonthlySummaryResponse.Item item) {
+        BigDecimal targetPercent = item.getTargetPercent();
+        return JarMonthlyDetailResponse.Explanation.builder()
+                .whyThisStatus("Đã chi " + formatVnd(item.getActualAmount()) + " trong khi ngân sách khuyến nghị là " + formatVnd(item.getTargetAmount()) + ".")
+                .whatChangesBudget("Khi bạn ghi thêm thu nhập trong tháng, ngân sách của hũ sẽ tăng theo tỷ lệ " + formatPercent(targetPercent) + "%.")
+                .nextAction(nextAction(item.getStatus()))
+                .build();
+    }
+
+    private String monthlyDetailMessage(JarMonthlySummaryResponse.Item item) {
+        return switch (item.getStatus()) {
+            case "NO_INCOME" -> "Chưa có thu nhập trong tháng để tính ngân sách hũ " + item.getJarName() + ".";
+            case "NO_DATA" -> "Hũ " + item.getJarName() + " chưa có khoản chi trong tháng này.";
+            case "OK" -> "Hũ " + item.getJarName() + " còn " + formatVnd(item.getRemainingAmount()) + " so với mức khuyến nghị.";
+            case "WARNING" -> "Hũ " + item.getJarName() + " đang vượt " + formatVnd(item.getOverAmount()) + " so với mức khuyến nghị.";
+            default -> "Hũ " + item.getJarName() + " đã vượt mạnh mức khuyến nghị.";
+        };
+    }
+
+    private String nextAction(String status) {
+        return switch (status) {
+            case "NO_INCOME" -> "Ghi thu nhập trong tháng để hệ thống tính ngân sách động cho từng hũ.";
+            case "NO_DATA", "OK" -> "Tiếp tục theo dõi các danh mục chi nhiều nhất trong hũ này.";
+            default -> "Kiểm tra các danh mục chi nhiều nhất hoặc ghi thêm thu nhập nếu tháng này còn doanh thu chưa nhập.";
+        };
+    }
+
+    private BigDecimal percent(BigDecimal amount, BigDecimal total) {
+        return total.compareTo(BigDecimal.ZERO) > 0
+                ? amount.multiply(ONE_HUNDRED).divide(total, 2, RoundingMode.HALF_UP)
+                : BigDecimal.ZERO;
+    }
+
+    private String formatPercent(BigDecimal value) {
+        return value.stripTrailingZeros().toPlainString();
+    }
+
+    private String formatVnd(BigDecimal amount) {
+        NumberFormat format = NumberFormat.getIntegerInstance(Locale.forLanguageTag("vi-VN"));
+        return format.format(amount.setScale(0, RoundingMode.HALF_UP)) + " đ";
     }
 
     private YearMonth parseMonth(String rawMonth) {

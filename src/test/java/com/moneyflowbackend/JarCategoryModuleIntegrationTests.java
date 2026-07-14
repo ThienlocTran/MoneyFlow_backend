@@ -322,35 +322,84 @@ class JarCategoryModuleIntegrationTests {
     @Test
     void monthlyDetailExplainsJarTotalsAndUsesOnlyActiveMappedCategories() {
         TestContext ctx = createContext("jar_detail", WorkspaceRole.OWNER);
+        TestContext outsider = createContext("jar_detail_outsider", WorkspaceRole.OWNER);
         Jar nec = jar(ctx, "NEC", "Essential", "55", 1);
         Category income = category(ctx, "Salary", CategoryType.INCOME, null, true);
         Category food = category(ctx, "Food", CategoryType.EXPENSE, nec, true);
         Category rent = category(ctx, "Rent", CategoryType.EXPENSE, nec, true);
         Category old = category(ctx, "Old PASE", CategoryType.EXPENSE, nec, false);
+        Category unmappedPase = category(ctx, "PASE", CategoryType.EXPENSE, null, false);
 
-        tx(ctx, income, TransactionType.INCOME, "1000", "2026-07-01", "Salary");
+        tx(ctx, income, TransactionType.INCOME, "250", "2026-07-01", "Salary 1");
+        tx(ctx, income, TransactionType.INCOME, "750", "2026-07-05", "Salary 2");
         tx(ctx, food, TransactionType.EXPENSE, "100", "2026-07-02", "Lunch");
         tx(ctx, food, TransactionType.EXPENSE, "50", "2026-07-03", "Coffee");
         tx(ctx, rent, TransactionType.EXPENSE, "300", "2026-07-04", "Rent");
         tx(ctx, old, TransactionType.EXPENSE, "999", "2026-07-05", "Historical inactive");
+        tx(ctx, unmappedPase, TransactionType.EXPENSE, "999", "2026-07-06", "Unmapped PASE");
 
         JarMonthlyDetailResponse detail = jarService.monthlyDetail(ctx.workspace().getId(), nec.getId(), "2026-07", ctx.user().getId());
 
         assertThat(detail.getMonth()).isEqualTo("2026-07");
+        assertThat(detail.getWorkspaceId()).isEqualTo(ctx.workspace().getId());
         assertThat(detail.getJarCode()).isEqualTo("NEC");
         assertThat(detail.getMonthlyIncome()).isEqualByComparingTo("1000");
         assertThat(detail.getTargetAmount()).isEqualByComparingTo("550");
         assertThat(detail.getActualAmount()).isEqualByComparingTo("450");
         assertThat(detail.getRemainingAmount()).isEqualByComparingTo("100");
         assertThat(detail.getOverAmount()).isEqualByComparingTo("0");
+        assertThat(detail.getActualPercentOfIncome()).isEqualByComparingTo("45");
         assertThat(detail.getStatus()).isEqualTo("OK");
+        assertThat(detail.getMessage()).contains("Essential");
         assertThat(detail.getFormulaText()).contains("targetAmount", "actualAmount");
+        assertThat(detail.getFormula().getLabel()).contains("Ngân sách hũ");
+        assertThat(detail.getFormula().getCalculationText()).contains("1.000", "55%", "550");
+        assertThat(detail.getIncomeBreakdown().getTransactionCount()).isEqualTo(2);
+        assertThat(detail.getIncomeBreakdown().getTotalAmount()).isEqualByComparingTo("1000");
+        assertThat(detail.getIncomeBreakdown().getRecentTransactions()).extracting(JarMonthlyDetailResponse.RecentTransaction::getDescription)
+                .containsExactly("Salary 2", "Salary 1");
         assertThat(detail.getCategoryBreakdown()).extracting(JarMonthlyDetailResponse.CategoryBreakdown::getCategoryName)
                 .containsExactly("Rent", "Food");
         assertThat(detail.getCategoryBreakdown().get(1).getTransactionCount()).isEqualTo(2);
         assertThat(detail.getCategoryBreakdown().get(1).getTotalAmount()).isEqualByComparingTo("150");
+        assertThat(detail.getCategoryBreakdown().get(1).getPercentOfJarActual()).isEqualByComparingTo("33.33");
+        assertThat(detail.getCategoryBreakdown().get(1).getPercentOfMonthlyIncome()).isEqualByComparingTo("15");
         assertThat(detail.getRecentTransactions()).extracting(JarMonthlyDetailResponse.RecentTransaction::getDescription)
                 .containsExactly("Rent", "Coffee", "Lunch");
+        assertThat(detail.getRecentExpenseTransactions()).extracting(JarMonthlyDetailResponse.RecentTransaction::getDescription)
+                .containsExactly("Rent", "Coffee", "Lunch");
+        assertThat(detail.getExplanation().getWhatChangesBudget()).contains("55%");
+        assertThatThrownBy(() -> jarService.monthlyDetail(ctx.workspace().getId(), nec.getId(), "2026-07", outsider.user().getId()))
+                .isInstanceOf(BusinessException.class).extracting("code").isEqualTo("WORKSPACE_ACCESS_DENIED");
+    }
+
+    @Test
+    void monthlyDetailStatusesFollowBudgetRules() {
+        TestContext warningCtx = createContext("jar_detail_warning", WorkspaceRole.OWNER);
+        Jar warningJar = jar(warningCtx, "NEC", "Essential", "55", 1);
+        Category warningIncome = category(warningCtx, "Salary", CategoryType.INCOME, null, true);
+        Category warningFood = category(warningCtx, "Food", CategoryType.EXPENSE, warningJar, true);
+        tx(warningCtx, warningIncome, TransactionType.INCOME, "1000", "2026-07-01");
+        tx(warningCtx, warningFood, TransactionType.EXPENSE, "600", "2026-07-02");
+
+        TestContext overCtx = createContext("jar_detail_over", WorkspaceRole.OWNER);
+        Jar overJar = jar(overCtx, "NEC", "Essential", "55", 1);
+        Category overIncome = category(overCtx, "Salary", CategoryType.INCOME, null, true);
+        Category overFood = category(overCtx, "Food", CategoryType.EXPENSE, overJar, true);
+        tx(overCtx, overIncome, TransactionType.INCOME, "1000", "2026-07-01");
+        tx(overCtx, overFood, TransactionType.EXPENSE, "700", "2026-07-02");
+
+        TestContext noIncomeCtx = createContext("jar_detail_no_income", WorkspaceRole.OWNER);
+        Jar noIncomeJar = jar(noIncomeCtx, "NEC", "Essential", "55", 1);
+        Category noIncomeFood = category(noIncomeCtx, "Food", CategoryType.EXPENSE, noIncomeJar, true);
+        tx(noIncomeCtx, noIncomeFood, TransactionType.EXPENSE, "100", "2026-07-02");
+
+        assertThat(jarService.monthlyDetail(warningCtx.workspace().getId(), warningJar.getId(), "2026-07", warningCtx.user().getId()).getStatus())
+                .isEqualTo("WARNING");
+        assertThat(jarService.monthlyDetail(overCtx.workspace().getId(), overJar.getId(), "2026-07", overCtx.user().getId()).getStatus())
+                .isEqualTo("OVER");
+        assertThat(jarService.monthlyDetail(noIncomeCtx.workspace().getId(), noIncomeJar.getId(), "2026-07", noIncomeCtx.user().getId()).getStatus())
+                .isEqualTo("NO_INCOME");
     }
 
     @Test
@@ -395,8 +444,9 @@ class JarCategoryModuleIntegrationTests {
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk())
                 .andExpect(jsonPath("$.data.month").value("2026-07"))
                 .andExpect(jsonPath("$.data.jarCode").value("NEC"))
+                .andExpect(jsonPath("$.data.incomeBreakdown.totalAmount").value(1000))
                 .andExpect(jsonPath("$.data.categoryBreakdown[0].categoryName").value(food.getName()))
-                .andExpect(jsonPath("$.data.recentTransactions[0].description").value("Lunch"));
+                .andExpect(jsonPath("$.data.recentExpenseTransactions[0].description").value("Lunch"));
     }
 
     private TestContext createContext(String prefix, WorkspaceRole role) {
