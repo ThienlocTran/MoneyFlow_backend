@@ -120,7 +120,7 @@ public class WorkspaceService {
 
     @Transactional(readOnly = true)
     public List<WorkspaceMemberResponse> listMembers(UUID workspaceId, UUID userId) {
-        requireActiveMember(workspaceId, userId);
+        verifyMemberListAccess(workspaceId, userId);
         return workspaceMemberRepository.findAllByWorkspaceIdAndMemberStatusOrderByJoinedAtAsc(workspaceId, "ACTIVE").stream()
                 .map(this::mapMember)
                 .toList();
@@ -241,6 +241,18 @@ public class WorkspaceService {
             throw forbiddenAction();
         }
         return member;
+    }
+
+    private void verifyMemberListAccess(UUID workspaceId, UUID userId) {
+        if (workspaceMemberRepository.existsByWorkspaceIdAndUserIdAndMemberStatus(workspaceId, userId, "ACTIVE")) {
+            return;
+        }
+        Workspace workspace = workspaceRepository.findById(workspaceId)
+                .filter(ws -> ws.getDeletedAt() == null)
+                .orElseThrow(() -> notFoundWorkspace());
+        if (!workspace.getCreatedByUser().getId().equals(userId)) {
+            throw forbiddenAction();
+        }
     }
 
     private WorkspaceMember requireActiveMember(UUID workspaceId, UUID userId) {
