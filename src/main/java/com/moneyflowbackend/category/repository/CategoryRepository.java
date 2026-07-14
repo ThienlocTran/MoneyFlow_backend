@@ -12,6 +12,7 @@ public interface CategoryRepository extends JpaRepository<Category, UUID> {
     List<Category> findAllByWorkspaceIdOrderByDisplayOrderAsc(UUID workspaceId);
     Optional<Category> findByIdAndWorkspaceId(UUID id, UUID workspaceId);
     long countByWorkspaceId(UUID workspaceId);
+    long countByWorkspaceIdAndJarId(UUID workspaceId, UUID jarId);
     long countByWorkspaceIdAndJarIdAndIsActiveTrue(UUID workspaceId, UUID jarId);
     boolean existsByWorkspaceIdAndCategoryTypeAndNameIgnoreCase(UUID workspaceId, CategoryType categoryType, String name);
     boolean existsByWorkspaceIdAndCategoryTypeAndNameIgnoreCaseAndIdNot(UUID workspaceId, CategoryType categoryType, String name, UUID id);

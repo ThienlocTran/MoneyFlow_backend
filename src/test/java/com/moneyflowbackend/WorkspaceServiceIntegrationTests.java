@@ -72,6 +72,19 @@ class WorkspaceServiceIntegrationTests {
     }
 
     @Test
+    void member_creatorWithoutMemberRowCanReadMembers() {
+        User owner = user("m03_members_owner");
+        User outsider = user("m03_members_outsider");
+        Workspace legacy = workspaceRepository.save(Workspace.builder()
+                .name("Legacy members workspace")
+                .createdByUser(owner)
+                .build());
+
+        assertThat(workspaceService.listMembers(legacy.getId(), owner.getId())).isEmpty();
+        assertBusinessCode(() -> workspaceService.listMembers(legacy.getId(), outsider.getId()), "FORBIDDEN");
+    }
+
+    @Test
     void userSearch_byUsernameReturnsSafeFieldsOnly() {
         User user = user("m03_search");
 

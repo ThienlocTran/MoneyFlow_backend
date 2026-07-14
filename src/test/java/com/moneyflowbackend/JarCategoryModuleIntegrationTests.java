@@ -132,13 +132,15 @@ class JarCategoryModuleIntegrationTests {
         allocations.setItems(List.of(allocation));
         assertThat(jarService.updateAllocations(owner.workspace().getId(), allocations, owner.user().getId()).isAllocationValid()).isFalse();
 
-        jarService.toggleStatus(owner.workspace().getId(), second.getId(), false, owner.user().getId());
-        assertThat(jarRepository.findById(second.getId()).orElseThrow().isActive()).isFalse();
-        jarService.toggleStatus(owner.workspace().getId(), second.getId(), true, owner.user().getId());
+        assertThatThrownBy(() -> jarService.toggleStatus(owner.workspace().getId(), second.getId(), false, owner.user().getId()))
+                .isInstanceOf(BusinessException.class).extracting("code").isEqualTo("JAR_DEACTIVATION_BREAKS_ALLOCATION");
+        JarResponse inactiveAllowed = jarService.create(owner.workspace().getId(), jarRequest("ZERO", "Zero", "0"), owner.user().getId());
+        jarService.toggleStatus(owner.workspace().getId(), inactiveAllowed.getId(), false, owner.user().getId());
+        assertThat(jarRepository.findById(inactiveAllowed.getId()).orElseThrow().isActive()).isFalse();
 
         CategoryResponse category = categoryService.create(owner.workspace().getId(), categoryRequest("Food", "EXPENSE", jar.getId()), owner.user().getId());
         assertThatThrownBy(() -> jarService.toggleStatus(owner.workspace().getId(), jar.getId(), false, owner.user().getId()))
-                .isInstanceOf(BusinessException.class).extracting("code").isEqualTo("JAR_HAS_ACTIVE_CATEGORIES");
+                .isInstanceOf(BusinessException.class).extracting("code").isEqualTo("JAR_DEACTIVATION_BREAKS_ALLOCATION");
         assertThat(category.getJarId()).isEqualTo(jar.getId());
 
         assertThat(jarService.list(owner.workspace().getId(), false, viewer.user().getId()).getJars()).hasSize(2);
@@ -168,7 +170,7 @@ class JarCategoryModuleIntegrationTests {
         assertThatThrownBy(() -> categoryService.create(ctx.workspace().getId(), categoryRequest("lunch", "EXPENSE", jar.getId()), ctx.user().getId()))
                 .isInstanceOf(BusinessException.class).extracting("code").isEqualTo("CATEGORY_NAME_ALREADY_EXISTS");
 
-        JarResponse inactiveJar = jarService.create(ctx.workspace().getId(), jarRequest("OLD", "Old", "1"), ctx.user().getId());
+        JarResponse inactiveJar = jarService.create(ctx.workspace().getId(), jarRequest("OLD", "Old", "0"), ctx.user().getId());
         jarService.toggleStatus(ctx.workspace().getId(), inactiveJar.getId(), false, ctx.user().getId());
         assertThatThrownBy(() -> categoryService.create(ctx.workspace().getId(), categoryRequest("Old Cat", "EXPENSE", inactiveJar.getId()), ctx.user().getId()))
                 .isInstanceOf(BusinessException.class).extracting("code").isEqualTo("JAR_INACTIVE");
