@@ -21,6 +21,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
 import java.security.MessageDigest;
@@ -325,7 +326,7 @@ public class AuthService {
                 .orElseThrow(() -> new BusinessException("USER_NOT_FOUND", "Không tìm thấy thông tin người dùng", HttpStatus.NOT_FOUND));
 
         user.setFullName(req.getFullName().trim());
-        if (req.getAvatarUrl() != null) {
+        if (StringUtils.hasText(req.getAvatarUrl())) {
             user.setAvatarUrl(req.getAvatarUrl());
         }
         user.setUpdatedAt(Instant.now());

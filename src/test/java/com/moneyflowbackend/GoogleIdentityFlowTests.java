@@ -101,6 +101,20 @@ class GoogleIdentityFlowTests {
     }
 
     @Test
+    void googleLogin_existingEmailPreservesAvatarUrl() {
+        authService.register(registerRequest("linked_avatar", "avatar-link@example.com"));
+        User user = userRepository.findByEmailIgnoreCaseAndDeletedAtIsNull("avatar-link@example.com").orElseThrow();
+        user.setAvatarUrl("https://cdn.example/persisted-avatar.png");
+        userRepository.save(user);
+        googleVerifier.add("avatar-link-token", payload("google-sub-avatar", "avatar-link@example.com", true));
+
+        TokenResponse token = authService.googleLogin(googleRequest("avatar-link-token"));
+
+        assertThat(token.getUser().getAvatarUrl()).isEqualTo("https://cdn.example/persisted-avatar.png");
+        assertThat(userRepository.findById(user.getId()).orElseThrow().getAvatarUrl()).isEqualTo("https://cdn.example/persisted-avatar.png");
+    }
+
+    @Test
     void googleLogin_existingLinkedAccountLogsIn() {
         googleVerifier.add("first-token", payload("google-sub-3", "linked@example.com", true));
         TokenResponse first = authService.googleLogin(googleRequest("first-token"));

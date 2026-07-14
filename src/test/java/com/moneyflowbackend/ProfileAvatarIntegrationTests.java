@@ -24,9 +24,12 @@ import org.springframework.web.multipart.MultipartFile;
 import java.nio.charset.StandardCharsets;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import org.springframework.http.MediaType;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -65,6 +68,45 @@ class ProfileAvatarIntegrationTests {
         assertThat(user.getAvatarUrl()).isEqualTo("https://cdn.example/users/" + token.getUser().getId() + "/avatar.png");
         assertThat(avatarStorageService.lastObjectKey).isEqualTo("users/" + token.getUser().getId() + "/avatar");
         assertThat(body).doesNotContain("secret", "apiKey", "api_secret", "cloudinary://");
+    }
+
+    @Test
+    void meReturnsPersistedAvatarUrlAfterUpload() throws Exception {
+        TokenResponse token = createUser("avatar_reload");
+        MockMultipartFile file = new MockMultipartFile("file", "avatar.png", "image/png", new byte[] {1});
+
+        mockMvc.perform(multipart("/api/me/avatar")
+                        .file(file)
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/me")
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.avatarUrl").value("https://cdn.example/users/" + token.getUser().getId() + "/avatar.png"));
+    }
+
+    @Test
+    void updateProfileDoesNotClearAvatarUrlWhenAvatarMissingOrBlank() throws Exception {
+        TokenResponse token = createUser("avatar_profile_update");
+        User user = userRepository.findById(token.getUser().getId()).orElseThrow();
+        user.setAvatarUrl("https://cdn.example/persisted.png");
+        userRepository.save(user);
+
+        mockMvc.perform(put("/api/me")
+                        .header("Authorization", bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"fullName\":\"Renamed User\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.fullName").value("Renamed User"))
+                .andExpect(jsonPath("$.data.avatarUrl").value("https://cdn.example/persisted.png"));
+
+        mockMvc.perform(put("/api/me")
+                        .header("Authorization", bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"fullName\":\"Renamed Again\",\"avatarUrl\":\"\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.avatarUrl").value("https://cdn.example/persisted.png"));
     }
 
     @Test
