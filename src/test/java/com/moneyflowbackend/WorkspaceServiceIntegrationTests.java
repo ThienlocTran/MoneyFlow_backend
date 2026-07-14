@@ -9,12 +9,15 @@ import com.moneyflowbackend.workspace.dto.WorkspaceRequest;
 import com.moneyflowbackend.workspace.dto.WorkspaceResponse;
 import com.moneyflowbackend.workspace.dto.WorkspaceRoleRequest;
 import com.moneyflowbackend.workspace.model.InvitationStatus;
+import com.moneyflowbackend.workspace.model.PersonKind;
 import com.moneyflowbackend.workspace.model.Workspace;
 import com.moneyflowbackend.workspace.model.WorkspaceInvitation;
 import com.moneyflowbackend.workspace.model.WorkspaceMember;
+import com.moneyflowbackend.workspace.model.WorkspacePerson;
 import com.moneyflowbackend.workspace.model.WorkspaceRole;
 import com.moneyflowbackend.workspace.repository.WorkspaceInvitationRepository;
 import com.moneyflowbackend.workspace.repository.WorkspaceMemberRepository;
+import com.moneyflowbackend.workspace.repository.WorkspacePersonRepository;
 import com.moneyflowbackend.workspace.repository.WorkspaceRepository;
 import com.moneyflowbackend.workspace.service.WorkspaceService;
 import org.junit.jupiter.api.Test;
@@ -36,6 +39,7 @@ class WorkspaceServiceIntegrationTests {
     @Autowired UserRepository userRepository;
     @Autowired WorkspaceRepository workspaceRepository;
     @Autowired WorkspaceMemberRepository workspaceMemberRepository;
+    @Autowired WorkspacePersonRepository workspacePersonRepository;
     @Autowired WorkspaceInvitationRepository workspaceInvitationRepository;
 
     @Test
@@ -82,6 +86,29 @@ class WorkspaceServiceIntegrationTests {
 
         assertThat(workspaceService.listMembers(legacy.getId(), owner.getId())).isEmpty();
         assertBusinessCode(() -> workspaceService.listMembers(legacy.getId(), outsider.getId()), "FORBIDDEN");
+    }
+
+    @Test
+    void member_linkedPersonMemberCanReadMembers() {
+        User owner = user("m03_linked_owner");
+        User oldUser = user("m03_linked_old");
+        User currentUser = user("m03_linked_current");
+        Workspace workspace = workspace(owner, "Linked member workspace");
+        WorkspacePerson person = workspacePersonRepository.save(WorkspacePerson.builder()
+                .workspace(workspace)
+                .linkedUser(currentUser)
+                .displayName(currentUser.getFullName())
+                .personKind(PersonKind.MEMBER)
+                .build());
+        workspaceMemberRepository.save(WorkspaceMember.builder()
+                .workspace(workspace)
+                .user(oldUser)
+                .person(person)
+                .role(WorkspaceRole.EDITOR)
+                .build());
+
+        assertThat(workspaceService.listMembers(workspace.getId(), owner.getId())).hasSize(2);
+        assertThat(workspaceService.listMembers(workspace.getId(), currentUser.getId())).hasSize(2);
     }
 
     @Test

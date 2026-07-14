@@ -244,7 +244,7 @@ public class WorkspaceService {
     }
 
     private void verifyMemberListAccess(UUID workspaceId, UUID userId) {
-        if (workspaceMemberRepository.existsByWorkspaceIdAndUserIdAndMemberStatus(workspaceId, userId, "ACTIVE")) {
+        if (findActiveMemberByUserOrLinkedPerson(workspaceId, userId).isPresent()) {
             return;
         }
         Workspace workspace = workspaceRepository.findById(workspaceId)
@@ -259,13 +259,18 @@ public class WorkspaceService {
         if (!workspaceRepository.existsByIdAndDeletedAtIsNull(workspaceId)) {
             throw notFoundWorkspace();
         }
-        return workspaceMemberRepository.findByWorkspaceIdAndUserIdAndMemberStatus(workspaceId, userId, "ACTIVE")
+        return findActiveMemberByUserOrLinkedPerson(workspaceId, userId)
                 .orElseThrow(() -> new BusinessException("FORBIDDEN", "Bạn không có quyền truy cập không gian tài chính này", HttpStatus.FORBIDDEN));
     }
 
     private WorkspaceMember findActiveMember(UUID workspaceId, UUID userId) {
-        return workspaceMemberRepository.findByWorkspaceIdAndUserIdAndMemberStatus(workspaceId, userId, "ACTIVE")
+        return findActiveMemberByUserOrLinkedPerson(workspaceId, userId)
                 .orElseThrow(() -> new BusinessException("FORBIDDEN", "Bạn không có quyền truy cập không gian tài chính này", HttpStatus.FORBIDDEN));
+    }
+
+    private java.util.Optional<WorkspaceMember> findActiveMemberByUserOrLinkedPerson(UUID workspaceId, UUID userId) {
+        return workspaceMemberRepository.findByWorkspaceIdAndUserIdAndMemberStatus(workspaceId, userId, "ACTIVE")
+                .or(() -> workspaceMemberRepository.findByWorkspaceIdAndPersonLinkedUserIdAndMemberStatus(workspaceId, userId, "ACTIVE"));
     }
 
     private WorkspaceMember activeMemberById(UUID workspaceId, UUID memberId) {
