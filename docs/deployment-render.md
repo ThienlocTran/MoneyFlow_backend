@@ -1,17 +1,27 @@
 # MoneyFlow Backend Render Deployment
 
-## Render service
+## Render Docker service
 
 Use a Render Web Service for the backend.
 
 Recommended settings:
 
 ```text
-Root directory: moneyflow-backend
-Runtime: Java
+Runtime/Language: Docker
+Branch: dev
+Root Directory: blank if this repo root is moneyflow-backend
+Build Command: leave blank; Dockerfile handles build
+Start Command: leave blank; Dockerfile CMD handles start
+Health check path: /api/public/health/live
+```
+
+Do not choose Node. Do not use yarn. Docker deployment requires the `Dockerfile` at the repo root.
+
+Native Java fallback, only if Render offers a Java runtime:
+
+```text
 Build command: ./mvnw clean package -DskipTests
 Start command: java -jar target/moneyflow-backend-0.0.1-SNAPSHOT.jar
-Health check path: /api/public/health/live
 ```
 
 The liveness endpoint is public and does not touch the database. Do not use dashboard, wallet, transaction, or other authenticated financial APIs for health checks.
