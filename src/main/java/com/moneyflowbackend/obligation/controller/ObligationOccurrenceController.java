@@ -1,11 +1,14 @@
 package com.moneyflowbackend.obligation.controller;
 
 import com.moneyflowbackend.dto.ApiResponse;
+import com.moneyflowbackend.obligation.dto.ConfirmOccurrenceRequest;
+import com.moneyflowbackend.obligation.dto.ConfirmOccurrenceResponse;
 import com.moneyflowbackend.obligation.dto.ObligationOccurrencePageResponse;
 import com.moneyflowbackend.obligation.dto.ObligationOccurrenceResponse;
 import com.moneyflowbackend.obligation.dto.SkipOccurrenceRequest;
 import com.moneyflowbackend.obligation.dto.SnoozeOccurrenceRequest;
 import com.moneyflowbackend.obligation.model.ObligationOccurrenceStatus;
+import com.moneyflowbackend.obligation.service.ObligationConfirmationService;
 import com.moneyflowbackend.obligation.service.FinancialInboxService;
 import com.moneyflowbackend.obligation.service.ObligationOccurrenceService;
 import jakarta.validation.Valid;
@@ -28,12 +31,15 @@ import java.util.UUID;
 public class ObligationOccurrenceController {
     private final FinancialInboxService inboxService;
     private final ObligationOccurrenceService occurrenceService;
+    private final ObligationConfirmationService confirmationService;
 
     public ObligationOccurrenceController(
             FinancialInboxService inboxService,
-            ObligationOccurrenceService occurrenceService) {
+            ObligationOccurrenceService occurrenceService,
+            ObligationConfirmationService confirmationService) {
         this.inboxService = inboxService;
         this.occurrenceService = occurrenceService;
+        this.confirmationService = confirmationService;
     }
 
     @GetMapping("/recurring-obligations/{templateId}/occurrences")
@@ -81,6 +87,15 @@ public class ObligationOccurrenceController {
             @PathVariable UUID occurrenceId) {
         ObligationOccurrenceResponse response = occurrenceService.reopen(workspaceId, occurrenceId, currentUserId());
         return ResponseEntity.ok(ApiResponse.ok("Obligation occurrence reopened", response));
+    }
+
+    @PostMapping("/obligation-occurrences/{occurrenceId}/confirm")
+    public ResponseEntity<ApiResponse<ConfirmOccurrenceResponse>> confirm(
+            @PathVariable UUID workspaceId,
+            @PathVariable UUID occurrenceId,
+            @RequestBody(required = false) ConfirmOccurrenceRequest request) {
+        ConfirmOccurrenceResponse response = confirmationService.confirm(workspaceId, occurrenceId, request, currentUserId());
+        return ResponseEntity.ok(ApiResponse.ok("Obligation occurrence confirmed", response));
     }
 
     private UUID currentUserId() {

@@ -13,6 +13,8 @@ import com.moneyflowbackend.category.repository.CategoryRepository;
 import com.moneyflowbackend.common.exception.BusinessException;
 import com.moneyflowbackend.obligation.dto.FinancialInboxGroup;
 import com.moneyflowbackend.obligation.dto.FinancialInboxResponse;
+import com.moneyflowbackend.obligation.dto.ConfirmOccurrenceRequest;
+import com.moneyflowbackend.obligation.dto.ConfirmOccurrenceResponse;
 import com.moneyflowbackend.obligation.dto.ObligationOccurrencePageResponse;
 import com.moneyflowbackend.obligation.dto.ObligationOccurrenceResponse;
 import com.moneyflowbackend.obligation.dto.SkipOccurrenceRequest;
@@ -27,11 +29,18 @@ import com.moneyflowbackend.obligation.model.RecurringObligationTemplate;
 import com.moneyflowbackend.obligation.repository.ObligationOccurrenceRepository;
 import com.moneyflowbackend.obligation.repository.RecurringObligationTemplateRepository;
 import com.moneyflowbackend.obligation.service.FinancialInboxService;
+import com.moneyflowbackend.obligation.service.ObligationConfirmationService;
 import com.moneyflowbackend.obligation.service.ObligationOccurrenceService;
+import com.moneyflowbackend.dashboard.service.DashboardService;
+import com.moneyflowbackend.transaction.audit.TransactionAuditLogRepository;
+import com.moneyflowbackend.transaction.dto.TransactionResponse;
+import com.moneyflowbackend.transaction.model.TransactionStatus;
+import com.moneyflowbackend.transaction.model.TransactionType;
 import com.moneyflowbackend.transaction.repository.TransactionRepository;
 import com.moneyflowbackend.wallet.model.Wallet;
 import com.moneyflowbackend.wallet.model.WalletType;
 import com.moneyflowbackend.wallet.repository.WalletRepository;
+import com.moneyflowbackend.wallet.service.WalletBalanceService;
 import com.moneyflowbackend.workspace.model.Workspace;
 import com.moneyflowbackend.workspace.model.WorkspaceMember;
 import com.moneyflowbackend.workspace.model.WorkspaceRole;
@@ -70,7 +79,10 @@ class FinancialInboxOccurrenceIntegrationTests {
     @Autowired MockMvc mockMvc;
     @Autowired AuthService authService;
     @Autowired FinancialInboxService inboxService;
+    @Autowired ObligationConfirmationService confirmationService;
     @Autowired ObligationOccurrenceService occurrenceService;
+    @Autowired DashboardService dashboardService;
+    @Autowired WalletBalanceService walletBalanceService;
     @Autowired UserRepository userRepository;
     @Autowired WorkspaceRepository workspaceRepository;
     @Autowired WorkspaceMemberRepository workspaceMemberRepository;
@@ -79,6 +91,7 @@ class FinancialInboxOccurrenceIntegrationTests {
     @Autowired RecurringObligationTemplateRepository templateRepository;
     @Autowired ObligationOccurrenceRepository occurrenceRepository;
     @Autowired TransactionRepository transactionRepository;
+    @Autowired TransactionAuditLogRepository transactionAuditLogRepository;
 
     @TestConfiguration
     static class FixedClockConfig {
@@ -247,6 +260,129 @@ class FinancialInboxOccurrenceIntegrationTests {
     }
 
     @Test
+    void confirmPayableCreatesPostedExpenseLinksOccurrenceAndUpdatesLedgerViews() {
+        TestContext ctx = createContext("b5_payable", WorkspaceRole.OWNER);
+        Wallet wallet = wallet(ctx);
+        wallet.setOpeningBalance(new BigDecimal("1000"));
+        walletRepository.saveAndFlush(wallet);
+        Category expense = category(ctx, CategoryType.EXPENSE);
+        RecurringObligationTemplate template = templateRepository.saveAndFlush(template(ctx, "Rent", RecurringObligationStatus.PAUSED, wallet, expense).build());
+        ObligationOccurrence occurrence = occurrenceRepository.saveAndFlush(occurrence(ctx, template, "2026-07-20", LocalDate.of(2026, 7, 20)));
+
+        ConfirmOccurrenceResponse response = confirmationService.confirm(
+                ctx.workspace().getId(),
+                occurrence.getId(),
+                confirmReq(true, null, null, null, LocalDate.of(2026, 7, 21), "  paid by cash  "),
+                ctx.user().getId());
+
+        TransactionResponse tx = response.getTransaction();
+        assertThat(tx.getType()).isEqualTo(TransactionType.EXPENSE.name());
+        assertThat(tx.getStatus()).isEqualTo(TransactionStatus.POSTED.name());
+        assertThat(tx.getAmount()).isEqualByComparingTo("100");
+        assertThat(tx.getWalletId()).isEqualTo(wallet.getId());
+        assertThat(tx.getCategoryId()).isEqualTo(expense.getId());
+        assertThat(tx.getTransactionDate()).isEqualTo(LocalDate.of(2026, 7, 21));
+        assertThat(tx.getNote()).isEqualTo("paid by cash");
+        assertThat(response.getOccurrence().getStatus()).isEqualTo(ObligationOccurrenceStatus.CONFIRMED);
+        assertThat(response.getOccurrence().getActualAmount()).isEqualByComparingTo("100");
+        assertThat(response.getOccurrence().getLinkedTransactionId()).isEqualTo(tx.getId());
+        assertThat(response.getOccurrence().getCompletedAt()).isNotNull();
+        assertThat(response.getOccurrence().getSnoozedUntil()).isNull();
+        assertThat(walletBalanceService.calculateCurrentBalance(wallet.getId())).isEqualByComparingTo("900");
+        assertThat(dashboardService.getDashboard(ctx.workspace().getId(), "2026-07", "FULL_MONTH", ctx.user().getId()).getExpense())
+                .isEqualByComparingTo("100");
+        assertThat(dashboardService.getDashboard(ctx.workspace().getId(), "2026-07", "FULL_MONTH", ctx.user().getId()).getIncome())
+                .isEqualByComparingTo("0");
+        assertThat(transactionAuditLogRepository.findByWorkspaceIdAndTransactionIdOrderByCreatedAtAsc(ctx.workspace().getId(), tx.getId()))
+                .hasSize(1);
+    }
+
+    @Test
+    void confirmReceivableCreatesPostedIncomeAndVariableAmountIsRequired() {
+        TestContext ctx = createContext("b5_receivable", WorkspaceRole.OWNER);
+        Wallet wallet = wallet(ctx);
+        Category income = category(ctx, CategoryType.INCOME);
+        RecurringObligationTemplate template = templateRepository.saveAndFlush(template(ctx, "Freelance", RecurringObligationStatus.ARCHIVED, wallet, income)
+                .direction(ObligationDirection.RECEIVABLE)
+                .amountMode(ObligationAmountMode.VARIABLE)
+                .defaultAmount(null)
+                .build());
+        ObligationOccurrence occurrence = occurrenceRepository.saveAndFlush(occurrence(ctx, template, "2026-07-20", LocalDate.of(2026, 7, 20)));
+        assertBusinessCode(() -> confirmationService.confirm(ctx.workspace().getId(), occurrence.getId(),
+                confirmReq(true, null, null, null, null, null), ctx.user().getId()), "INVALID_OBLIGATION_AMOUNT");
+
+        ConfirmOccurrenceResponse response = confirmationService.confirm(ctx.workspace().getId(), occurrence.getId(),
+                confirmReq(true, new BigDecimal("250"), null, null, null, null), ctx.user().getId());
+
+        assertThat(response.getTransaction().getType()).isEqualTo(TransactionType.INCOME.name());
+        assertThat(response.getTransaction().getAmount()).isEqualByComparingTo("250");
+        assertThat(response.getTransaction().getTransactionDate()).isEqualTo(LocalDate.of(2026, 7, 20));
+        assertThat(walletBalanceService.calculateCurrentBalance(wallet.getId())).isEqualByComparingTo("250");
+        assertThat(dashboardService.getDashboard(ctx.workspace().getId(), "2026-07", "FULL_MONTH", ctx.user().getId()).getIncome())
+                .isEqualByComparingTo("250");
+    }
+
+    @Test
+    void confirmUsesRequestOverridesAndRetryIsIdempotent() {
+        TestContext ctx = createContext("b5_idempotent", WorkspaceRole.OWNER);
+        Wallet defaultWallet = wallet(ctx);
+        Wallet requestWallet = wallet(ctx);
+        Category defaultCategory = category(ctx, CategoryType.EXPENSE);
+        Category requestCategory = category(ctx, CategoryType.EXPENSE);
+        RecurringObligationTemplate template = templateRepository.saveAndFlush(template(ctx, "Internet", RecurringObligationStatus.ACTIVE, defaultWallet, defaultCategory).build());
+        ObligationOccurrence occurrence = occurrenceRepository.saveAndFlush(occurrence(ctx, template, "2026-07-20", LocalDate.of(2026, 7, 20)));
+
+        ConfirmOccurrenceResponse first = confirmationService.confirm(ctx.workspace().getId(), occurrence.getId(),
+                confirmReq(true, new BigDecimal("120"), requestWallet.getId(), requestCategory.getId(), LocalDate.of(2026, 7, 19), null),
+                ctx.user().getId());
+        ConfirmOccurrenceResponse retry = confirmationService.confirm(ctx.workspace().getId(), occurrence.getId(),
+                confirmReq(true, new BigDecimal("999"), defaultWallet.getId(), defaultCategory.getId(), LocalDate.of(2026, 7, 18), null),
+                ctx.user().getId());
+
+        assertThat(retry.getTransaction().getId()).isEqualTo(first.getTransaction().getId());
+        assertThat(retry.getTransaction().getAmount()).isEqualByComparingTo("120");
+        assertThat(retry.getTransaction().getWalletId()).isEqualTo(requestWallet.getId());
+        assertThat(retry.getTransaction().getCategoryId()).isEqualTo(requestCategory.getId());
+        assertThat(retry.getTransaction().getTransactionDate()).isEqualTo(LocalDate.of(2026, 7, 19));
+        assertThat(transactionRepository.findAll().stream().filter(tx -> tx.getWorkspace().getId().equals(ctx.workspace().getId())).count())
+                .isEqualTo(1);
+    }
+
+    @Test
+    void confirmRejectsMissingConfirmationDefaultsBadReferencesStatesAndViewer() {
+        TestContext owner = createContext("b5_validation", WorkspaceRole.OWNER);
+        TestContext viewer = createContext("b5_validation_viewer", WorkspaceRole.OWNER);
+        TestContext other = createContext("b5_validation_other", WorkspaceRole.OWNER);
+        workspaceMemberRepository.saveAndFlush(WorkspaceMember.builder().workspace(owner.workspace()).user(viewer.user()).role(WorkspaceRole.VIEWER).build());
+        Category expense = category(owner, CategoryType.EXPENSE);
+        Category income = category(owner, CategoryType.INCOME);
+        Wallet wallet = wallet(owner);
+        Wallet otherWallet = wallet(other);
+        RecurringObligationTemplate noDefaults = templateRepository.saveAndFlush(template(owner, "No defaults", RecurringObligationStatus.ACTIVE, null, null).build());
+        ObligationOccurrence occurrence = occurrenceRepository.saveAndFlush(occurrence(owner, noDefaults, "2026-07-20", LocalDate.of(2026, 7, 20)));
+
+        assertBusinessCode(() -> confirmationService.confirm(owner.workspace().getId(), occurrence.getId(),
+                confirmReq(false, new BigDecimal("1"), wallet.getId(), expense.getId(), null, null), owner.user().getId()), "CONFIRMATION_REQUIRED");
+        assertBusinessCode(() -> confirmationService.confirm(owner.workspace().getId(), occurrence.getId(),
+                confirmReq(true, new BigDecimal("1"), null, expense.getId(), null, null), owner.user().getId()), "WALLET_REQUIRED");
+        assertBusinessCode(() -> confirmationService.confirm(owner.workspace().getId(), occurrence.getId(),
+                confirmReq(true, new BigDecimal("1"), wallet.getId(), null, null, null), owner.user().getId()), "CATEGORY_REQUIRED");
+        assertBusinessCode(() -> confirmationService.confirm(owner.workspace().getId(), occurrence.getId(),
+                confirmReq(true, new BigDecimal("1"), otherWallet.getId(), expense.getId(), null, null), owner.user().getId()), "WALLET_NOT_FOUND");
+        assertBusinessCode(() -> confirmationService.confirm(owner.workspace().getId(), occurrence.getId(),
+                confirmReq(true, new BigDecimal("1"), wallet.getId(), income.getId(), null, null), owner.user().getId()), "CATEGORY_TYPE_MISMATCH");
+        assertBusinessCode(() -> confirmationService.confirm(owner.workspace().getId(), occurrence.getId(),
+                confirmReq(true, new BigDecimal("1"), wallet.getId(), expense.getId(), null, null), viewer.user().getId()), "FORBIDDEN");
+
+        ObligationOccurrence skipped = occurrence(owner, noDefaults, "2026-08-20", LocalDate.of(2026, 8, 20));
+        skipped.setStatus(ObligationOccurrenceStatus.SKIPPED);
+        skipped.setSkippedAt(Instant.parse("2026-08-20T00:00:00Z"));
+        ObligationOccurrence savedSkipped = occurrenceRepository.saveAndFlush(skipped);
+        assertBusinessCode(() -> confirmationService.confirm(owner.workspace().getId(), savedSkipped.getId(),
+                confirmReq(true, new BigDecimal("1"), wallet.getId(), expense.getId(), null, null), owner.user().getId()), "INVALID_OCCURRENCE_STATE");
+    }
+
+    @Test
     void controllerPathsReturnWrappedJson() throws Exception {
         String username = "b4_http_" + UUID.randomUUID().toString().substring(0, 8);
         UserResponse registered = authService.register(registerRequest(username));
@@ -258,6 +394,12 @@ class FinancialInboxOccurrenceIntegrationTests {
                 .name("Rent")
                 .categoryType(CategoryType.EXPENSE)
                 .build());
+        Wallet wallet = walletRepository.saveAndFlush(Wallet.builder()
+                .workspace(workspace)
+                .name("Cash")
+                .walletType(WalletType.CASH)
+                .openingBalance(BigDecimal.ZERO)
+                .build());
         RecurringObligationTemplate template = templateRepository.saveAndFlush(RecurringObligationTemplate.builder()
                 .workspace(workspace)
                 .name("Rent")
@@ -268,6 +410,7 @@ class FinancialInboxOccurrenceIntegrationTests {
                 .intervalCount(1)
                 .startDate(LocalDate.of(2026, 7, 20))
                 .reminderDaysBefore(0)
+                .defaultWallet(wallet)
                 .defaultCategory(category)
                 .status(RecurringObligationStatus.ACTIVE)
                 .createdByUser(user)
@@ -288,6 +431,25 @@ class FinancialInboxOccurrenceIntegrationTests {
                         .header("Authorization", "Bearer " + token.getAccessToken()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("SKIPPED"));
+        ObligationOccurrence confirmOccurrence = occurrenceRepository.saveAndFlush(occurrence(new TestContext(user, workspace), template, "2026-07-21", LocalDate.of(2026, 7, 21)));
+        mockMvc.perform(post("/api/workspaces/" + workspace.getId() + "/obligation-occurrences/" + confirmOccurrence.getId() + "/confirm")
+                        .contentType("application/json")
+                        .content("{\"confirmed\":true}")
+                        .header("Authorization", "Bearer " + token.getAccessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.occurrence.status").value("CONFIRMED"))
+                .andExpect(jsonPath("$.data.transaction.type").value("EXPENSE"));
+    }
+
+    private ConfirmOccurrenceRequest confirmReq(Boolean confirmed, BigDecimal actualAmount, UUID walletId, UUID categoryId, LocalDate transactionDate, String note) {
+        ConfirmOccurrenceRequest request = new ConfirmOccurrenceRequest();
+        request.setConfirmed(confirmed);
+        request.setActualAmount(actualAmount);
+        request.setWalletId(walletId);
+        request.setCategoryId(categoryId);
+        request.setTransactionDate(transactionDate);
+        request.setNote(note);
+        return request;
     }
 
     private TestContext createContext(String prefix, WorkspaceRole role) {
