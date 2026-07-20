@@ -4,6 +4,7 @@ import com.moneyflowbackend.common.dto.ErrorResponse;
 import com.moneyflowbackend.security.RateLimitExceededException;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.FieldError;
@@ -79,6 +80,18 @@ public class GlobalExceptionHandler {
                 .fieldErrors(Collections.emptyMap())
                 .build();
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(res);
+    }
+
+    @ExceptionHandler(ObjectOptimisticLockingFailureException.class)
+    public ResponseEntity<ErrorResponse> handleOptimisticLock(ObjectOptimisticLockingFailureException ex) {
+        ErrorResponse res = ErrorResponse.builder()
+                .success(false)
+                .code("OPTIMISTIC_LOCK_CONFLICT")
+                .message("Du lieu da duoc cap nhat boi thao tac khac. Vui long tai lai.")
+                .timestamp(clock.instant().toString())
+                .fieldErrors(Collections.emptyMap())
+                .build();
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(res);
     }
 
     @ExceptionHandler(DataAccessException.class)

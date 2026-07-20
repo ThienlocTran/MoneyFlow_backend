@@ -18,6 +18,17 @@ public interface WalletRepository extends JpaRepository<Wallet, UUID> {
     long countByWorkspaceIdAndIsActiveTrue(UUID workspaceId);
 
     @Query("""
+            SELECT w FROM Wallet w
+            WHERE w.workspace.id = :workspaceId
+              AND w.isActive = true
+              AND (w.openingDate IS NULL OR w.openingDate <= :closingDate)
+            ORDER BY w.createdAt ASC
+            """)
+    List<Wallet> findActiveOpenOnDate(
+            @Param("workspaceId") UUID workspaceId,
+            @Param("closingDate") java.time.LocalDate closingDate);
+
+    @Query("""
             SELECT COUNT(w) > 0 FROM Wallet w
             WHERE w.workspace.id = :workspaceId
               AND LOWER(w.name) = LOWER(:name)
