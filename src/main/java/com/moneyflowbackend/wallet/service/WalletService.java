@@ -2,8 +2,6 @@ package com.moneyflowbackend.wallet.service;
 
 import com.moneyflowbackend.common.exception.BusinessException;
 import com.moneyflowbackend.transaction.repository.TransactionRepository;
-import com.moneyflowbackend.transaction.model.TransactionStatus;
-import com.moneyflowbackend.transaction.model.TransactionType;
 import com.moneyflowbackend.wallet.dto.WalletRequest;
 import com.moneyflowbackend.wallet.dto.WalletResponse;
 import com.moneyflowbackend.wallet.dto.WalletSummaryResponse;
@@ -15,8 +13,6 @@ import com.moneyflowbackend.workspace.model.WorkspaceMember;
 import com.moneyflowbackend.workspace.model.WorkspaceRole;
 import com.moneyflowbackend.workspace.repository.WorkspaceMemberRepository;
 import com.moneyflowbackend.workspace.repository.WorkspaceRepository;
-import jakarta.persistence.EntityManager;
-import jakarta.persistence.PersistenceContext;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -25,9 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -40,19 +34,19 @@ public class WalletService {
     private final TransactionRepository transactionRepository;
     private final WorkspaceRepository workspaceRepository;
     private final WorkspaceMemberRepository workspaceMemberRepository;
-
-    @PersistenceContext
-    private EntityManager entityManager;
+    private final WalletBalanceService walletBalanceService;
 
     public WalletService(
             WalletRepository walletRepository,
             TransactionRepository transactionRepository,
             WorkspaceRepository workspaceRepository,
-            WorkspaceMemberRepository workspaceMemberRepository) {
+            WorkspaceMemberRepository workspaceMemberRepository,
+            WalletBalanceService walletBalanceService) {
         this.walletRepository = walletRepository;
         this.transactionRepository = transactionRepository;
         this.workspaceRepository = workspaceRepository;
         this.workspaceMemberRepository = workspaceMemberRepository;
+        this.walletBalanceService = walletBalanceService;
     }
 
     @Transactional(readOnly = true)
@@ -196,31 +190,7 @@ public class WalletService {
 
     @Transactional(readOnly = true)
     public BigDecimal calculateCurrentBalance(UUID walletId) {
-        Wallet wallet = walletRepository.findById(walletId)
-                .orElseThrow(() -> new BusinessException("WALLET_NOT_FOUND", "Không tìm thấy ví"));
-        return calculateCurrentBalance(wallet);
-    }
-
-    private BigDecimal calculateCurrentBalance(Wallet wallet) {
-        UUID walletId = wallet.getId();
-        LocalDate openingDate = wallet.getOpeningDate();
-
-        BigDecimal income = sumWalletTransactions(walletId, openingDate, List.of(
-                TransactionType.INCOME,
-                TransactionType.LOAN_COLLECTION,
-                TransactionType.BORROWING_RECEIPT));
-        BigDecimal expense = sumWalletTransactions(walletId, openingDate, List.of(
-                TransactionType.EXPENSE,
-                TransactionType.LOAN_DISBURSEMENT,
-                TransactionType.BORROWING_REPAYMENT));
-        BigDecimal transferTo = sumTransfer(walletId, openingDate, true);
-        BigDecimal transferFrom = sumTransfer(walletId, openingDate, false);
-
-        return wallet.getOpeningBalance()
-                .add(income)
-                .subtract(expense)
-                .add(transferTo)
-                .subtract(transferFrom);
+        return walletBalanceService.calculateCurrentBalance(walletId);
     }
 
     private List<WalletResponse> mapToResponses(List<Wallet> wallets) {
@@ -231,95 +201,7 @@ public class WalletService {
     }
 
     private Map<UUID, BigDecimal> calculateCurrentBalances(List<Wallet> wallets) {
-        Map<UUID, BigDecimal> balances = new HashMap<>();
-        List<UUID> walletIds = new ArrayList<>(wallets.size());
-        for (Wallet wallet : wallets) {
-            balances.put(wallet.getId(), wallet.getOpeningBalance());
-            walletIds.add(wallet.getId());
-        }
-        if (walletIds.isEmpty()) {
-            return balances;
-        }
-
-        applyDeltas(balances, walletTransactionDeltas(walletIds));
-        applyDeltas(balances, transferDeltas(walletIds, true));
-        applyDeltas(balances, transferDeltas(walletIds, false));
-        return balances;
-    }
-
-    @SuppressWarnings("unchecked")
-    private List<Object[]> walletTransactionDeltas(List<UUID> walletIds) {
-        return entityManager.createQuery(
-                "SELECT t.wallet.id, COALESCE(SUM(CASE " +
-                "WHEN t.transactionType IN :incomeTypes THEN t.amount " +
-                "WHEN t.transactionType IN :expenseTypes THEN -t.amount " +
-                "ELSE 0 END), 0) " +
-                "FROM Transaction t JOIN t.wallet w " +
-                "WHERE w.id IN :walletIds " +
-                "AND t.transactionStatus = :status " +
-                "AND t.deletedAt IS NULL " +
-                "AND t.affectsWalletBalance = true " +
-                "AND t.transactionType IN :types " +
-                "AND (w.openingDate IS NULL OR t.transactionDate >= w.openingDate) " +
-                "GROUP BY t.wallet.id")
-                .setParameter("walletIds", walletIds)
-                .setParameter("status", TransactionStatus.POSTED)
-                .setParameter("incomeTypes", incomeBalanceTypes())
-                .setParameter("expenseTypes", expenseBalanceTypes())
-                .setParameter("types", balanceTransactionTypes())
-                .getResultList();
-    }
-
-    @SuppressWarnings("unchecked")
-    private List<Object[]> transferDeltas(List<UUID> walletIds, boolean incoming) {
-        String walletSide = incoming ? "destinationWallet" : "sourceWallet";
-        String sign = incoming ? "td.transaction.amount" : "-td.transaction.amount";
-        return entityManager.createQuery(
-                "SELECT w.id, COALESCE(SUM(" + sign + "), 0) " +
-                "FROM TransferDetail td JOIN td." + walletSide + " w " +
-                "WHERE w.id IN :walletIds " +
-                "AND td.transaction.transactionType = :type " +
-                "AND td.transaction.transactionStatus = :status " +
-                "AND td.transaction.deletedAt IS NULL " +
-                "AND td.transaction.affectsWalletBalance = true " +
-                "AND (w.openingDate IS NULL OR td.transaction.transactionDate >= w.openingDate) " +
-                "GROUP BY w.id")
-                .setParameter("walletIds", walletIds)
-                .setParameter("type", TransactionType.TRANSFER)
-                .setParameter("status", TransactionStatus.POSTED)
-                .getResultList();
-    }
-
-    private void applyDeltas(Map<UUID, BigDecimal> balances, List<Object[]> rows) {
-        for (Object[] row : rows) {
-            UUID walletId = (UUID) row[0];
-            BigDecimal delta = (BigDecimal) row[1];
-            balances.computeIfPresent(walletId, (id, balance) -> balance.add(delta));
-        }
-    }
-
-    private List<TransactionType> incomeBalanceTypes() {
-        return List.of(
-                TransactionType.INCOME,
-                TransactionType.LOAN_COLLECTION,
-                TransactionType.BORROWING_RECEIPT);
-    }
-
-    private List<TransactionType> expenseBalanceTypes() {
-        return List.of(
-                TransactionType.EXPENSE,
-                TransactionType.LOAN_DISBURSEMENT,
-                TransactionType.BORROWING_REPAYMENT);
-    }
-
-    private List<TransactionType> balanceTransactionTypes() {
-        return List.of(
-                TransactionType.INCOME,
-                TransactionType.LOAN_COLLECTION,
-                TransactionType.BORROWING_RECEIPT,
-                TransactionType.EXPENSE,
-                TransactionType.LOAN_DISBURSEMENT,
-                TransactionType.BORROWING_REPAYMENT);
+        return walletBalanceService.calculateCurrentBalances(wallets);
     }
 
     private WorkspaceMember requireActiveMember(UUID workspaceId, UUID userId) {
@@ -410,47 +292,8 @@ public class WalletService {
         }
     }
 
-    private BigDecimal sumWalletTransactions(UUID walletId, LocalDate openingDate, List<TransactionType> types) {
-        String dateFilter = openingDate == null ? "" : "AND t.transactionDate >= :openingDate ";
-        var query = entityManager.createQuery(
-                "SELECT COALESCE(SUM(t.amount), 0) FROM Transaction t " +
-                "WHERE t.wallet.id = :walletId " +
-                "AND t.transactionStatus = :status " +
-                "AND t.deletedAt IS NULL " +
-                "AND t.affectsWalletBalance = true " +
-                "AND t.transactionType IN :types " +
-                dateFilter, BigDecimal.class)
-                .setParameter("walletId", walletId)
-                .setParameter("status", TransactionStatus.POSTED)
-                .setParameter("types", types);
-        if (openingDate != null) {
-            query.setParameter("openingDate", openingDate);
-        }
-        return query.getSingleResult();
-    }
-
-    private BigDecimal sumTransfer(UUID walletId, LocalDate openingDate, boolean incoming) {
-        String walletSide = incoming ? "destinationWallet" : "sourceWallet";
-        String dateFilter = openingDate == null ? "" : "AND td.transaction.transactionDate >= :openingDate ";
-        var query = entityManager.createQuery(
-                "SELECT COALESCE(SUM(td.transaction.amount), 0) FROM TransferDetail td " +
-                "WHERE td." + walletSide + ".id = :walletId " +
-                "AND td.transaction.transactionType = :type " +
-                "AND td.transaction.transactionStatus = :status " +
-                "AND td.transaction.deletedAt IS NULL " +
-                "AND td.transaction.affectsWalletBalance = true " +
-                dateFilter, BigDecimal.class)
-                .setParameter("walletId", walletId)
-                .setParameter("type", TransactionType.TRANSFER)
-                .setParameter("status", TransactionStatus.POSTED);
-        if (openingDate != null) {
-            query.setParameter("openingDate", openingDate);
-        }
-        return query.getSingleResult();
-    }
-
     private WalletResponse mapToResponse(Wallet w) {
-        return mapToResponse(w, calculateCurrentBalance(w));
+        return mapToResponse(w, walletBalanceService.calculateCurrentBalance(w.getId()));
     }
 
     private WalletResponse mapToResponse(Wallet w, BigDecimal currentBalance) {
