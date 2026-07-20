@@ -11,6 +11,7 @@ import com.moneyflowbackend.transaction.audit.TransactionAuditService;
 import com.moneyflowbackend.transaction.dto.TransactionPageResponse;
 import com.moneyflowbackend.transaction.dto.TransactionRequest;
 import com.moneyflowbackend.transaction.dto.TransactionResponse;
+import com.moneyflowbackend.transaction.model.AdjustmentDirection;
 import com.moneyflowbackend.transaction.model.Transaction;
 import com.moneyflowbackend.transaction.model.TransactionSourceType;
 import com.moneyflowbackend.transaction.model.TransactionStatus;
@@ -455,6 +456,52 @@ public class TransactionService {
         tx = transactionRepository.save(tx);
         transactionAuditService.record(tx, userId, TransactionAuditAction.CREATE, null, transactionAuditService.snapshot(tx));
         return mapToResponse(tx);
+    }
+
+    @Transactional
+    public Transaction createAdjustment(
+            UUID workspaceId,
+            Wallet wallet,
+            AdjustmentDirection direction,
+            BigDecimal amount,
+            LocalDate transactionDate,
+            String note,
+            UUID userId,
+            String sourceReference) {
+        if (wallet == null || !wallet.getWorkspace().getId().equals(workspaceId)) {
+            throw new BusinessException("WALLET_NOT_FOUND", "Wallet not found", HttpStatus.NOT_FOUND);
+        }
+        if (direction == null) {
+            throw new BusinessException("INVALID_ADJUSTMENT_DIRECTION", "Adjustment direction is required");
+        }
+        BigDecimal normalizedAmount = requireAmount(amount);
+        Workspace workspace = wallet.getWorkspace();
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new BusinessException("USER_NOT_FOUND", "User not found", HttpStatus.NOT_FOUND));
+        Instant now = clock.instant();
+        Transaction tx = Transaction.builder()
+                .workspace(workspace)
+                .createdByUser(user)
+                .wallet(wallet)
+                .transactionType(TransactionType.ADJUSTMENT)
+                .adjustmentDirection(direction)
+                .transactionStatus(TransactionStatus.POSTED)
+                .amount(normalizedAmount)
+                .currency(workspaceCurrency(workspace))
+                .transactionDate(transactionDate)
+                .description("Reconciliation adjustment")
+                .note(normalizeText(note))
+                .sourceType(TransactionSourceType.MANUAL)
+                .sourceReference(normalizeText(sourceReference))
+                .walletUnknown(false)
+                .historical(false)
+                .affectsWalletBalance(true)
+                .createdAt(now)
+                .updatedAt(now)
+                .build();
+        tx = transactionRepository.saveAndFlush(tx);
+        transactionAuditService.record(tx, userId, TransactionAuditAction.CREATE, null, transactionAuditService.snapshot(tx));
+        return tx;
     }
 
     @Transactional

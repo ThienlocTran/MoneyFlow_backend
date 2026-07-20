@@ -80,6 +80,7 @@ public class TransactionAuditService {
     public Map<String, Object> snapshot(Transaction tx) {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("type", tx.getTransactionType().name());
+        data.put("adjustmentDirection", tx.getAdjustmentDirection() != null ? tx.getAdjustmentDirection().name() : null);
         data.put("status", tx.getTransactionStatus().name());
         data.put("amount", tx.getAmount());
         data.put("currency", tx.getCurrency());

@@ -2,6 +2,7 @@ package com.moneyflowbackend.closing.controller;
 
 import com.moneyflowbackend.closing.dto.CompleteDailyClosingRequest;
 import com.moneyflowbackend.closing.dto.DailyClosingResponse;
+import com.moneyflowbackend.closing.dto.ReconciliationAdjustmentRequest;
 import com.moneyflowbackend.closing.dto.WalletSnapshotPageResponse;
 import com.moneyflowbackend.closing.dto.WalletSnapshotRequest;
 import com.moneyflowbackend.closing.service.DailyClosingService;
@@ -57,6 +58,15 @@ public class DailyClosingController {
             @RequestBody(required = false) CompleteDailyClosingRequest request) {
         DailyClosingResponse response = dailyClosingService.completeDailyClosing(workspaceId, closingDate, request, currentUserId());
         return ResponseEntity.ok(ApiResponse.ok("Daily closing completed", response));
+    }
+
+    @PostMapping("/wallet-snapshots/{snapshotId}/adjustment")
+    public ResponseEntity<ApiResponse<DailyClosingResponse>> reconcileWalletSnapshot(
+            @PathVariable UUID workspaceId,
+            @PathVariable UUID snapshotId,
+            @RequestBody ReconciliationAdjustmentRequest request) {
+        DailyClosingResponse response = dailyClosingService.reconcileWalletSnapshot(workspaceId, snapshotId, request, currentUserId());
+        return ResponseEntity.ok(ApiResponse.ok("Wallet snapshot adjusted", response));
     }
 
     @GetMapping("/wallet-snapshots")

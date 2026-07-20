@@ -3,6 +3,7 @@ package com.moneyflowbackend.closing.service;
 import com.moneyflowbackend.closing.dto.CompleteDailyClosingRequest;
 import com.moneyflowbackend.closing.dto.DailyClosingResponse;
 import com.moneyflowbackend.closing.dto.DailyClosingWalletResponse;
+import com.moneyflowbackend.closing.dto.ReconciliationAdjustmentRequest;
 import com.moneyflowbackend.closing.dto.WalletSnapshotHistoryResponse;
 import com.moneyflowbackend.closing.dto.WalletSnapshotPageResponse;
 import com.moneyflowbackend.closing.dto.WalletSnapshotRequest;
@@ -10,6 +11,9 @@ import com.moneyflowbackend.closing.model.DailyClosing;
 import com.moneyflowbackend.closing.model.DailyClosingStatus;
 import com.moneyflowbackend.closing.repository.DailyClosingRepository;
 import com.moneyflowbackend.common.exception.BusinessException;
+import com.moneyflowbackend.transaction.model.AdjustmentDirection;
+import com.moneyflowbackend.transaction.model.Transaction;
+import com.moneyflowbackend.transaction.service.TransactionService;
 import com.moneyflowbackend.wallet.model.BalanceSourceType;
 import com.moneyflowbackend.wallet.model.ReconciliationStatus;
 import com.moneyflowbackend.wallet.model.Wallet;
@@ -48,6 +52,7 @@ public class DailyClosingService {
     private final WalletRepository walletRepository;
     private final WalletBalanceService walletBalanceService;
     private final WorkspaceService workspaceService;
+    private final TransactionService transactionService;
     private final Clock clock;
 
     public DailyClosingService(
@@ -56,12 +61,14 @@ public class DailyClosingService {
             WalletRepository walletRepository,
             WalletBalanceService walletBalanceService,
             WorkspaceService workspaceService,
+            TransactionService transactionService,
             Clock clock) {
         this.dailyClosingRepository = dailyClosingRepository;
         this.snapshotRepository = snapshotRepository;
         this.walletRepository = walletRepository;
         this.walletBalanceService = walletBalanceService;
         this.workspaceService = workspaceService;
+        this.transactionService = transactionService;
         this.clock = clock;
     }
 
@@ -130,6 +137,31 @@ public class DailyClosingService {
             dailyClosingRepository.saveAndFlush(closing);
         }
         return mapDailyClosingResponse(workspaceId, closingDate, closing);
+    }
+
+    @Transactional
+    public DailyClosingResponse reconcileWalletSnapshot(UUID workspaceId, UUID snapshotId, ReconciliationAdjustmentRequest req, UUID userId) {
+        workspaceService.requireWritableMember(workspaceId, userId);
+        WalletBalanceSnapshot snapshot = snapshotRepository.lockByIdAndWorkspaceId(snapshotId, workspaceId)
+                .orElseThrow(() -> new BusinessException("SNAPSHOT_NOT_FOUND", "Snapshot not found", HttpStatus.NOT_FOUND));
+        DailyClosing closing = snapshot.getDailyClosing();
+        validateReconciliationSnapshot(snapshot, closing);
+        validateAdjustmentRequest(snapshot, req);
+
+        Transaction adjustment = transactionService.createAdjustment(
+                workspaceId,
+                snapshot.getWallet(),
+                req.getDirection(),
+                req.getAmount(),
+                closing.getClosingDate(),
+                normalizeNote(req.getNote()),
+                userId,
+                "wallet_snapshot:" + snapshot.getId());
+        snapshot.setAdjustmentTransaction(adjustment);
+        snapshot.setReconciliationStatus(ReconciliationStatus.ADJUSTED);
+        snapshot.setUpdatedAt(clock.instant());
+        snapshotRepository.saveAndFlush(snapshot);
+        return mapDailyClosingResponse(workspaceId, closing.getClosingDate(), closing);
     }
 
     @Transactional(readOnly = true)
@@ -301,6 +333,50 @@ public class DailyClosingService {
         if (wallet.getOpeningDate() != null && wallet.getOpeningDate().isAfter(closingDate)) {
             throw new BusinessException("WALLET_NOT_OPEN_ON_DATE", "Vi chua mo vao ngay chot so");
         }
+    }
+
+    private void validateReconciliationSnapshot(WalletBalanceSnapshot snapshot, DailyClosing closing) {
+        if (snapshot.getSourceType() == BalanceSourceType.EXCEL_MIGRATION) {
+            throw new BusinessException("HISTORICAL_SNAPSHOT_NOT_RECONCILABLE", "Historical snapshot cannot be reconciled", HttpStatus.CONFLICT);
+        }
+        if (closing == null || snapshot.getLedgerBalance() == null || snapshot.getDifference() == null) {
+            throw new BusinessException("SNAPSHOT_NOT_RECONCILABLE", "Snapshot cannot be reconciled", HttpStatus.CONFLICT);
+        }
+        if (snapshot.getAdjustmentTransaction() != null || snapshot.getReconciliationStatus() == ReconciliationStatus.ADJUSTED) {
+            throw new BusinessException("SNAPSHOT_ALREADY_ADJUSTED", "Snapshot already adjusted", HttpStatus.CONFLICT);
+        }
+        if (snapshot.getDifference().compareTo(BigDecimal.ZERO) == 0 || snapshot.getReconciliationStatus() == ReconciliationStatus.MATCHED) {
+            throw new BusinessException("RECONCILIATION_NOT_NEEDED", "Snapshot is already matched", HttpStatus.CONFLICT);
+        }
+        if (snapshot.getReconciliationStatus() != ReconciliationStatus.UNRESOLVED) {
+            throw new BusinessException("SNAPSHOT_NOT_RECONCILABLE", "Snapshot cannot be reconciled", HttpStatus.CONFLICT);
+        }
+        walletRepository.findByIdAndWorkspaceId(snapshot.getWallet().getId(), snapshot.getWorkspace().getId())
+                .orElseThrow(() -> new BusinessException("SNAPSHOT_NOT_RECONCILABLE", "Snapshot wallet cannot be reconciled", HttpStatus.CONFLICT));
+    }
+
+    private void validateAdjustmentRequest(WalletBalanceSnapshot snapshot, ReconciliationAdjustmentRequest req) {
+        if (req == null || !Boolean.TRUE.equals(req.getConfirmed())) {
+            throw new BusinessException("CONFIRMATION_REQUIRED", "Confirmation is required");
+        }
+        if (req.getDirection() == null) {
+            throw new BusinessException("INVALID_ADJUSTMENT_DIRECTION", "Adjustment direction is required");
+        }
+        if (req.getAmount() == null || req.getAmount().compareTo(BigDecimal.ZERO) <= 0) {
+            throw new BusinessException("INVALID_ADJUSTMENT_AMOUNT", "Adjustment amount must be greater than 0");
+        }
+        BigDecimal difference = snapshot.getDifference();
+        AdjustmentDirection expectedDirection = difference.compareTo(BigDecimal.ZERO) > 0
+                ? AdjustmentDirection.INCREASE
+                : AdjustmentDirection.DECREASE;
+        BigDecimal expectedAmount = difference.abs();
+        if (req.getDirection() != expectedDirection) {
+            throw new BusinessException("INVALID_ADJUSTMENT_DIRECTION", "Adjustment direction does not match difference");
+        }
+        if (req.getAmount().compareTo(expectedAmount) != 0) {
+            throw new BusinessException("ADJUSTMENT_MISMATCH", "Adjustment amount does not match difference");
+        }
+        normalizeNote(req.getNote());
     }
 
     private String normalizeNote(String note) {
