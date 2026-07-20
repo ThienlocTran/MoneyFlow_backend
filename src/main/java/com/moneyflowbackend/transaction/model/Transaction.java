@@ -55,6 +55,10 @@ public class Transaction {
     private TransactionType transactionType;
 
     @Enumerated(EnumType.STRING)
+    @Column(name = "adjustment_direction", length = 20)
+    private AdjustmentDirection adjustmentDirection;
+
+    @Enumerated(EnumType.STRING)
     @Column(name = "transaction_status", nullable = false, length = 20)
     @Builder.Default
     private TransactionStatus transactionStatus = TransactionStatus.POSTED;

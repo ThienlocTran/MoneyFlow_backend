@@ -1,4 +1,4 @@
 package com.moneyflowbackend.wallet.model;
 public enum BalanceSourceType {
-    MANUAL, EXCEL_MIGRATION, SYSTEM
+    MANUAL, VOICE, EXCEL_MIGRATION, SYSTEM
 }
