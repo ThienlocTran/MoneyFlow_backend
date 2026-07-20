@@ -23,9 +23,18 @@ public interface ObligationOccurrenceRepository extends JpaRepository<Obligation
             LocalDate startDate,
             LocalDate endDate);
     Optional<ObligationOccurrence> findByLinkedTransactionId(UUID linkedTransactionId);
+    boolean existsByTemplateId(UUID templateId);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     Optional<ObligationOccurrence> findByIdAndWorkspaceId(UUID id, UUID workspaceId);
+
+    @Query("""
+            select o.template.id, count(o)
+            from ObligationOccurrence o
+            where o.template.id in :templateIds
+            group by o.template.id
+            """)
+    List<Object[]> countByTemplateIds(@Param("templateIds") List<UUID> templateIds);
 
     @Query("""
             select o.periodKey

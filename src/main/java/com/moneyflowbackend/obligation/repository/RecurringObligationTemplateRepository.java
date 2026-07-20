@@ -3,6 +3,8 @@ package com.moneyflowbackend.obligation.repository;
 import com.moneyflowbackend.obligation.model.RecurringObligationStatus;
 import com.moneyflowbackend.obligation.model.RecurringObligationTemplate;
 import jakarta.persistence.LockModeType;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
@@ -18,6 +20,46 @@ public interface RecurringObligationTemplateRepository extends JpaRepository<Rec
     List<RecurringObligationTemplate> findAllByWorkspaceIdAndStatusInOrderByStartDateAsc(UUID workspaceId, List<RecurringObligationStatus> statuses);
     List<RecurringObligationTemplate> findAllByWorkspaceIdAndStatusOrderByCreatedAtAsc(UUID workspaceId, RecurringObligationStatus status);
     boolean existsByIdAndWorkspaceId(UUID id, UUID workspaceId);
+
+    @Query(
+            value = """
+                    select distinct t
+                    from RecurringObligationTemplate t
+                    left join fetch t.defaultWallet
+                    left join fetch t.defaultCategory
+                    left join fetch t.createdByUser
+                    where t.workspace.id = :workspaceId
+                      and t.status in :statuses
+                      and (:direction is null or t.direction = :direction)
+                      and (:search is null or lower(t.name) like :search or lower(coalesce(t.note, '')) like :search)
+                    """,
+            countQuery = """
+                    select count(t)
+                    from RecurringObligationTemplate t
+                    where t.workspace.id = :workspaceId
+                      and t.status in :statuses
+                      and (:direction is null or t.direction = :direction)
+                      and (:search is null or lower(t.name) like :search or lower(coalesce(t.note, '')) like :search)
+                    """)
+    Page<RecurringObligationTemplate> findTemplatePage(
+            @Param("workspaceId") UUID workspaceId,
+            @Param("statuses") List<RecurringObligationStatus> statuses,
+            @Param("direction") com.moneyflowbackend.obligation.model.ObligationDirection direction,
+            @Param("search") String search,
+            Pageable pageable);
+
+    @Query("""
+            select t
+            from RecurringObligationTemplate t
+            left join fetch t.defaultWallet
+            left join fetch t.defaultCategory
+            left join fetch t.createdByUser
+            where t.id = :templateId
+              and t.workspace.id = :workspaceId
+            """)
+    Optional<RecurringObligationTemplate> findByIdAndWorkspaceIdWithReferences(
+            @Param("templateId") UUID templateId,
+            @Param("workspaceId") UUID workspaceId);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""
