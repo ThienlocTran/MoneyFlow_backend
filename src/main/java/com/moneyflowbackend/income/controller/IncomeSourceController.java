@@ -4,6 +4,8 @@ import com.moneyflowbackend.dto.ApiResponse;
 import com.moneyflowbackend.common.exception.BusinessException;
 import com.moneyflowbackend.income.dto.IncomeSourceRequest;
 import com.moneyflowbackend.income.dto.IncomeSourceResponse;
+import com.moneyflowbackend.income.dto.IncomeSourceSummaryListResponse;
+import com.moneyflowbackend.income.dto.IncomeSourceSummaryResponse;
 import com.moneyflowbackend.income.model.IncomeSourceStatus;
 import com.moneyflowbackend.income.service.IncomeSourceService;
 import jakarta.validation.Valid;
@@ -41,12 +43,35 @@ public class IncomeSourceController {
         return ResponseEntity.ok(ApiResponse.ok("Income sources loaded", response));
     }
 
+    @GetMapping("/summaries")
+    public ResponseEntity<ApiResponse<IncomeSourceSummaryListResponse>> summaries(
+            @PathVariable UUID workspaceId,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) String from,
+            @RequestParam(required = false) String to) {
+        IncomeSourceSummaryListResponse response = incomeSourceService.summaries(
+                workspaceId, parseStatus(status), search, from, to, currentUserId());
+        return ResponseEntity.ok(ApiResponse.ok("Income source summaries loaded", response));
+    }
+
     @GetMapping("/{incomeSourceId}")
     public ResponseEntity<ApiResponse<IncomeSourceResponse>> get(
             @PathVariable UUID workspaceId,
             @PathVariable UUID incomeSourceId) {
         IncomeSourceResponse response = incomeSourceService.get(workspaceId, incomeSourceId, currentUserId());
         return ResponseEntity.ok(ApiResponse.ok("Income source loaded", response));
+    }
+
+    @GetMapping("/{incomeSourceId}/summary")
+    public ResponseEntity<ApiResponse<IncomeSourceSummaryResponse>> summary(
+            @PathVariable UUID workspaceId,
+            @PathVariable UUID incomeSourceId,
+            @RequestParam(required = false) String from,
+            @RequestParam(required = false) String to) {
+        IncomeSourceSummaryResponse response = incomeSourceService.summary(
+                workspaceId, incomeSourceId, from, to, currentUserId());
+        return ResponseEntity.ok(ApiResponse.ok("Income source summary loaded", response));
     }
 
     @PostMapping
