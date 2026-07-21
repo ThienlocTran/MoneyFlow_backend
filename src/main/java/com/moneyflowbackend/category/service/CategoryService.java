@@ -8,6 +8,7 @@ import com.moneyflowbackend.category.model.CategoryType;
 import com.moneyflowbackend.category.repository.CategoryRepository;
 import com.moneyflowbackend.category.repository.CategoryKeywordRepository;
 import com.moneyflowbackend.common.exception.BusinessException;
+import com.moneyflowbackend.common.model.SpendingScope;
 import com.moneyflowbackend.jar.model.Jar;
 import com.moneyflowbackend.jar.repository.JarRepository;
 import com.moneyflowbackend.transaction.repository.TransactionRepository;
@@ -96,6 +97,7 @@ public class CategoryService {
         }
 
         Jar jar = resolveJarForCategory(workspaceId, type, req.getJarId());
+        validateDefaultSpendingScope(type, req.getDefaultSpendingScope());
         boolean active = req.getIsActive() == null || req.getIsActive();
         boolean quickAction = Boolean.TRUE.equals(req.getIsQuickAction());
         if (quickAction && !active) {
@@ -107,6 +109,7 @@ public class CategoryService {
                 .jar(jar)
                 .name(name)
                 .categoryType(type)
+                .defaultSpendingScope(req.getDefaultSpendingScope())
                 .icon(req.getIcon())
                 .isActive(active)
                 .isArchived(false)
@@ -131,6 +134,7 @@ public class CategoryService {
         }
 
         Jar jar = resolveJarForCategory(workspaceId, type, req.getJarId());
+        validateDefaultSpendingScope(type, req.getDefaultSpendingScope());
         boolean active = req.getIsActive() == null ? category.isActive() : req.getIsActive();
         boolean archived = category.isArchived();
         boolean quickAction = req.getIsQuickAction() == null ? category.isQuickAction() : req.getIsQuickAction();
@@ -144,6 +148,7 @@ public class CategoryService {
 
         category.setName(name);
         category.setCategoryType(type);
+        category.setDefaultSpendingScope(req.getDefaultSpendingScope());
         category.setJar(jar);
         category.setIcon(req.getIcon());
         category.setActive(active);
@@ -250,6 +255,14 @@ public class CategoryService {
         return jar;
     }
 
+    private void validateDefaultSpendingScope(CategoryType type, SpendingScope defaultSpendingScope) {
+        if (type != CategoryType.EXPENSE && defaultSpendingScope != null) {
+            throw new BusinessException(
+                    "INVALID_CATEGORY_SPENDING_SCOPE",
+                    "Default spending scope is only supported for expense categories.");
+        }
+    }
+
     private Category findCategoryInWorkspace(UUID workspaceId, UUID categoryId) {
         return categoryRepository.findByIdAndWorkspaceId(categoryId, workspaceId)
                 .orElseThrow(() -> new BusinessException("CATEGORY_NOT_FOUND", "Category not found", HttpStatus.NOT_FOUND));
@@ -330,6 +343,7 @@ public class CategoryService {
                 .type(category.getCategoryType().name())
                 .jarId(category.getJar() != null ? category.getJar().getId() : null)
                 .jarName(category.getJar() != null ? category.getJar().getName() : null)
+                .defaultSpendingScope(category.getDefaultSpendingScope())
                 .icon(category.getIcon())
                 .isQuickAction(category.isQuickAction())
                 .isActive(category.isActive())

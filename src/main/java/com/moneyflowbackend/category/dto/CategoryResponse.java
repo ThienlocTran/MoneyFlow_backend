@@ -1,5 +1,6 @@
 package com.moneyflowbackend.category.dto;
 
+import com.moneyflowbackend.common.model.SpendingScope;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -18,6 +19,7 @@ public class CategoryResponse {
     private String type;
     private UUID jarId;
     private String jarName;
+    private SpendingScope defaultSpendingScope;
     private String icon;
     private boolean isQuickAction;
     private boolean isActive;
