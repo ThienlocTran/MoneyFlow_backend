@@ -341,6 +341,53 @@ public class TransactionService {
     }
 
     @Transactional
+    public TransactionResponse createConfirmedObligationTransaction(
+            UUID workspaceId,
+            TransactionType type,
+            BigDecimal amount,
+            UUID walletId,
+            UUID categoryId,
+            LocalDate transactionDate,
+            String description,
+            String note,
+            UUID userId) {
+        requireWritableMember(workspaceId, userId);
+        Workspace workspace = findWorkspace(workspaceId);
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new BusinessException("USER_NOT_FOUND", "User not found", HttpStatus.NOT_FOUND));
+        if (type != TransactionType.INCOME && type != TransactionType.EXPENSE) {
+            throw new BusinessException("INVALID_TRANSACTION_TYPE", "Invalid obligation transaction type");
+        }
+        Wallet wallet = resolveWallet(workspaceId, walletId, true, true, "WALLET_REQUIRED");
+        Category category = resolveCategory(workspaceId, categoryId, type, true, true);
+        Transaction tx = Transaction.builder()
+                .workspace(workspace)
+                .createdByUser(user)
+                .wallet(wallet)
+                .category(category)
+                .transactionType(type)
+                .transactionStatus(TransactionStatus.POSTED)
+                .amount(requireAmount(amount))
+                .currency(workspaceCurrency(workspace))
+                .transactionDate(transactionDate != null ? transactionDate : today(workspace))
+                .description(normalizeText(description))
+                .note(normalizeText(note))
+                .sourceType(TransactionSourceType.SYSTEM)
+                .walletUnknown(false)
+                .historical(false)
+                .affectsWalletBalance(true)
+                .build();
+        tx = transactionRepository.saveAndFlush(tx);
+        transactionAuditService.record(tx, userId, TransactionAuditAction.CREATE, null, transactionAuditService.snapshot(tx));
+        return mapToResponse(tx);
+    }
+
+    @Transactional(readOnly = true)
+    public Transaction reference(UUID workspaceId, UUID transactionId) {
+        return findTransaction(workspaceId, transactionId);
+    }
+
+    @Transactional
     public TransactionResponse createHistoricalExcelMigration(UUID workspaceId, TransactionRequest req, UUID userId,
                                                              String migrationKey, String sourceReference, String rawInput) {
         requireWritableMember(workspaceId, userId);

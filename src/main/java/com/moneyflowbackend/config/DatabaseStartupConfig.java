@@ -92,12 +92,7 @@ public class DatabaseStartupConfig {
 
     private static boolean flywayHistoryExists(Statement statement) throws Exception {
         try (ResultSet rs = statement.executeQuery("""
-                select exists (
-                    select 1
-                    from information_schema.tables
-                    where table_schema = 'public'
-                      and table_name = 'flyway_schema_history'
-                )
+                select to_regclass('flyway_schema_history') is not null
                 """)) {
             return rs.next() && rs.getBoolean(1);
         }
