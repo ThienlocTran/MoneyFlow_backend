@@ -5,6 +5,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import com.moneyflowbackend.common.model.SpendingScope;
+
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -31,6 +33,7 @@ public class TransactionResponse {
     private String walletName;
     private UUID categoryId;
     private String categoryName;
+    private SpendingScope spendingScope;
     private UUID incomeSourceId;
     private UUID relatedIncomeSourceId;
     private UUID sourceWalletId;

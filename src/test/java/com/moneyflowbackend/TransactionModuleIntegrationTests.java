@@ -1,11 +1,17 @@
 package com.moneyflowbackend;
 
 import com.moneyflowbackend.auth.model.User;
+import com.moneyflowbackend.auth.dto.LoginRequest;
+import com.moneyflowbackend.auth.dto.RegisterRequest;
+import com.moneyflowbackend.auth.dto.TokenResponse;
+import com.moneyflowbackend.auth.dto.UserResponse;
 import com.moneyflowbackend.auth.repository.UserRepository;
+import com.moneyflowbackend.auth.service.AuthService;
 import com.moneyflowbackend.category.model.Category;
 import com.moneyflowbackend.category.model.CategoryType;
 import com.moneyflowbackend.category.repository.CategoryRepository;
 import com.moneyflowbackend.common.exception.BusinessException;
+import com.moneyflowbackend.common.model.SpendingScope;
 import com.moneyflowbackend.income.model.IncomeSource;
 import com.moneyflowbackend.income.model.IncomeSourceStatus;
 import com.moneyflowbackend.income.model.IncomeSourceType;
@@ -35,8 +41,10 @@ import com.moneyflowbackend.workspace.repository.WorkspacePersonRepository;
 import com.moneyflowbackend.workspace.repository.WorkspaceRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -46,14 +54,22 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest
+@AutoConfigureMockMvc
 @ActiveProfiles("test")
 @Transactional
 class TransactionModuleIntegrationTests {
 
     @Autowired TransactionService transactionService;
     @Autowired WalletService walletService;
+    @Autowired AuthService authService;
+    @Autowired MockMvc mockMvc;
     @Autowired UserRepository userRepository;
     @Autowired WorkspaceRepository workspaceRepository;
     @Autowired WorkspaceMemberRepository workspaceMemberRepository;
@@ -206,7 +222,7 @@ class TransactionModuleIntegrationTests {
         assertBusinessCode(() -> transactionService.create(ctx.workspace().getId(), plannedNoWallet, ctx.user().getId()), "WALLET_NOT_FOUND");
         TransactionRequest plannedNoCategory = expenseReq("1", cash, expenseCategory, "Planned no category", TransactionStatus.PLANNED);
         plannedNoCategory.setCategoryId(null);
-        assertBusinessCode(() -> transactionService.create(ctx.workspace().getId(), plannedNoCategory, ctx.user().getId()), "CATEGORY_NOT_FOUND");
+        assertThat(transactionService.create(ctx.workspace().getId(), plannedNoCategory, ctx.user().getId()).getCategoryId()).isNull();
 
         TransactionRequest sameWallet = transferReq("1", cash, cash, "Bad", TransactionStatus.POSTED);
         assertBusinessCode(() -> transactionService.create(ctx.workspace().getId(), sameWallet, ctx.user().getId()), "TRANSFER_SAME_WALLET");
@@ -239,8 +255,10 @@ class TransactionModuleIntegrationTests {
 
         TransactionRequest expenseReq = expenseReq("20", cash, expenseCategory, "Fuel", TransactionStatus.POSTED);
         expenseReq.setRelatedIncomeSourceId(gig.getId());
+        expenseReq.setSpendingScope(SpendingScope.WORK);
         TransactionResponse expense = transactionService.create(ctx.workspace().getId(), expenseReq, ctx.user().getId());
         assertThat(expense.getRelatedIncomeSourceId()).isEqualTo(gig.getId());
+        assertThat(expense.getSpendingScope()).isEqualTo(SpendingScope.WORK);
         assertThat(walletService.calculateCurrentBalance(cash.getId())).isEqualByComparingTo("80");
 
         TransactionRequest badIncome = incomeReq("10", cash, incomeCategory, "Bad");
@@ -275,6 +293,114 @@ class TransactionModuleIntegrationTests {
         TransactionRequest archivedAssign = incomeReq("150", cash, incomeCategory, "Pay archived");
         archivedAssign.setIncomeSourceId(salary.getId());
         assertBusinessCode(() -> transactionService.update(ctx.workspace().getId(), income.getId(), archivedAssign, ctx.user().getId()), "INCOME_SOURCE_ARCHIVED");
+    }
+
+    @Test
+    void spendingScopeCreateUpdateResponseAndAuditContractWork() {
+        TestContext ctx = createContext("tx_scope", WorkspaceRole.OWNER);
+        Wallet cash = wallet(ctx, "Cash", WalletType.CASH, "0");
+        Wallet bank = wallet(ctx, "Bank", WalletType.BANK, "0");
+        Category incomeCategory = category(ctx, "Salary", CategoryType.INCOME, true, false);
+        Category personalFood = category(ctx, "Food", CategoryType.EXPENSE, true, false, SpendingScope.PERSONAL);
+        Category noDefaultFood = category(ctx, "Snacks", CategoryType.EXPENSE, true, false);
+        Category workFood = category(ctx, "Work", CategoryType.EXPENSE, true, false, SpendingScope.WORK);
+
+        TransactionResponse defaulted = transactionService.create(ctx.workspace().getId(),
+                expenseReq("10", cash, personalFood, "Defaulted", TransactionStatus.POSTED), ctx.user().getId());
+        assertThat(defaulted.getSpendingScope()).isEqualTo(SpendingScope.PERSONAL);
+        assertThat(transactionRepository.findById(defaulted.getId()).orElseThrow().getSpendingScope()).isEqualTo(SpendingScope.PERSONAL);
+        assertThat(transactionService.getDetails(ctx.workspace().getId(), defaulted.getId(), false, ctx.user().getId()).getSpendingScope())
+                .isEqualTo(SpendingScope.PERSONAL);
+        assertThat(transactionService.list(ctx.workspace().getId(), null, null, TransactionType.EXPENSE, null, null, null,
+                null, null, null, false, 0, 20, null, ctx.user().getId()).getContent())
+                .extracting(TransactionResponse::getSpendingScope)
+                .contains(SpendingScope.PERSONAL);
+
+        TransactionResponse noDefault = transactionService.create(ctx.workspace().getId(),
+                expenseReq("10", cash, noDefaultFood, "No default", TransactionStatus.POSTED), ctx.user().getId());
+        assertThat(noDefault.getSpendingScope()).isNull();
+
+        TransactionRequest noCategoryReq = expenseReq("10", cash, noDefaultFood, "No category", TransactionStatus.POSTED);
+        noCategoryReq.setCategoryId(null);
+        TransactionResponse noCategory = transactionService.create(ctx.workspace().getId(), noCategoryReq, ctx.user().getId());
+        assertThat(noCategory.getCategoryId()).isNull();
+        assertThat(noCategory.getSpendingScope()).isNull();
+
+        TransactionRequest override = expenseReq("10", cash, personalFood, "Override", TransactionStatus.POSTED);
+        override.setSpendingScope(SpendingScope.WORK);
+        assertThat(transactionService.create(ctx.workspace().getId(), override, ctx.user().getId()).getSpendingScope())
+                .isEqualTo(SpendingScope.WORK);
+
+        TransactionRequest explicitNull = expenseReq("10", cash, personalFood, "No scope", TransactionStatus.POSTED);
+        explicitNull.setSpendingScope(null);
+        assertThat(transactionService.create(ctx.workspace().getId(), explicitNull, ctx.user().getId()).getSpendingScope()).isNull();
+
+        for (SpendingScope scope : SpendingScope.values()) {
+            TransactionRequest req = expenseReq("1", cash, personalFood, "Scope " + scope, TransactionStatus.POSTED);
+            req.setSpendingScope(scope);
+            assertThat(transactionService.create(ctx.workspace().getId(), req, ctx.user().getId()).getSpendingScope()).isEqualTo(scope);
+        }
+
+        TransactionRequest preserve = expenseReq("12", cash, personalFood, "Preserve", TransactionStatus.POSTED);
+        assertThat(transactionService.update(ctx.workspace().getId(), defaulted.getId(), preserve, ctx.user().getId()).getSpendingScope())
+                .isEqualTo(SpendingScope.PERSONAL);
+
+        TransactionRequest replace = expenseReq("13", cash, personalFood, "Replace", TransactionStatus.POSTED);
+        replace.setSpendingScope(SpendingScope.SHARED);
+        assertThat(transactionService.update(ctx.workspace().getId(), defaulted.getId(), replace, ctx.user().getId()).getSpendingScope())
+                .isEqualTo(SpendingScope.SHARED);
+
+        TransactionRequest changeCategoryPreserve = expenseReq("14", cash, workFood, "Category changed", TransactionStatus.POSTED);
+        assertThat(transactionService.update(ctx.workspace().getId(), defaulted.getId(), changeCategoryPreserve, ctx.user().getId()).getSpendingScope())
+                .isEqualTo(SpendingScope.SHARED);
+
+        TransactionRequest clear = expenseReq("15", cash, workFood, "Clear", TransactionStatus.POSTED);
+        clear.setSpendingScope(null);
+        assertThat(transactionService.update(ctx.workspace().getId(), defaulted.getId(), clear, ctx.user().getId()).getSpendingScope()).isNull();
+
+        TransactionRequest incomeScope = incomeReq("10", cash, incomeCategory, "Bad scope");
+        incomeScope.setSpendingScope(SpendingScope.WORK);
+        assertBusinessCode(() -> transactionService.create(ctx.workspace().getId(), incomeScope, ctx.user().getId()), "INVALID_TRANSACTION_SPENDING_SCOPE");
+        TransactionRequest transferScope = transferReq("10", cash, bank, "Bad scope", TransactionStatus.POSTED);
+        transferScope.setSpendingScope(SpendingScope.WORK);
+        assertBusinessCode(() -> transactionService.create(ctx.workspace().getId(), transferScope, ctx.user().getId()), "INVALID_TRANSACTION_SPENDING_SCOPE");
+
+        TransactionRequest incomeNull = incomeReq("10", cash, incomeCategory, "Null scope");
+        incomeNull.setSpendingScope(null);
+        assertThat(transactionService.create(ctx.workspace().getId(), incomeNull, ctx.user().getId()).getSpendingScope()).isNull();
+        TransactionRequest transferNull = transferReq("10", cash, bank, "Null scope", TransactionStatus.POSTED);
+        transferNull.setSpendingScope(null);
+        TransactionResponse transfer = transactionService.create(ctx.workspace().getId(), transferNull, ctx.user().getId());
+        assertThat(transfer.getSpendingScope()).isNull();
+        assertThat(transactionRepository.findById(transfer.getId()).orElseThrow().getSpendingScope()).isNull();
+
+        var logs = transactionAuditLogRepository.findByWorkspaceIdAndTransactionIdOrderByCreatedAtAsc(ctx.workspace().getId(), defaulted.getId());
+        assertThat(logs.get(0).getAfterData()).containsEntry("spendingScope", "PERSONAL");
+        assertThat(logs.get(1).getBeforeData()).containsEntry("spendingScope", "PERSONAL");
+        assertThat(logs.get(1).getAfterData()).containsEntry("spendingScope", "PERSONAL");
+        assertThat(logs.get(logs.size() - 1).getAfterData()).containsEntry("spendingScope", null);
+
+        assertThat(transactionService.createAdjustment(ctx.workspace().getId(), cash, com.moneyflowbackend.transaction.model.AdjustmentDirection.INCREASE,
+                bd("1"), LocalDate.of(2026, 6, 15), "Adjust", ctx.user().getId(), "scope-test").getSpendingScope()).isNull();
+    }
+
+    @Test
+    void invalidSpendingScopeEnumJsonReturnsSafeValidationError() throws Exception {
+        String username = "tx_scope_http_" + UUID.randomUUID().toString().substring(0, 8);
+        UserResponse registered = authService.register(registerRequest(username));
+        TokenResponse token = authService.login(loginRequest(username));
+        Workspace workspace = workspaceRepository.findAllByUserId(registered.getId()).getFirst();
+
+        mockMvc.perform(post("/api/workspaces/" + workspace.getId() + "/transactions")
+                        .contentType("application/json")
+                        .content("""
+                                {"type":"EXPENSE","status":"POSTED","amount":1,"spendingScope":"NOPE"}
+                                """)
+                        .header("Authorization", "Bearer " + token.getAccessToken()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.message", not(containsString("SpendingScope"))))
+                .andExpect(jsonPath("$.message", not(containsString("constraint"))));
     }
 
     @Test
@@ -419,6 +545,7 @@ class TransactionModuleIntegrationTests {
         quickReq.setTransactionDate(LocalDate.of(2026, 7, 3));
         TransactionResponse quick = transactionService.createWithSource(owner.workspace().getId(), quickReq, editor.user().getId(),
                 TransactionSourceType.QUICK_TEXT, "raw noodles from quick text", null);
+        assertThat(quick.getSpendingScope()).isNull();
 
         TransactionRequest deletedReq = expenseReq("5", cash, food, "Deleted", TransactionStatus.POSTED);
         deletedReq.setTransactionDate(LocalDate.of(2026, 7, 4));
@@ -624,10 +751,15 @@ class TransactionModuleIntegrationTests {
     }
 
     private Category category(TestContext ctx, String name, CategoryType type, boolean active, boolean archived) {
+        return category(ctx, name, type, active, archived, null);
+    }
+
+    private Category category(TestContext ctx, String name, CategoryType type, boolean active, boolean archived, SpendingScope defaultSpendingScope) {
         return categoryRepository.saveAndFlush(Category.builder()
                 .workspace(ctx.workspace())
                 .name(name)
                 .categoryType(type)
+                .defaultSpendingScope(defaultSpendingScope)
                 .isActive(active)
                 .isArchived(archived)
                 .build());
@@ -689,6 +821,22 @@ class TransactionModuleIntegrationTests {
 
     private BigDecimal bd(String value) {
         return new BigDecimal(value);
+    }
+
+    private RegisterRequest registerRequest(String username) {
+        RegisterRequest req = new RegisterRequest();
+        req.setUsername(username);
+        req.setEmail(username + "@example.com");
+        req.setPassword("Password123!");
+        req.setFullName("Transaction Test User");
+        return req;
+    }
+
+    private LoginRequest loginRequest(String username) {
+        LoginRequest req = new LoginRequest();
+        req.setIdentifier(username);
+        req.setPassword("Password123!");
+        return req;
     }
 
     private void assertBusinessCode(ThrowingRunnable runnable, String code) {

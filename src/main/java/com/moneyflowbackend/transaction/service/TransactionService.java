@@ -6,6 +6,7 @@ import com.moneyflowbackend.category.model.Category;
 import com.moneyflowbackend.category.model.CategoryType;
 import com.moneyflowbackend.category.repository.CategoryRepository;
 import com.moneyflowbackend.common.exception.BusinessException;
+import com.moneyflowbackend.common.model.SpendingScope;
 import com.moneyflowbackend.income.model.IncomeSource;
 import com.moneyflowbackend.income.model.IncomeSourceStatus;
 import com.moneyflowbackend.income.repository.IncomeSourceRepository;
@@ -454,6 +455,7 @@ public class TransactionService {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new BusinessException("USER_NOT_FOUND", "User not found", HttpStatus.NOT_FOUND));
         TransactionType type = requireManualType(req.getType());
+        TransactionSourceType normalizedSourceType = normalizeSourceType(sourceType);
         IncomeSourceLink incomeSourceLink = resolveIncomeSourceLinkForCreate(workspaceId, type, req);
         TransactionStatus status = normalizeStatus(req.getStatus(), TransactionStatus.POSTED);
         BigDecimal amount = requireAmount(req.getAmount());
@@ -473,7 +475,7 @@ public class TransactionService {
                 .transactionTime(req.getTransactionTime())
                 .description(normalizeText(req.getDescription()))
                 .note(normalizeText(req.getNote()))
-                .sourceType(normalizeSourceType(sourceType))
+                .sourceType(normalizedSourceType)
                 .rawInput(normalizeText(rawInput))
                 .walletUnknown(false)
                 .historical(false)
@@ -486,6 +488,7 @@ public class TransactionService {
         }
 
         if (type == TransactionType.TRANSFER) {
+            validateSpendingScope(type, req);
             if (req.getCategoryId() != null) {
                 throw new BusinessException("TRANSFER_CATEGORY_NOT_ALLOWED", "Transfer cannot have category");
             }
@@ -507,7 +510,8 @@ public class TransactionService {
         }
 
         Wallet wallet = resolveWallet(workspaceId, req.getWalletId(), true, true, "WALLET_NOT_FOUND");
-        Category category = resolveCategory(workspaceId, req.getCategoryId(), type, true, true);
+        Category category = resolveCategory(workspaceId, req.getCategoryId(), type, type != TransactionType.EXPENSE, true);
+        tx.setSpendingScope(resolveSpendingScopeForCreate(type, normalizedSourceType, req, category));
         tx.setWallet(wallet);
         tx.setCategory(category);
         tx = transactionRepository.save(tx);
@@ -574,6 +578,7 @@ public class TransactionService {
             throw new BusinessException("TRANSACTION_TYPE_IMMUTABLE", "Transaction type cannot be changed");
         }
         IncomeSourceLink incomeSourceLink = resolveIncomeSourceLinkForUpdate(workspaceId, requestedType, req, tx);
+        validateSpendingScope(requestedType, req);
 
         TransactionStatus oldStatus = tx.getTransactionStatus();
         TransactionStatus newStatus = normalizeStatus(req.getStatus(), oldStatus);
@@ -604,6 +609,7 @@ public class TransactionService {
             validateDifferentWallets(source, destination);
             tx.setWallet(source);
             tx.setCategory(null);
+            tx.setSpendingScope(null);
             transactionRepository.save(tx);
             detail.setSourceWallet(source);
             detail.setDestinationWallet(destination);
@@ -616,6 +622,7 @@ public class TransactionService {
         Category category = resolveCategoryForUpdate(workspaceId, tx.getCategory(), req.getCategoryId(), tx.getTransactionType(), true, newStatus, postingNow);
         tx.setWallet(wallet);
         tx.setCategory(category);
+        tx.setSpendingScope(resolveSpendingScopeForUpdate(requestedType, req, tx));
         tx = transactionRepository.save(tx);
         transactionAuditService.record(tx, userId, TransactionAuditAction.UPDATE, before, transactionAuditService.snapshot(tx));
         return mapToResponse(tx);
@@ -784,6 +791,32 @@ public class TransactionService {
         }
         boolean changed = current == null || !current.getId().equals(requestedId);
         return resolveCategory(workspaceId, requestedId, type, required, status == TransactionStatus.POSTED && (changed || postingNow));
+    }
+
+    private SpendingScope resolveSpendingScopeForCreate(TransactionType type, TransactionSourceType sourceType, TransactionRequest req, Category category) {
+        validateSpendingScope(type, req);
+        if (type != TransactionType.EXPENSE || sourceType != TransactionSourceType.MANUAL) {
+            return null;
+        }
+        if (req.hasSpendingScope()) {
+            return req.getSpendingScope();
+        }
+        return category == null ? null : category.getDefaultSpendingScope();
+    }
+
+    private SpendingScope resolveSpendingScopeForUpdate(TransactionType type, TransactionRequest req, Transaction tx) {
+        if (type != TransactionType.EXPENSE) {
+            return null;
+        }
+        return req.hasSpendingScope() ? req.getSpendingScope() : tx.getSpendingScope();
+    }
+
+    private void validateSpendingScope(TransactionType type, TransactionRequest req) {
+        if (type != TransactionType.EXPENSE && req.hasSpendingScope() && req.getSpendingScope() != null) {
+            throw new BusinessException(
+                    "INVALID_TRANSACTION_SPENDING_SCOPE",
+                    "Spending scope is only supported for expense transactions.");
+        }
     }
 
     private IncomeSourceLink resolveIncomeSourceLinkForCreate(UUID workspaceId, TransactionType type, TransactionRequest req) {
@@ -1014,6 +1047,7 @@ public class TransactionService {
                 .historical(tx.isHistorical())
                 .affectsWalletBalance(tx.isAffectsWalletBalance())
                 .walletUnknown(tx.isWalletUnknown())
+                .spendingScope(tx.getSpendingScope())
                 .incomeSourceId(tx.getIncomeSource() == null ? null : tx.getIncomeSource().getId())
                 .relatedIncomeSourceId(tx.getRelatedIncomeSource() == null ? null : tx.getRelatedIncomeSource().getId())
                 .createdAt(tx.getCreatedAt())
