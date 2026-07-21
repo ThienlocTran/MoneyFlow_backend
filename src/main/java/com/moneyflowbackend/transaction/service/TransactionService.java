@@ -184,6 +184,30 @@ public class TransactionService {
             int size,
             String sort,
             UUID userId) {
+        return list(workspaceId, dateFrom, dateTo, type, status, walletId, categoryId, jarId,
+                attributedPersonId, sourceType, createdBy, null, search, includeDeleted, page, size, sort, userId);
+    }
+
+    @Transactional(readOnly = true)
+    public TransactionPageResponse list(
+            UUID workspaceId,
+            LocalDate dateFrom,
+            LocalDate dateTo,
+            TransactionType type,
+            TransactionStatus status,
+            UUID walletId,
+            UUID categoryId,
+            UUID jarId,
+            UUID attributedPersonId,
+            TransactionSourceType sourceType,
+            UUID createdBy,
+            SpendingScope spendingScope,
+            String search,
+            boolean includeDeleted,
+            int page,
+            int size,
+            String sort,
+            UUID userId) {
         WorkspaceMember member = requireActiveMember(workspaceId, userId);
         if (dateFrom != null && dateTo != null && dateFrom.isAfter(dateTo)) {
             throw new BusinessException("INVALID_DATE_RANGE", "Invalid date range");
@@ -194,7 +218,7 @@ public class TransactionService {
         int pageSize = Math.min(Math.max(size, 1), 100);
         Pageable pageable = PageRequest.of(pageNumber, pageSize, parseSort(sort));
         Specification<Transaction> spec = buildListSpec(workspaceId, dateFrom, dateTo, type, status, walletId,
-                categoryId, jarId, attributedPersonId, sourceType, createdBy, search, includeDeleted);
+                categoryId, jarId, attributedPersonId, sourceType, createdBy, spendingScope, search, includeDeleted);
 
         Page<Transaction> result = transactionRepository.findAll(spec, pageable);
         return TransactionPageResponse.builder()
@@ -224,6 +248,27 @@ public class TransactionService {
             String search,
             boolean includeDeleted,
             UUID userId) {
+        return exportCsv(workspaceId, dateFrom, dateTo, type, status, walletId, categoryId, jarId,
+                attributedPersonId, sourceType, createdBy, null, search, includeDeleted, userId);
+    }
+
+    @Transactional(readOnly = true)
+    public byte[] exportCsv(
+            UUID workspaceId,
+            LocalDate dateFrom,
+            LocalDate dateTo,
+            TransactionType type,
+            TransactionStatus status,
+            UUID walletId,
+            UUID categoryId,
+            UUID jarId,
+            UUID attributedPersonId,
+            TransactionSourceType sourceType,
+            UUID createdBy,
+            SpendingScope spendingScope,
+            String search,
+            boolean includeDeleted,
+            UUID userId) {
         WorkspaceMember member = requireActiveMember(workspaceId, userId);
         if (dateFrom != null && dateTo != null && dateFrom.isAfter(dateTo)) {
             throw new BusinessException("INVALID_DATE_RANGE", "Invalid date range");
@@ -231,14 +276,14 @@ public class TransactionService {
         validateIncludeDeleted(includeDeleted, member);
 
         Specification<Transaction> spec = buildListSpec(workspaceId, dateFrom, dateTo, type, status, walletId,
-                categoryId, jarId, attributedPersonId, sourceType, createdBy, search, includeDeleted);
+                categoryId, jarId, attributedPersonId, sourceType, createdBy, spendingScope, search, includeDeleted);
         List<Transaction> exportTransactions = transactionRepository
                 .findAll(spec, PageRequest.of(0, EXPORT_LIMIT, parseSort(null)))
                 .getContent();
         List<TransactionResponse> rows = mapToResponses(exportTransactions);
 
         StringBuilder csv = new StringBuilder("\uFEFF");
-        csv.append("transactionDate,type,amount,walletName,transferSourceWalletName,transferDestinationWalletName,categoryName,jarName,sourceType,createdByUsername,note,rawInput,isDeleted,createdAt,updatedAt\n");
+        csv.append("transactionDate,type,amount,walletName,transferSourceWalletName,transferDestinationWalletName,categoryName,jarName,sourceType,createdByUsername,note,rawInput,isDeleted,createdAt,updatedAt,spendingScope\n");
         for (TransactionResponse row : rows) {
             csv.append(csv(row.getTransactionDate()))
                     .append(',').append(csv(row.getType()))
@@ -255,6 +300,7 @@ public class TransactionService {
                     .append(',').append(csv(row.getDeletedAt() != null))
                     .append(',').append(csv(row.getCreatedAt()))
                     .append(',').append(csv(row.getUpdatedAt()))
+                    .append(',').append(csv(row.getSpendingScope()))
                     .append('\n');
         }
         return csv.toString().getBytes(StandardCharsets.UTF_8);
@@ -272,6 +318,7 @@ public class TransactionService {
             UUID attributedPersonId,
             TransactionSourceType sourceType,
             UUID createdBy,
+            SpendingScope spendingScope,
             String search,
             boolean includeDeleted) {
         return (root, query, cb) -> {
@@ -306,6 +353,9 @@ public class TransactionService {
             }
             if (createdBy != null) {
                 predicates.add(cb.equal(root.get("createdByUser").get("id"), createdBy));
+            }
+            if (spendingScope != null) {
+                predicates.add(cb.equal(root.get("spendingScope"), spendingScope));
             }
             if (walletId != null) {
                 Join<Transaction, Wallet> walletJoin = root.join("wallet", JoinType.LEFT);

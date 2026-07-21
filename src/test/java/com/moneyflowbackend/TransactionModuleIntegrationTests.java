@@ -56,6 +56,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -401,6 +402,13 @@ class TransactionModuleIntegrationTests {
                 .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
                 .andExpect(jsonPath("$.message", not(containsString("SpendingScope"))))
                 .andExpect(jsonPath("$.message", not(containsString("constraint"))));
+        mockMvc.perform(get("/api/workspaces/" + workspace.getId() + "/transactions")
+                        .param("spendingScope", "NOPE")
+                        .header("Authorization", "Bearer " + token.getAccessToken()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.message", not(containsString("SpendingScope"))))
+                .andExpect(jsonPath("$.message", not(containsString("constraint"))));
     }
 
     @Test
@@ -539,6 +547,7 @@ class TransactionModuleIntegrationTests {
         TransactionRequest manualReq = expenseReq("12.50", cash, food, "Comma, quote \" meal", TransactionStatus.POSTED);
         manualReq.setTransactionDate(LocalDate.of(2026, 7, 2));
         manualReq.setNote("Comma, quote \" meal\nline two");
+        manualReq.setSpendingScope(SpendingScope.PERSONAL);
         TransactionResponse manual = transactionService.create(owner.workspace().getId(), manualReq, owner.user().getId());
 
         TransactionRequest quickReq = expenseReq("9", cash, food, "Quick lunch", TransactionStatus.POSTED);
@@ -551,6 +560,16 @@ class TransactionModuleIntegrationTests {
         deletedReq.setTransactionDate(LocalDate.of(2026, 7, 4));
         TransactionResponse deleted = transactionService.create(owner.workspace().getId(), deletedReq, owner.user().getId());
         transactionService.delete(owner.workspace().getId(), deleted.getId(), owner.user().getId());
+        for (SpendingScope scope : SpendingScope.values()) {
+            TransactionRequest scopedReq = expenseReq("2", cash, food, "Scoped " + scope, TransactionStatus.POSTED);
+            scopedReq.setTransactionDate(LocalDate.of(2026, 7, 10 + scope.ordinal()));
+            scopedReq.setSpendingScope(scope);
+            transactionService.create(owner.workspace().getId(), scopedReq, owner.user().getId());
+        }
+        TransactionRequest otherWorkspaceReq = expenseReq("2", wallet(outsider, "Other cash", WalletType.CASH, "0"),
+                category(outsider, "Other food", CategoryType.EXPENSE, true, false), "Scoped PERSONAL leak", TransactionStatus.POSTED);
+        otherWorkspaceReq.setSpendingScope(SpendingScope.PERSONAL);
+        transactionService.create(outsider.workspace().getId(), otherWorkspaceReq, outsider.user().getId());
 
         assertThat(transactionService.list(owner.workspace().getId(), LocalDate.of(2026, 7, 1), LocalDate.of(2026, 7, 31),
                 null, null, null, null, null, null, TransactionSourceType.QUICK_TEXT, null, null, false, 0, 20, null, owner.user().getId()).getContent())
@@ -561,6 +580,24 @@ class TransactionModuleIntegrationTests {
         assertThat(transactionService.list(owner.workspace().getId(), null, null, null, null, null, null, null, null,
                 TransactionSourceType.QUICK_TEXT, editor.user().getId(), null, false, 0, 500, null, owner.user().getId()).getSize())
                 .isEqualTo(100);
+        assertThat(transactionService.list(owner.workspace().getId(), LocalDate.of(2026, 7, 1), LocalDate.of(2026, 7, 31),
+                TransactionType.EXPENSE, TransactionStatus.POSTED, null, null, null, null, null, null,
+                null, null, false, 0, 20, "date,asc", owner.user().getId()).getContent())
+                .extracting(TransactionResponse::getSpendingScope)
+                .contains(null, SpendingScope.PERSONAL, SpendingScope.FAMILY, SpendingScope.SHARED, SpendingScope.WORK, SpendingScope.OTHER);
+        for (SpendingScope scope : SpendingScope.values()) {
+            assertThat(transactionService.list(owner.workspace().getId(), LocalDate.of(2026, 7, 1), LocalDate.of(2026, 7, 31),
+                    TransactionType.EXPENSE, TransactionStatus.POSTED, null, null, null, null, null, null,
+                    scope, null, false, 0, 20, "date,asc", owner.user().getId()).getContent())
+                    .extracting(TransactionResponse::getSpendingScope)
+                    .containsOnly(scope);
+        }
+        assertThat(transactionService.list(owner.workspace().getId(), LocalDate.of(2026, 7, 1), LocalDate.of(2026, 7, 31),
+                TransactionType.EXPENSE, TransactionStatus.POSTED, null, null, null, null, null, null,
+                SpendingScope.PERSONAL, null, false, 0, 20, "date,asc", owner.user().getId()).getContent())
+                .extracting(TransactionResponse::getDescription)
+                .contains("Comma, quote \" meal", "Scoped PERSONAL")
+                .doesNotContain("Quick lunch", "Scoped FAMILY", "Scoped PERSONAL leak", "Deleted");
         assertThat(transactionService.list(owner.workspace().getId(), null, null, null, null, null, null, null, null,
                 null, null, null, true, 0, 20, null, editor.user().getId()).getContent())
                 .extracting(TransactionResponse::getId).contains(deleted.getId());
@@ -569,9 +606,20 @@ class TransactionModuleIntegrationTests {
 
         String csv = new String(transactionService.exportCsv(owner.workspace().getId(), LocalDate.of(2026, 7, 1), LocalDate.of(2026, 7, 31),
                 null, null, null, null, null, null, null, null, "quote", false, owner.user().getId()), StandardCharsets.UTF_8);
-        assertThat(csv).startsWith("\uFEFFtransactionDate,type,amount");
+        assertThat(csv).startsWith("\uFEFFtransactionDate,type,amount,walletName,transferSourceWalletName,transferDestinationWalletName,categoryName,jarName,sourceType,createdByUsername,note,rawInput,isDeleted,createdAt,updatedAt,spendingScope\n");
         assertThat(csv).contains("\"Comma, quote \"\" meal\nline two\"");
+        assertThat(csv).contains("\"PERSONAL\"");
         assertThat(csv).doesNotContain("storagePublicId", "playbackUrl", "audioUrl", "password", "refreshToken");
+        String quickCsv = new String(transactionService.exportCsv(owner.workspace().getId(), null, null,
+                null, null, null, null, null, null, TransactionSourceType.QUICK_TEXT, null, null, "raw noodles", false,
+                owner.user().getId()), StandardCharsets.UTF_8);
+        assertThat(quickCsv).contains("\"raw noodles from quick text\",");
+        assertThat(quickCsv.lines().skip(1).findFirst().orElseThrow()).endsWith(",");
+        String workCsv = new String(transactionService.exportCsv(owner.workspace().getId(), null, null,
+                null, null, null, null, null, null, null, null, SpendingScope.WORK, null, false,
+                owner.user().getId()), StandardCharsets.UTF_8);
+        assertThat(workCsv).contains("\"WORK\"");
+        assertThat(workCsv).doesNotContain("\"PERSONAL\"", "\"FAMILY\"", "\"SHARED\"", "\"OTHER\"");
 
         assertBusinessCode(() -> transactionService.exportCsv(outsider.workspace().getId(), null, null, null, null, null, null,
                 null, null, null, null, null, false, owner.user().getId()), "WORKSPACE_ACCESS_DENIED");
