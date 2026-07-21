@@ -5,6 +5,7 @@ import com.moneyflowbackend.auth.model.User;
 import com.moneyflowbackend.workspace.model.WorkspacePerson;
 import com.moneyflowbackend.wallet.model.Wallet;
 import com.moneyflowbackend.category.model.Category;
+import com.moneyflowbackend.common.model.SpendingScope;
 import com.moneyflowbackend.income.model.IncomeSource;
 import jakarta.persistence.*;
 import lombok.*;
@@ -81,6 +82,10 @@ public class Transaction {
     @Enumerated(EnumType.STRING)
     @Column(name = "adjustment_direction", length = 20)
     private AdjustmentDirection adjustmentDirection;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "spending_scope", length = 20)
+    private SpendingScope spendingScope;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "transaction_status", nullable = false, length = 20)

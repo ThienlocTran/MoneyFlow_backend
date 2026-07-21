@@ -63,7 +63,7 @@ class MigrationSqlSafetyTests {
         try (Stream<Path> paths = Files.list(Path.of("src/main/resources/db/migration"))) {
             migrationNames = paths
                     .map(path -> path.getFileName().toString())
-                    .sorted()
+                    .sorted((left, right) -> Integer.compare(version(left), version(right)))
                     .toList();
         }
 
@@ -76,7 +76,8 @@ class MigrationSqlSafetyTests {
                 "V6__enforce_adjustment_direction_nullability.sql",
                 "V7__recurring_obligations.sql",
                 "V8__income_sources.sql",
-                "V9__transaction_income_source_links.sql");
+                "V9__transaction_income_source_links.sql",
+                "V10__spending_scope_foundation.sql");
 
         for (String migrationName : migrationNames) {
             String sql = Files.readString(Path.of("src/main/resources/db/migration", migrationName));
@@ -87,5 +88,10 @@ class MigrationSqlSafetyTests {
                     .doesNotContain(String.valueOf((char) 0x00C6))
                     .doesNotContain(String.valueOf((char) 0x00C2));
         }
+    }
+
+    private int version(String migrationName) {
+        int marker = migrationName.indexOf("__");
+        return Integer.parseInt(migrationName.substring(1, marker));
     }
 }
