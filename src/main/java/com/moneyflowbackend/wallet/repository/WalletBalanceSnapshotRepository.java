@@ -16,6 +16,11 @@ import java.util.Optional;
 import java.util.UUID;
 
 public interface WalletBalanceSnapshotRepository extends JpaRepository<WalletBalanceSnapshot, UUID>, JpaSpecificationExecutor<WalletBalanceSnapshot> {
+    interface ActivityAdjustmentContext {
+        UUID getAdjustmentTransactionId();
+        UUID getDailyClosingId();
+    }
+
     Optional<WalletBalanceSnapshot> findByDailyClosingIdAndWalletId(UUID dailyClosingId, UUID walletId);
     List<WalletBalanceSnapshot> findAllByDailyClosingId(UUID dailyClosingId);
 
@@ -27,6 +32,20 @@ public interface WalletBalanceSnapshotRepository extends JpaRepository<WalletBal
 
     Page<WalletBalanceSnapshot> findAllByWorkspaceIdOrderBySnapshotDateDescRecordedAtDescCreatedAtDesc(UUID workspaceId, Pageable pageable);
     Optional<WalletBalanceSnapshot> findByIdAndWorkspaceId(UUID snapshotId, UUID workspaceId);
+
+    @Query("""
+            SELECT tx.id AS adjustmentTransactionId,
+                   closing.id AS dailyClosingId
+            FROM WalletBalanceSnapshot s
+            JOIN s.adjustmentTransaction tx
+            LEFT JOIN s.dailyClosing closing
+            WHERE s.workspace.id = :workspaceId
+              AND tx.workspace.id = :workspaceId
+              AND tx.id IN :transactionIds
+            """)
+    List<ActivityAdjustmentContext> findActivityAdjustmentContextByWorkspaceIdAndTransactionIdIn(
+            @Param("workspaceId") UUID workspaceId,
+            @Param("transactionIds") java.util.Collection<UUID> transactionIds);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""

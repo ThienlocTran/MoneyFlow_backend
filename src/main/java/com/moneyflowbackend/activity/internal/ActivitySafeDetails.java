@@ -9,11 +9,15 @@ public final class ActivitySafeDetails {
             "transactionType",
             "transactionStatus",
             "walletId",
+            "sourceWalletId",
             "destinationWalletId",
             "categoryId",
+            "obligationOccurrenceId",
             "obligationTemplateId",
+            "linkedTransactionId",
             "closingDate",
-            "adjustmentDirection"
+            "adjustmentDirection",
+            "dailyClosingId"
     );
 
     private ActivitySafeDetails() {
