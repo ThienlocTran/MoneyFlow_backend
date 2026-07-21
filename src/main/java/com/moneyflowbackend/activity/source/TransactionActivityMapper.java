@@ -35,6 +35,9 @@ class TransactionActivityMapper {
         if (transaction == null || audit.getAuditAction() == TransactionAuditAction.IMPORT) {
             return Optional.empty();
         }
+        if (adjustment != null && adjustment.getDailyClosingId() != null) {
+            return Optional.empty();
+        }
         ActivityAction action = action(audit.getAuditAction(), transaction, obligation);
         if (action == null) {
             return Optional.empty();

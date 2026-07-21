@@ -16,6 +16,7 @@ public final class ActivitySafeDetails {
             "obligationTemplateId",
             "linkedTransactionId",
             "closingDate",
+            "snapshotCount",
             "adjustmentDirection",
             "dailyClosingId"
     );

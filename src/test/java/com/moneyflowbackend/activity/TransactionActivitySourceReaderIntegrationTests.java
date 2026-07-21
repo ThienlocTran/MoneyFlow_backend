@@ -128,7 +128,6 @@ class TransactionActivitySourceReaderIntegrationTests {
 
         assertThat(candidates).extracting(ActivityCandidate::action).containsExactly(
                 ActivityAction.OBLIGATION_CONFIRMED,
-                ActivityAction.ADJUSTMENT_CREATED,
                 ActivityAction.TRANSFER_CREATED,
                 ActivityAction.TRANSACTION_CREATED);
         ActivityCandidate obligation = candidates.get(0);
@@ -138,14 +137,30 @@ class TransactionActivitySourceReaderIntegrationTests {
         assertThat(obligation.details()).containsEntry("linkedTransactionId", obligationTx.getId());
         assertThat(obligation.details()).containsEntry("obligationOccurrenceId", occurrence.getId());
 
-        ActivityCandidate adjustmentCandidate = candidates.get(1);
-        assertThat(adjustmentCandidate.entityType()).isEqualTo(ActivityEntityType.TRANSACTION);
-        assertThat(adjustmentCandidate.details()).containsEntry("adjustmentDirection", "INCREASE");
-        assertThat(adjustmentCandidate.details()).containsEntry("dailyClosingId", closing.getId());
-
-        ActivityCandidate transferCandidate = candidates.get(2);
+        ActivityCandidate transferCandidate = candidates.get(1);
         assertThat(transferCandidate.entityType()).isEqualTo(ActivityEntityType.TRANSFER);
         assertThat(transferCandidate.details()).containsKeys("sourceWalletId", "destinationWalletId");
+    }
+
+    @Test
+    void keepsManualAdjustmentButSuppressesDailyClosingAdjustmentDuplicate() {
+        TestContext ctx = context("activity_adjustment_dedupe");
+        Instant base = Instant.parse("2026-07-20T10:15:30Z");
+        Transaction manualAdjustment = adjustment(ctx, "10.00");
+        Transaction closingAdjustment = adjustment(ctx, "30.00");
+        DailyClosing closing = dailyClosing(ctx, LocalDate.of(2026, 7, 20));
+        snapshot(ctx, closingAdjustment, closing);
+        audit(ctx, manualAdjustment, TransactionAuditAction.CREATE, base);
+        audit(ctx, closingAdjustment, TransactionAuditAction.CREATE, base.minusSeconds(1));
+
+        List<ActivityCandidate> candidates = reader.read(query(ctx.workspace().getId()), 10);
+
+        assertThat(candidates).singleElement().satisfies(candidate -> {
+            assertThat(candidate.action()).isEqualTo(ActivityAction.ADJUSTMENT_CREATED);
+            assertThat(candidate.entityId()).isEqualTo(manualAdjustment.getId());
+            assertThat(candidate.details()).containsEntry("adjustmentDirection", "INCREASE");
+            assertThat(candidate.details()).doesNotContainKey("dailyClosingId");
+        });
     }
 
     @Test

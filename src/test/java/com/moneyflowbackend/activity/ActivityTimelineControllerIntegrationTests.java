@@ -4,10 +4,14 @@ import com.moneyflowbackend.auth.dto.LoginRequest;
 import com.moneyflowbackend.auth.dto.RegisterRequest;
 import com.moneyflowbackend.auth.dto.TokenResponse;
 import com.moneyflowbackend.auth.model.User;
+import com.moneyflowbackend.auth.repository.UserRepository;
 import com.moneyflowbackend.auth.service.AuthService;
 import com.moneyflowbackend.category.model.Category;
 import com.moneyflowbackend.category.model.CategoryType;
 import com.moneyflowbackend.category.repository.CategoryRepository;
+import com.moneyflowbackend.closing.model.DailyClosing;
+import com.moneyflowbackend.closing.model.DailyClosingStatus;
+import com.moneyflowbackend.closing.repository.DailyClosingRepository;
 import com.moneyflowbackend.transaction.audit.TransactionAuditAction;
 import com.moneyflowbackend.transaction.audit.TransactionAuditLog;
 import com.moneyflowbackend.transaction.audit.TransactionAuditLogRepository;
@@ -16,8 +20,11 @@ import com.moneyflowbackend.transaction.model.TransactionSourceType;
 import com.moneyflowbackend.transaction.model.TransactionStatus;
 import com.moneyflowbackend.transaction.model.TransactionType;
 import com.moneyflowbackend.transaction.repository.TransactionRepository;
+import com.moneyflowbackend.wallet.model.BalanceSourceType;
 import com.moneyflowbackend.wallet.model.Wallet;
+import com.moneyflowbackend.wallet.model.WalletBalanceSnapshot;
 import com.moneyflowbackend.wallet.model.WalletType;
+import com.moneyflowbackend.wallet.repository.WalletBalanceSnapshotRepository;
 import com.moneyflowbackend.wallet.repository.WalletRepository;
 import com.moneyflowbackend.workspace.model.Workspace;
 import com.moneyflowbackend.workspace.model.WorkspaceMember;
@@ -51,12 +58,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class ActivityTimelineControllerIntegrationTests {
     @Autowired MockMvc mockMvc;
     @Autowired AuthService authService;
+    @Autowired UserRepository userRepository;
     @Autowired WorkspaceRepository workspaceRepository;
     @Autowired WorkspaceMemberRepository workspaceMemberRepository;
     @Autowired WalletRepository walletRepository;
+    @Autowired WalletBalanceSnapshotRepository snapshotRepository;
     @Autowired CategoryRepository categoryRepository;
     @Autowired TransactionRepository transactionRepository;
     @Autowired TransactionAuditLogRepository auditLogRepository;
+    @Autowired DailyClosingRepository dailyClosingRepository;
 
     @Test
     void ownerEditorViewerCanReadAndNonMemberCannot() throws Exception {
@@ -172,6 +182,39 @@ class ActivityTimelineControllerIntegrationTests {
                 .andExpect(jsonPath("$.code").value("INVALID_ACTIVITY_DATE_RANGE"));
     }
 
+    @Test
+    void endpointReturnsDailyClosingEventsWithoutSnapshotSpam() throws Exception {
+        TestUser owner = registerAndLogin("activity_closing");
+        Instant completedAt = Instant.parse("2026-07-20T10:15:30Z");
+        DailyClosing closing = dailyClosing(owner.workspace(), owner.user(), LocalDate.of(2026, 7, 20), completedAt);
+        snapshot(owner.workspace(), owner.user(), closing);
+
+        mockMvc.perform(get("/api/workspaces/{workspaceId}/activity-timeline", owner.workspace().getId())
+                        .param("actions", "DAILY_CLOSING_COMPLETED")
+                        .param("entityTypes", "DAILY_CLOSING")
+                        .param("actorId", owner.user().getId().toString())
+                        .param("from", "2026-07-20T10:15:29Z")
+                        .param("to", "2026-07-20T10:15:31Z")
+                        .header("Authorization", bearer(owner.token())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items[0].id").value("DAILY_CLOSING:" + closing.getId()))
+                .andExpect(jsonPath("$.data.items[0].source").value("DAILY_CLOSING"))
+                .andExpect(jsonPath("$.data.items[0].sourceRank").doesNotExist())
+                .andExpect(jsonPath("$.data.items[0].action").value("DAILY_CLOSING_COMPLETED"))
+                .andExpect(jsonPath("$.data.items[0].entityType").value("DAILY_CLOSING"))
+                .andExpect(jsonPath("$.data.items[0].businessDate").value("2026-07-20"))
+                .andExpect(jsonPath("$.data.items[0].details.closingDate").value("2026-07-20"))
+                .andExpect(jsonPath("$.data.items[0].details.snapshotCount").value(1))
+                .andExpect(jsonPath("$.data.items[0].details.note").doesNotExist())
+                .andExpect(jsonPath("$.data.items[1]").doesNotExist());
+
+        mockMvc.perform(get("/api/workspaces/{workspaceId}/activity-timeline", owner.workspace().getId())
+                        .param("actions", "WALLET_SNAPSHOT_RECORDED")
+                        .header("Authorization", bearer(owner.token())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items").isEmpty());
+    }
+
     private TestUser registerAndLogin(String prefix) {
         String suffix = UUID.randomUUID().toString().substring(0, 8);
         RegisterRequest request = new RegisterRequest();
@@ -234,6 +277,37 @@ class ActivityTimelineControllerIntegrationTests {
                 .beforeData(Map.of("note", "private before"))
                 .afterData(Map.of("rawInput", "private after", "token", "secret"))
                 .createdAt(createdAt)
+                .build());
+    }
+
+    private DailyClosing dailyClosing(Workspace workspace, User user, LocalDate closingDate, Instant completedAt) {
+        User completedBy = userRepository.findById(user.getId()).orElseThrow();
+        return dailyClosingRepository.saveAndFlush(DailyClosing.builder()
+                .workspace(workspace)
+                .closingDate(closingDate)
+                .status(DailyClosingStatus.COMPLETED)
+                .completedAt(completedAt)
+                .completedBy(completedBy)
+                .build());
+    }
+
+    private WalletBalanceSnapshot snapshot(Workspace workspace, User user, DailyClosing closing) {
+        Wallet wallet = walletRepository.saveAndFlush(Wallet.builder()
+                .workspace(workspace)
+                .name("Closing snapshot wallet " + UUID.randomUUID())
+                .walletType(WalletType.CASH)
+                .openingBalance(BigDecimal.ZERO)
+                .openingDate(closing.getClosingDate())
+                .build());
+        return snapshotRepository.saveAndFlush(WalletBalanceSnapshot.builder()
+                .workspace(workspace)
+                .wallet(wallet)
+                .dailyClosing(closing)
+                .snapshotDate(closing.getClosingDate())
+                .balance(BigDecimal.TEN)
+                .sourceType(BalanceSourceType.MANUAL)
+                .createdBy(user)
+                .createdAt(Instant.parse("2026-07-20T10:00:00Z"))
                 .build());
     }
 
