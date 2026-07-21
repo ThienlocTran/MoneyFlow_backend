@@ -47,12 +47,11 @@ public interface DailyClosingRepository extends JpaRepository<DailyClosing, UUID
             WHERE workspace.id = :workspaceId
               AND d.status = com.moneyflowbackend.closing.model.DailyClosingStatus.COMPLETED
               AND d.completedAt IS NOT NULL
-              AND (:from IS NULL OR d.completedAt >= :from)
-              AND (:to IS NULL OR d.completedAt < :to)
+              AND d.completedAt >= :from
+              AND d.completedAt < :to
               AND (:actorId IS NULL OR completedBy.id = :actorId)
               AND (
-                    :cursorOccurredAt IS NULL
-                    OR d.completedAt < :cursorOccurredAt
+                    d.completedAt < :cursorOccurredAt
                     OR (
                         d.completedAt = :cursorOccurredAt
                         AND (

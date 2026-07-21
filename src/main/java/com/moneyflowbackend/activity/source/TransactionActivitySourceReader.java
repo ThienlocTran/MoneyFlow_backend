@@ -25,6 +25,10 @@ import java.util.stream.Collectors;
 
 @Service
 public class TransactionActivitySourceReader implements ActivitySourceReader {
+    private static final java.time.Instant MIN_OCCURRED_AT = java.time.Instant.parse("0001-01-01T00:00:00Z");
+    private static final java.time.Instant MAX_OCCURRED_AT = java.time.Instant.parse("9999-12-31T23:59:59Z");
+    private static final UUID MAX_UUID = UUID.fromString("ffffffff-ffff-ffff-ffff-ffffffffffff");
+
     private final TransactionAuditLogRepository auditLogRepository;
     private final TransactionRepository transactionRepository;
     private final TransferDetailRepository transferDetailRepository;
@@ -53,13 +57,13 @@ public class TransactionActivitySourceReader implements ActivitySourceReader {
         ActivityCursor cursor = query.cursor();
         UUID cursorId = cursor != null && cursor.source() == ActivitySource.TRANSACTION_AUDIT
                 ? UUID.fromString(cursor.stableId().substring((ActivitySource.TRANSACTION_AUDIT.name() + ":").length()))
-                : null;
+                : MAX_UUID;
         List<TransactionAuditTimelineProjection> audits = auditLogRepository.findTimelinePage(
                 query.workspaceId(),
-                query.from(),
-                query.to(),
+                query.from() == null ? MIN_OCCURRED_AT : query.from(),
+                query.to() == null ? MAX_OCCURRED_AT : query.to(),
                 query.actorId(),
-                cursor == null ? null : cursor.occurredAt(),
+                cursor == null ? MAX_OCCURRED_AT : cursor.occurredAt(),
                 cursorId,
                 PageRequest.of(0, Math.max(limit, 1)));
         if (audits.isEmpty()) {

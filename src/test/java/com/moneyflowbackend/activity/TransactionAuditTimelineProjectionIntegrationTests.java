@@ -41,6 +41,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 @ActiveProfiles("test")
 @Transactional
 class TransactionAuditTimelineProjectionIntegrationTests {
+    private static final Instant MIN_OCCURRED_AT = Instant.parse("0001-01-01T00:00:00Z");
+    private static final Instant MAX_OCCURRED_AT = Instant.parse("9999-12-31T23:59:59Z");
+    private static final UUID MAX_UUID = UUID.fromString("ffffffff-ffff-ffff-ffff-ffffffffffff");
+
     @Autowired UserRepository userRepository;
     @Autowired WorkspaceRepository workspaceRepository;
     @Autowired WorkspaceMemberRepository workspaceMemberRepository;
@@ -62,7 +66,7 @@ class TransactionAuditTimelineProjectionIntegrationTests {
         audit(other, otherTx, TransactionAuditAction.CREATE, base.plusSeconds(60));
 
         List<TransactionAuditTimelineProjection> firstPage = auditLogRepository.findTimelinePage(
-                owner.workspace().getId(), null, null, null, null, null, PageRequest.of(0, 2));
+                owner.workspace().getId(), MIN_OCCURRED_AT, MAX_OCCURRED_AT, null, MAX_OCCURRED_AT, MAX_UUID, PageRequest.of(0, 2));
 
         assertThat(firstPage).hasSize(2);
         assertThat(firstPage).extracting(TransactionAuditTimelineProjection::getOccurredAt)
@@ -75,7 +79,7 @@ class TransactionAuditTimelineProjectionIntegrationTests {
 
         TransactionAuditTimelineProjection cursor = firstPage.get(1);
         List<TransactionAuditTimelineProjection> secondPage = auditLogRepository.findTimelinePage(
-                owner.workspace().getId(), null, null, null, cursor.getOccurredAt(), cursor.getId(), PageRequest.of(0, 2));
+                owner.workspace().getId(), MIN_OCCURRED_AT, MAX_OCCURRED_AT, null, cursor.getOccurredAt(), cursor.getId(), PageRequest.of(0, 2));
 
         assertThat(secondPage).extracting(TransactionAuditTimelineProjection::getId)
                 .doesNotContain(cursor.getId())
@@ -99,8 +103,8 @@ class TransactionAuditTimelineProjectionIntegrationTests {
                 base.minusSeconds(1),
                 base.plusSeconds(1),
                 secondActor.getId(),
-                null,
-                null,
+                MAX_OCCURRED_AT,
+                MAX_UUID,
                 PageRequest.of(0, 2));
 
         assertThat(rows).hasSize(1);

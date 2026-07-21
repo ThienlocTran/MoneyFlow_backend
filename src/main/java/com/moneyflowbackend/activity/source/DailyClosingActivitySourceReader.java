@@ -25,6 +25,9 @@ import java.util.UUID;
 @Service
 public class DailyClosingActivitySourceReader implements ActivitySourceReader {
     private static final ActivitySource SOURCE = ActivitySource.DAILY_CLOSING;
+    private static final java.time.Instant MIN_OCCURRED_AT = java.time.Instant.parse("0001-01-01T00:00:00Z");
+    private static final java.time.Instant MAX_OCCURRED_AT = java.time.Instant.parse("9999-12-31T23:59:59Z");
+    private static final UUID MAX_UUID = UUID.fromString("ffffffff-ffff-ffff-ffff-ffffffffffff");
 
     private final DailyClosingRepository dailyClosingRepository;
 
@@ -45,15 +48,15 @@ public class DailyClosingActivitySourceReader implements ActivitySourceReader {
         ActivityCursor cursor = query.cursor();
         UUID cursorId = cursor != null && cursor.source() == SOURCE
                 ? UUID.fromString(cursor.stableId().substring((SOURCE.name() + ":").length()))
-                : null;
+                : MAX_UUID;
 
         return dailyClosingRepository.findActivityContextPage(
                         query.workspaceId(),
-                        query.from(),
-                        query.to(),
+                        query.from() == null ? MIN_OCCURRED_AT : query.from(),
+                        query.to() == null ? MAX_OCCURRED_AT : query.to(),
                         query.actorId(),
-                        cursor == null ? null : cursor.occurredAt(),
-                        cursor == null ? null : cursor.sourceRank(),
+                        cursor == null ? MAX_OCCURRED_AT : cursor.occurredAt(),
+                        cursor == null ? Integer.MAX_VALUE : cursor.sourceRank(),
                         cursorId,
                         SOURCE.rank(),
                         PageRequest.of(0, Math.max(limit, 1)))
