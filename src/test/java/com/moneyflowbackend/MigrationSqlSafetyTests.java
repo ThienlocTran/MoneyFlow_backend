@@ -6,6 +6,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -58,10 +59,13 @@ class MigrationSqlSafetyTests {
 
     @Test
     void v7DoesNotModifyEarlierMigrationsAndContainsNoMojibake() throws Exception {
-        List<String> migrationNames = Files.list(Path.of("src/main/resources/db/migration"))
-                .map(path -> path.getFileName().toString())
-                .sorted()
-                .toList();
+        List<String> migrationNames;
+        try (Stream<Path> paths = Files.list(Path.of("src/main/resources/db/migration"))) {
+            migrationNames = paths
+                    .map(path -> path.getFileName().toString())
+                    .sorted()
+                    .toList();
+        }
 
         assertThat(migrationNames).containsExactly(
                 "V1__create_core_schema.sql",
@@ -70,7 +74,8 @@ class MigrationSqlSafetyTests {
                 "V4__transaction_list_pagination_index.sql",
                 "V5__daily_closing_wallet_snapshot_reconciliation.sql",
                 "V6__enforce_adjustment_direction_nullability.sql",
-                "V7__recurring_obligations.sql");
+                "V7__recurring_obligations.sql",
+                "V8__income_sources.sql");
 
         for (String migrationName : migrationNames) {
             String sql = Files.readString(Path.of("src/main/resources/db/migration", migrationName));
