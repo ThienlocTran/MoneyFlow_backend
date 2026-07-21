@@ -73,7 +73,7 @@ public class DatabaseStartupConfig {
             if (!flywayHistoryExists(statement)) {
                 return;
             }
-            try (ResultSet rs = statement.executeQuery("select script from flyway_schema_history where script is not null")) {
+            try (ResultSet rs = statement.executeQuery("select script from public.flyway_schema_history where script is not null")) {
                 while (rs.next()) {
                     scripts.add(rs.getString(1).toLowerCase(Locale.ROOT));
                 }
@@ -92,12 +92,7 @@ public class DatabaseStartupConfig {
 
     private static boolean flywayHistoryExists(Statement statement) throws Exception {
         try (ResultSet rs = statement.executeQuery("""
-                select exists (
-                    select 1
-                    from information_schema.tables
-                    where table_schema = 'public'
-                      and table_name = 'flyway_schema_history'
-                )
+                select to_regclass('public.flyway_schema_history') is not null
                 """)) {
             return rs.next() && rs.getBoolean(1);
         }
