@@ -1,5 +1,6 @@
 package com.moneyflowbackend.quickentry.dto;
 
+import com.moneyflowbackend.common.model.SpendingScope;
 import com.moneyflowbackend.transaction.model.TransactionStatus;
 import com.moneyflowbackend.transaction.model.TransactionType;
 import lombok.AllArgsConstructor;
@@ -36,6 +37,7 @@ public class QuickEntryPreviewResponse {
     private LocalTime transactionTime;
     private String description;
     private String note;
+    private SpendingScope spendingScope;
     private double confidence;
     private boolean readyToConfirm;
     @Builder.Default

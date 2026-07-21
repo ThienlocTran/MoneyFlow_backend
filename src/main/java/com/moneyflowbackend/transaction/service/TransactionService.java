@@ -408,35 +408,38 @@ public class TransactionService {
             String description,
             String note,
             UUID userId) {
+        return createConfirmedObligationTransaction(workspaceId, type, amount, walletId, categoryId, transactionDate, description, note, null, userId);
+    }
+
+    @Transactional
+    public TransactionResponse createConfirmedObligationTransaction(
+            UUID workspaceId,
+            TransactionType type,
+            BigDecimal amount,
+            UUID walletId,
+            UUID categoryId,
+            LocalDate transactionDate,
+            String description,
+            String note,
+            SpendingScope spendingScope,
+            UUID userId) {
         requireWritableMember(workspaceId, userId);
-        Workspace workspace = findWorkspace(workspaceId);
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new BusinessException("USER_NOT_FOUND", "User not found", HttpStatus.NOT_FOUND));
         if (type != TransactionType.INCOME && type != TransactionType.EXPENSE) {
             throw new BusinessException("INVALID_TRANSACTION_TYPE", "Invalid obligation transaction type");
         }
-        Wallet wallet = resolveWallet(workspaceId, walletId, true, true, "WALLET_REQUIRED");
-        Category category = resolveCategory(workspaceId, categoryId, type, true, true);
-        Transaction tx = Transaction.builder()
-                .workspace(workspace)
-                .createdByUser(user)
-                .wallet(wallet)
-                .category(category)
-                .transactionType(type)
-                .transactionStatus(TransactionStatus.POSTED)
-                .amount(requireAmount(amount))
-                .currency(workspaceCurrency(workspace))
-                .transactionDate(transactionDate != null ? transactionDate : today(workspace))
-                .description(normalizeText(description))
-                .note(normalizeText(note))
-                .sourceType(TransactionSourceType.SYSTEM)
-                .walletUnknown(false)
-                .historical(false)
-                .affectsWalletBalance(true)
-                .build();
-        tx = transactionRepository.saveAndFlush(tx);
-        transactionAuditService.record(tx, userId, TransactionAuditAction.CREATE, null, transactionAuditService.snapshot(tx));
-        return mapToResponse(tx);
+        TransactionRequest req = new TransactionRequest();
+        req.setType(type);
+        req.setStatus(TransactionStatus.POSTED);
+        req.setAmount(amount);
+        req.setWalletId(walletId);
+        req.setCategoryId(categoryId);
+        req.setTransactionDate(transactionDate);
+        req.setDescription(description);
+        req.setNote(note);
+        if (spendingScope != null) {
+            req.setSpendingScope(spendingScope);
+        }
+        return createWithSource(workspaceId, req, userId, TransactionSourceType.SYSTEM, null);
     }
 
     @Transactional(readOnly = true)
@@ -845,7 +848,7 @@ public class TransactionService {
 
     private SpendingScope resolveSpendingScopeForCreate(TransactionType type, TransactionSourceType sourceType, TransactionRequest req, Category category) {
         validateSpendingScope(type, req);
-        if (type != TransactionType.EXPENSE || sourceType != TransactionSourceType.MANUAL) {
+        if (type != TransactionType.EXPENSE) {
             return null;
         }
         if (req.hasSpendingScope()) {

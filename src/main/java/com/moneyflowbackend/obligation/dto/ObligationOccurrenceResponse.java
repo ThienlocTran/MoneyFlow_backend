@@ -1,5 +1,6 @@
 package com.moneyflowbackend.obligation.dto;
 
+import com.moneyflowbackend.common.model.SpendingScope;
 import com.moneyflowbackend.obligation.model.ObligationAmountMode;
 import com.moneyflowbackend.obligation.model.ObligationDirection;
 import com.moneyflowbackend.obligation.model.ObligationOccurrenceStatus;
@@ -34,6 +35,7 @@ public class ObligationOccurrenceResponse {
     private UUID linkedTransactionId;
     private RecurringObligationTemplateResponse.ReferenceSummary defaultWallet;
     private RecurringObligationTemplateResponse.ReferenceSummary defaultCategory;
+    private SpendingScope spendingScope;
     private String note;
     private String periodKey;
     private Instant skippedAt;

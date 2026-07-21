@@ -33,6 +33,7 @@ class ObligationOccurrenceMapper {
                 .linkedTransactionId(occurrence.getLinkedTransaction() == null ? null : occurrence.getLinkedTransaction().getId())
                 .defaultWallet(walletSummary(template.getDefaultWallet()))
                 .defaultCategory(categorySummary(template.getDefaultCategory()))
+                .spendingScope(template.getSpendingScope())
                 .note(template.getNote())
                 .periodKey(occurrence.getPeriodKey())
                 .skippedAt(occurrence.getSkippedAt())
