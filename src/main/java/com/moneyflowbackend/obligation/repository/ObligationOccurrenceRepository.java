@@ -19,6 +19,14 @@ import java.util.Set;
 import java.util.UUID;
 
 public interface ObligationOccurrenceRepository extends JpaRepository<ObligationOccurrence, UUID> {
+    interface ActivityObligationContext {
+        UUID getOccurrenceId();
+        UUID getLinkedTransactionId();
+        UUID getTemplateId();
+        ObligationDirection getDirection();
+        java.math.BigDecimal getActualAmount();
+    }
+
     Optional<ObligationOccurrence> findByTemplateIdAndPeriodKey(UUID templateId, String periodKey);
     Optional<ObligationOccurrence> findTopByTemplateIdOrderByDueDateDesc(UUID templateId);
     List<ObligationOccurrence> findAllByWorkspaceIdAndStatusAndDueDateBetweenOrderByDueDateAsc(
@@ -28,6 +36,24 @@ public interface ObligationOccurrenceRepository extends JpaRepository<Obligation
             LocalDate endDate);
     Optional<ObligationOccurrence> findByLinkedTransactionId(UUID linkedTransactionId);
     boolean existsByTemplateId(UUID templateId);
+
+    @Query("""
+            SELECT o.id AS occurrenceId,
+                   tx.id AS linkedTransactionId,
+                   t.id AS templateId,
+                   t.direction AS direction,
+                   o.actualAmount AS actualAmount
+            FROM ObligationOccurrence o
+            JOIN o.template t
+            JOIN o.linkedTransaction tx
+            WHERE o.workspace.id = :workspaceId
+              AND t.workspace.id = :workspaceId
+              AND tx.workspace.id = :workspaceId
+              AND tx.id IN :transactionIds
+            """)
+    List<ActivityObligationContext> findActivityContextByWorkspaceIdAndLinkedTransactionIdIn(
+            @Param("workspaceId") UUID workspaceId,
+            @Param("transactionIds") java.util.Collection<UUID> transactionIds);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     Optional<ObligationOccurrence> findByIdAndWorkspaceId(UUID id, UUID workspaceId);

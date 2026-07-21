@@ -16,10 +16,40 @@ import java.util.Optional;
 import java.util.UUID;
 
 public interface TransactionRepository extends JpaRepository<Transaction, UUID>, JpaSpecificationExecutor<Transaction> {
+    interface ActivityTransactionContext {
+        UUID getId();
+        com.moneyflowbackend.transaction.model.TransactionType getTransactionType();
+        com.moneyflowbackend.transaction.model.TransactionStatus getTransactionStatus();
+        com.moneyflowbackend.transaction.model.AdjustmentDirection getAdjustmentDirection();
+        BigDecimal getAmount();
+        LocalDate getBusinessDate();
+        UUID getWalletId();
+        UUID getCategoryId();
+    }
+
     long countByWorkspaceIdAndCategoryId(UUID workspaceId, UUID categoryId);
     boolean existsByWorkspaceIdAndVoiceRecordIdAndSourceType(UUID workspaceId, UUID voiceRecordId, TransactionSourceType sourceType);
     Optional<Transaction> findByIdAndWorkspaceId(UUID transactionId, UUID workspaceId);
     Optional<Transaction> findByWorkspaceIdAndMigrationKey(UUID workspaceId, String migrationKey);
+
+    @Query("""
+            SELECT t.id AS id,
+                   t.transactionType AS transactionType,
+                   t.transactionStatus AS transactionStatus,
+                   t.adjustmentDirection AS adjustmentDirection,
+                   t.amount AS amount,
+                   t.transactionDate AS businessDate,
+                   w.id AS walletId,
+                   c.id AS categoryId
+            FROM Transaction t
+            LEFT JOIN t.wallet w
+            LEFT JOIN t.category c
+            WHERE t.workspace.id = :workspaceId
+              AND t.id IN :transactionIds
+            """)
+    List<ActivityTransactionContext> findActivityContextByWorkspaceIdAndIdIn(
+            @Param("workspaceId") UUID workspaceId,
+            @Param("transactionIds") Collection<UUID> transactionIds);
 
     @Query("""
             SELECT t.wallet FROM Transaction t
