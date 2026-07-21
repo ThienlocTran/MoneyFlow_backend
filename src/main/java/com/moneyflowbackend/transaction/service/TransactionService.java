@@ -6,6 +6,9 @@ import com.moneyflowbackend.category.model.Category;
 import com.moneyflowbackend.category.model.CategoryType;
 import com.moneyflowbackend.category.repository.CategoryRepository;
 import com.moneyflowbackend.common.exception.BusinessException;
+import com.moneyflowbackend.income.model.IncomeSource;
+import com.moneyflowbackend.income.model.IncomeSourceStatus;
+import com.moneyflowbackend.income.repository.IncomeSourceRepository;
 import com.moneyflowbackend.transaction.audit.TransactionAuditAction;
 import com.moneyflowbackend.transaction.audit.TransactionAuditService;
 import com.moneyflowbackend.transaction.dto.TransactionPageResponse;
@@ -84,6 +87,7 @@ public class TransactionService {
     private final UserRepository userRepository;
     private final WalletRepository walletRepository;
     private final CategoryRepository categoryRepository;
+    private final IncomeSourceRepository incomeSourceRepository;
     private final WorkspaceRepository workspaceRepository;
     private final WorkspaceMemberRepository workspaceMemberRepository;
     private final WorkspacePersonRepository workspacePersonRepository;
@@ -97,6 +101,7 @@ public class TransactionService {
             UserRepository userRepository,
             WalletRepository walletRepository,
             CategoryRepository categoryRepository,
+            IncomeSourceRepository incomeSourceRepository,
             WorkspaceRepository workspaceRepository,
             WorkspaceMemberRepository workspaceMemberRepository,
             WorkspacePersonRepository workspacePersonRepository,
@@ -108,6 +113,7 @@ public class TransactionService {
         this.userRepository = userRepository;
         this.walletRepository = walletRepository;
         this.categoryRepository = categoryRepository;
+        this.incomeSourceRepository = incomeSourceRepository;
         this.workspaceRepository = workspaceRepository;
         this.workspaceMemberRepository = workspaceMemberRepository;
         this.workspacePersonRepository = workspacePersonRepository;
@@ -402,6 +408,7 @@ public class TransactionService {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new BusinessException("USER_NOT_FOUND", "User not found", HttpStatus.NOT_FOUND));
         TransactionType type = requireManualType(req.getType());
+        validateIncomeSourceLinks(type, req.getIncomeSourceId(), req.getRelatedIncomeSourceId());
         if (type != TransactionType.INCOME && type != TransactionType.EXPENSE) {
             throw new BusinessException("INVALID_MIGRATION_TRANSACTION_TYPE", "Historical migration supports income/expense only");
         }
@@ -447,6 +454,7 @@ public class TransactionService {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new BusinessException("USER_NOT_FOUND", "User not found", HttpStatus.NOT_FOUND));
         TransactionType type = requireManualType(req.getType());
+        IncomeSourceLink incomeSourceLink = resolveIncomeSourceLinkForCreate(workspaceId, type, req);
         TransactionStatus status = normalizeStatus(req.getStatus(), TransactionStatus.POSTED);
         BigDecimal amount = requireAmount(req.getAmount());
         WorkspacePerson person = resolvePersonForWrite(workspaceId, req.getAttributedPersonId(), true);
@@ -456,6 +464,8 @@ public class TransactionService {
                 .createdByUser(user)
                 .attributedPerson(person)
                 .transactionType(type)
+                .incomeSource(incomeSourceLink.incomeSource())
+                .relatedIncomeSource(incomeSourceLink.relatedIncomeSource())
                 .transactionStatus(status)
                 .amount(amount)
                 .currency(workspaceCurrency(workspace))
@@ -563,6 +573,7 @@ public class TransactionService {
         if (requestedType != tx.getTransactionType()) {
             throw new BusinessException("TRANSACTION_TYPE_IMMUTABLE", "Transaction type cannot be changed");
         }
+        IncomeSourceLink incomeSourceLink = resolveIncomeSourceLinkForUpdate(workspaceId, requestedType, req, tx);
 
         TransactionStatus oldStatus = tx.getTransactionStatus();
         TransactionStatus newStatus = normalizeStatus(req.getStatus(), oldStatus);
@@ -577,6 +588,8 @@ public class TransactionService {
         tx.setTransactionTime(req.getTransactionTime());
         tx.setDescription(normalizeText(req.getDescription()));
         tx.setNote(normalizeText(req.getNote()));
+        tx.setIncomeSource(incomeSourceLink.incomeSource());
+        tx.setRelatedIncomeSource(incomeSourceLink.relatedIncomeSource());
         tx.setUpdatedAt(Instant.now());
         tx.setAttributedPerson(resolvePersonForUpdate(workspaceId, tx.getAttributedPerson(), req.getAttributedPersonId()));
 
@@ -773,6 +786,65 @@ public class TransactionService {
         return resolveCategory(workspaceId, requestedId, type, required, status == TransactionStatus.POSTED && (changed || postingNow));
     }
 
+    private IncomeSourceLink resolveIncomeSourceLinkForCreate(UUID workspaceId, TransactionType type, TransactionRequest req) {
+        validateIncomeSourceLinks(type, req.getIncomeSourceId(), req.getRelatedIncomeSourceId());
+        return switch (type) {
+            case INCOME -> new IncomeSourceLink(resolveActiveIncomeSource(workspaceId, req.getIncomeSourceId(), null), null);
+            case EXPENSE -> new IncomeSourceLink(null, resolveActiveIncomeSource(workspaceId, req.getRelatedIncomeSourceId(), null));
+            default -> new IncomeSourceLink(null, null);
+        };
+    }
+
+    private IncomeSourceLink resolveIncomeSourceLinkForUpdate(UUID workspaceId, TransactionType type, TransactionRequest req, Transaction tx) {
+        UUID incomeSourceId = req.hasIncomeSourceId()
+                ? req.getIncomeSourceId()
+                : tx.getIncomeSource() == null ? null : tx.getIncomeSource().getId();
+        UUID relatedIncomeSourceId = req.hasRelatedIncomeSourceId()
+                ? req.getRelatedIncomeSourceId()
+                : tx.getRelatedIncomeSource() == null ? null : tx.getRelatedIncomeSource().getId();
+        validateIncomeSourceLinks(type, incomeSourceId, relatedIncomeSourceId);
+        return switch (type) {
+            case INCOME -> new IncomeSourceLink(resolveActiveIncomeSource(workspaceId, incomeSourceId, tx.getIncomeSource()), null);
+            case EXPENSE -> new IncomeSourceLink(null, resolveActiveIncomeSource(workspaceId, relatedIncomeSourceId, tx.getRelatedIncomeSource()));
+            default -> new IncomeSourceLink(null, null);
+        };
+    }
+
+    private void validateIncomeSourceLinks(TransactionType type, UUID incomeSourceId, UUID relatedIncomeSourceId) {
+        if (incomeSourceId != null && relatedIncomeSourceId != null) {
+            throw invalidIncomeSourceLink();
+        }
+        if (type == TransactionType.INCOME && relatedIncomeSourceId != null) {
+            throw invalidIncomeSourceLink();
+        }
+        if (type == TransactionType.EXPENSE && incomeSourceId != null) {
+            throw invalidIncomeSourceLink();
+        }
+        if (type != TransactionType.INCOME && type != TransactionType.EXPENSE
+                && (incomeSourceId != null || relatedIncomeSourceId != null)) {
+            throw invalidIncomeSourceLink();
+        }
+    }
+
+    private IncomeSource resolveActiveIncomeSource(UUID workspaceId, UUID requestedId, IncomeSource current) {
+        if (requestedId == null) {
+            return null;
+        }
+        IncomeSource source = incomeSourceRepository.findByIdAndWorkspaceId(requestedId, workspaceId)
+                .orElseThrow(() -> new BusinessException("INCOME_SOURCE_NOT_FOUND", "Income source not found", HttpStatus.NOT_FOUND));
+        if (source.getStatus() == IncomeSourceStatus.ACTIVE) {
+            return source;
+        }
+        if (current != null && current.getId().equals(requestedId)) {
+            return source;
+        }
+        throw new BusinessException("INCOME_SOURCE_ARCHIVED", "Income source is archived", HttpStatus.CONFLICT);
+    }
+
+    private BusinessException invalidIncomeSourceLink() {
+        return new BusinessException("INVALID_INCOME_SOURCE_LINK", "Income source link is invalid");
+    }
+
     private WorkspacePerson resolvePersonForWrite(UUID workspaceId, UUID personId, boolean requireActive) {
         if (personId == null) {
             return null;
@@ -942,6 +1014,8 @@ public class TransactionService {
                 .historical(tx.isHistorical())
                 .affectsWalletBalance(tx.isAffectsWalletBalance())
                 .walletUnknown(tx.isWalletUnknown())
+                .incomeSourceId(tx.getIncomeSource() == null ? null : tx.getIncomeSource().getId())
+                .relatedIncomeSourceId(tx.getRelatedIncomeSource() == null ? null : tx.getRelatedIncomeSource().getId())
                 .createdAt(tx.getCreatedAt())
                 .updatedAt(tx.getUpdatedAt())
                 .deletedAt(tx.getDeletedAt());
@@ -1006,6 +1080,9 @@ public class TransactionService {
                     .build());
         }
         return builder.build();
+    }
+
+    private record IncomeSourceLink(IncomeSource incomeSource, IncomeSource relatedIncomeSource) {
     }
 }
 
