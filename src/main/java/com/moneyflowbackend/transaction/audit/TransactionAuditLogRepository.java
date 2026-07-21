@@ -24,7 +24,7 @@ public interface TransactionAuditLogRepository extends JpaRepository<Transaction
             LEFT JOIN l.actorUser actor
             WHERE l.workspace.id = :workspaceId
               AND (:from IS NULL OR l.createdAt >= :from)
-              AND (:to IS NULL OR l.createdAt <= :to)
+              AND (:to IS NULL OR l.createdAt < :to)
               AND (:actorId IS NULL OR actor.id = :actorId)
               AND (
                     :cursorOccurredAt IS NULL

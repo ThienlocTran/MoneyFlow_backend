@@ -8,7 +8,7 @@ import java.util.List;
 @Data
 @Builder
 public class ActivityTimelinePageResponse {
-    private List<ActivityTimelineItemResponse> content;
+    private List<ActivityTimelineItemResponse> items;
     private String nextCursor;
     private boolean hasMore;
     private int size;

@@ -27,12 +27,11 @@ public record ActivityTimelineQuery(
         }
         actions = actions == null ? Set.of() : Set.copyOf(actions);
         entityTypes = entityTypes == null ? Set.of() : Set.copyOf(entityTypes);
-        size = size == 0 ? DEFAULT_SIZE : size;
         if (size < 1 || size > MAX_SIZE) {
             throw new BusinessException("INVALID_ACTIVITY_PAGE_SIZE", "Activity page size must be between 1 and 100");
         }
-        if (from != null && to != null && from.isAfter(to)) {
-            throw new BusinessException("INVALID_ACTIVITY_DATE_RANGE", "Activity from must be before or equal to to");
+        if (from != null && to != null && !from.isBefore(to)) {
+            throw new BusinessException("INVALID_ACTIVITY_DATE_RANGE", "Activity from must be before to");
         }
     }
 }

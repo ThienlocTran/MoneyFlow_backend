@@ -2,6 +2,7 @@ package com.moneyflowbackend.activity.query;
 
 import com.moneyflowbackend.activity.domain.ActivitySource;
 import com.moneyflowbackend.common.exception.BusinessException;
+import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -10,6 +11,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
+@Component
 public class ActivityCursorCodec {
     private static final int VERSION = 1;
 

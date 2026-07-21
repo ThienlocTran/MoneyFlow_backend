@@ -97,7 +97,7 @@ class ActivityFoundationTests {
     void queryCriteriaDefaultsValidatesAndDeduplicatesFilters() {
         UUID workspaceId = UUID.randomUUID();
 
-        ActivityTimelineQuery defaults = new ActivityTimelineQuery(workspaceId, null, null, null, null, null, null, 0);
+        ActivityTimelineQuery defaults = new ActivityTimelineQuery(workspaceId, null, null, null, null, null, null, ActivityTimelineQuery.DEFAULT_SIZE);
         assertThat(defaults.size()).isEqualTo(ActivityTimelineQuery.DEFAULT_SIZE);
         assertThat(defaults.actions()).isEmpty();
         assertThat(defaults.entityTypes()).isEmpty();
@@ -113,10 +113,11 @@ class ActivityFoundationTests {
                 ActivityTimelineQuery.MAX_SIZE);
         assertThat(max.actions()).containsExactly(ActivityAction.TRANSACTION_CREATED);
 
+        assertBusinessCode(() -> new ActivityTimelineQuery(workspaceId, null, null, null, null, null, null, 0), "INVALID_ACTIVITY_PAGE_SIZE");
         assertBusinessCode(() -> new ActivityTimelineQuery(workspaceId, null, null, null, null, null, null, -1), "INVALID_ACTIVITY_PAGE_SIZE");
         assertBusinessCode(() -> new ActivityTimelineQuery(workspaceId, null, null, null, null, null, null, 101), "INVALID_ACTIVITY_PAGE_SIZE");
         assertBusinessCode(() -> new ActivityTimelineQuery(workspaceId, null, null, null,
-                Instant.parse("2026-07-21T00:00:00Z"), Instant.parse("2026-07-20T00:00:00Z"), null, 30), "INVALID_ACTIVITY_DATE_RANGE");
+                Instant.parse("2026-07-21T00:00:00Z"), Instant.parse("2026-07-21T00:00:00Z"), null, 30), "INVALID_ACTIVITY_DATE_RANGE");
     }
 
     @Test
