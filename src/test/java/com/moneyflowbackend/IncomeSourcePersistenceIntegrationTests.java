@@ -174,7 +174,7 @@ class IncomeSourcePersistenceIntegrationTests {
     private void insertNative(TestContext ctx, String name, String type, String status) {
         entityManager.createNativeQuery("""
                 INSERT INTO income_sources (id, workspace_id, name, type, status, created_by_user_id, created_at, updated_at, version)
-                VALUES (RANDOM_UUID(), :workspaceId, :name, :type, :status, :userId, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0)
+                VALUES (gen_random_uuid(), :workspaceId, :name, :type, :status, :userId, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0)
                 """)
                 .setParameter("workspaceId", ctx.workspace().getId())
                 .setParameter("name", name)

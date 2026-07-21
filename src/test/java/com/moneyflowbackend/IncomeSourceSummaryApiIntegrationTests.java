@@ -15,6 +15,7 @@ import com.moneyflowbackend.income.model.IncomeSourceStatus;
 import com.moneyflowbackend.income.model.IncomeSourceType;
 import com.moneyflowbackend.income.repository.IncomeSourceRepository;
 import com.moneyflowbackend.income.service.IncomeSourceService;
+import com.moneyflowbackend.transaction.model.AdjustmentDirection;
 import com.moneyflowbackend.transaction.model.Transaction;
 import com.moneyflowbackend.transaction.model.TransactionStatus;
 import com.moneyflowbackend.transaction.model.TransactionType;
@@ -208,6 +209,7 @@ class IncomeSourceSummaryApiIntegrationTests {
                 .currency("VND")
                 .transactionDate(LocalDate.parse("2026-07-10"))
                 .incomeSource(source)
+                .walletUnknown(true)
                 .description("Public description")
                 .note("private note")
                 .rawInput("private raw")
@@ -260,12 +262,14 @@ class IncomeSourceSummaryApiIntegrationTests {
                 .workspace(ctx.workspace())
                 .createdByUser(ctx.user())
                 .transactionType(type)
+                .adjustmentDirection(type == TransactionType.ADJUSTMENT ? AdjustmentDirection.INCREASE : null)
                 .transactionStatus(status)
                 .amount(new BigDecimal(amount))
                 .currency("VND")
                 .transactionDate(LocalDate.parse(date))
                 .incomeSource(incomeSource)
                 .relatedIncomeSource(relatedIncomeSource)
+                .walletUnknown(true)
                 .description(description)
                 .deletedAt(deleted ? Instant.parse("2026-07-22T00:00:00Z") : null)
                 .build());
