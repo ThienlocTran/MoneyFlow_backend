@@ -6,6 +6,10 @@ import com.moneyflowbackend.category.model.Category;
 import com.moneyflowbackend.category.model.CategoryType;
 import com.moneyflowbackend.category.repository.CategoryRepository;
 import com.moneyflowbackend.common.exception.BusinessException;
+import com.moneyflowbackend.income.model.IncomeSource;
+import com.moneyflowbackend.income.model.IncomeSourceStatus;
+import com.moneyflowbackend.income.model.IncomeSourceType;
+import com.moneyflowbackend.income.repository.IncomeSourceRepository;
 import com.moneyflowbackend.transaction.audit.TransactionAuditLogRepository;
 import com.moneyflowbackend.transaction.audit.TransactionAuditService;
 import com.moneyflowbackend.transaction.dto.TransactionPageResponse;
@@ -56,6 +60,7 @@ class TransactionModuleIntegrationTests {
     @Autowired WorkspacePersonRepository workspacePersonRepository;
     @Autowired WalletRepository walletRepository;
     @Autowired CategoryRepository categoryRepository;
+    @Autowired IncomeSourceRepository incomeSourceRepository;
     @Autowired TransactionRepository transactionRepository;
     @Autowired TransferDetailRepository transferDetailRepository;
     @Autowired TransactionAuditLogRepository transactionAuditLogRepository;
@@ -211,6 +216,65 @@ class TransactionModuleIntegrationTests {
 
         TransactionResponse income = transactionService.create(ctx.workspace().getId(), incomeReq("10", cash, incomeCategory, "Income"), ctx.user().getId());
         assertBusinessCode(() -> transactionService.update(ctx.workspace().getId(), income.getId(), expenseReq("10", cash, expenseCategory, "Type flip", TransactionStatus.POSTED), ctx.user().getId()), "TRANSACTION_TYPE_IMMUTABLE");
+    }
+
+    @Test
+    void incomeSourceLinksValidateCreateUpdateAndArchivedHistory() {
+        TestContext ctx = createContext("tx_income_source", WorkspaceRole.OWNER);
+        TestContext other = createContext("tx_income_source_other", WorkspaceRole.OWNER);
+        Wallet cash = wallet(ctx, "Cash", WalletType.CASH, "0");
+        Wallet bank = wallet(ctx, "Bank", WalletType.BANK, "0");
+        Category incomeCategory = category(ctx, "Salary", CategoryType.INCOME, true, false);
+        Category expenseCategory = category(ctx, "Fuel", CategoryType.EXPENSE, true, false);
+        IncomeSource salary = incomeSource(ctx, "Salary Job");
+        IncomeSource gig = incomeSource(ctx, "Ride App");
+        IncomeSource otherSource = incomeSource(other, "Other Workspace");
+
+        TransactionRequest incomeReq = incomeReq("100", cash, incomeCategory, "Pay");
+        incomeReq.setIncomeSourceId(salary.getId());
+        TransactionResponse income = transactionService.create(ctx.workspace().getId(), incomeReq, ctx.user().getId());
+        assertThat(income.getIncomeSourceId()).isEqualTo(salary.getId());
+        assertThat(transactionRepository.findById(income.getId()).orElseThrow().getIncomeSource().getId()).isEqualTo(salary.getId());
+        assertThat(walletService.calculateCurrentBalance(cash.getId())).isEqualByComparingTo("100");
+
+        TransactionRequest expenseReq = expenseReq("20", cash, expenseCategory, "Fuel", TransactionStatus.POSTED);
+        expenseReq.setRelatedIncomeSourceId(gig.getId());
+        TransactionResponse expense = transactionService.create(ctx.workspace().getId(), expenseReq, ctx.user().getId());
+        assertThat(expense.getRelatedIncomeSourceId()).isEqualTo(gig.getId());
+        assertThat(walletService.calculateCurrentBalance(cash.getId())).isEqualByComparingTo("80");
+
+        TransactionRequest badIncome = incomeReq("10", cash, incomeCategory, "Bad");
+        badIncome.setRelatedIncomeSourceId(gig.getId());
+        assertBusinessCode(() -> transactionService.create(ctx.workspace().getId(), badIncome, ctx.user().getId()), "INVALID_INCOME_SOURCE_LINK");
+
+        TransactionRequest badExpense = expenseReq("10", cash, expenseCategory, "Bad", TransactionStatus.POSTED);
+        badExpense.setIncomeSourceId(salary.getId());
+        assertBusinessCode(() -> transactionService.create(ctx.workspace().getId(), badExpense, ctx.user().getId()), "INVALID_INCOME_SOURCE_LINK");
+
+        TransactionRequest badTransfer = transferReq("10", cash, bank, "Bad", TransactionStatus.POSTED);
+        badTransfer.setIncomeSourceId(salary.getId());
+        assertBusinessCode(() -> transactionService.create(ctx.workspace().getId(), badTransfer, ctx.user().getId()), "INVALID_INCOME_SOURCE_LINK");
+
+        TransactionRequest crossWorkspace = incomeReq("10", cash, incomeCategory, "Cross");
+        crossWorkspace.setIncomeSourceId(otherSource.getId());
+        assertBusinessCode(() -> transactionService.create(ctx.workspace().getId(), crossWorkspace, ctx.user().getId()), "INCOME_SOURCE_NOT_FOUND");
+
+        salary.setStatus(IncomeSourceStatus.ARCHIVED);
+        incomeSourceRepository.saveAndFlush(salary);
+
+        TransactionRequest preserve = incomeReq("150", cash, incomeCategory, "Pay updated");
+        TransactionResponse preserved = transactionService.update(ctx.workspace().getId(), income.getId(), preserve, ctx.user().getId());
+        assertThat(preserved.getIncomeSourceId()).isEqualTo(salary.getId());
+        assertThat(walletService.calculateCurrentBalance(cash.getId())).isEqualByComparingTo("130");
+
+        TransactionRequest clear = incomeReq("150", cash, incomeCategory, "Pay cleared");
+        clear.setIncomeSourceId(null);
+        TransactionResponse cleared = transactionService.update(ctx.workspace().getId(), income.getId(), clear, ctx.user().getId());
+        assertThat(cleared.getIncomeSourceId()).isNull();
+
+        TransactionRequest archivedAssign = incomeReq("150", cash, incomeCategory, "Pay archived");
+        archivedAssign.setIncomeSourceId(salary.getId());
+        assertBusinessCode(() -> transactionService.update(ctx.workspace().getId(), income.getId(), archivedAssign, ctx.user().getId()), "INCOME_SOURCE_ARCHIVED");
     }
 
     @Test
@@ -566,6 +630,16 @@ class TransactionModuleIntegrationTests {
                 .categoryType(type)
                 .isActive(active)
                 .isArchived(archived)
+                .build());
+    }
+
+    private IncomeSource incomeSource(TestContext ctx, String name) {
+        return incomeSourceRepository.saveAndFlush(IncomeSource.builder()
+                .workspace(ctx.workspace())
+                .name(name)
+                .type(IncomeSourceType.OTHER)
+                .status(IncomeSourceStatus.ACTIVE)
+                .createdByUser(ctx.user())
                 .build());
     }
 

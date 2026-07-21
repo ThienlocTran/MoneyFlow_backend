@@ -5,6 +5,7 @@ import com.moneyflowbackend.auth.model.User;
 import com.moneyflowbackend.workspace.model.WorkspacePerson;
 import com.moneyflowbackend.wallet.model.Wallet;
 import com.moneyflowbackend.category.model.Category;
+import com.moneyflowbackend.income.model.IncomeSource;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.JdbcTypeCode;
@@ -16,7 +17,22 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "transactions")
+@Table(
+        name = "transactions",
+        check = {
+                @CheckConstraint(name = "chk_transactions_income_source_links", constraint = """
+                        income_source_id IS NULL
+                        OR (transaction_type = 'INCOME' AND related_income_source_id IS NULL)
+                        """),
+                @CheckConstraint(name = "chk_transactions_related_income_source_links", constraint = """
+                        related_income_source_id IS NULL
+                        OR (transaction_type = 'EXPENSE' AND income_source_id IS NULL)
+                        """),
+                @CheckConstraint(name = "chk_transactions_single_income_source_link", constraint = """
+                        income_source_id IS NULL OR related_income_source_id IS NULL
+                        """)
+        }
+)
 @Getter
 @Setter
 @NoArgsConstructor
@@ -46,6 +62,14 @@ public class Transaction {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "category_id")
     private Category category;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "income_source_id")
+    private IncomeSource incomeSource;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "related_income_source_id")
+    private IncomeSource relatedIncomeSource;
 
     @Column(name = "voice_record_id")
     private UUID voiceRecordId;

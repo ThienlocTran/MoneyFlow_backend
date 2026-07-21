@@ -75,7 +75,8 @@ class MigrationSqlSafetyTests {
                 "V5__daily_closing_wallet_snapshot_reconciliation.sql",
                 "V6__enforce_adjustment_direction_nullability.sql",
                 "V7__recurring_obligations.sql",
-                "V8__income_sources.sql");
+                "V8__income_sources.sql",
+                "V9__transaction_income_source_links.sql");
 
         for (String migrationName : migrationNames) {
             String sql = Files.readString(Path.of("src/main/resources/db/migration", migrationName));

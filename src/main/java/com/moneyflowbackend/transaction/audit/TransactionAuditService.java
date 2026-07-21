@@ -94,6 +94,8 @@ public class TransactionAuditService {
         data.put("walletName", tx.getWallet() != null ? tx.getWallet().getName() : null);
         data.put("categoryId", tx.getCategory() != null ? tx.getCategory().getId() : null);
         data.put("categoryName", tx.getCategory() != null ? tx.getCategory().getName() : null);
+        data.put("incomeSourceId", tx.getIncomeSource() != null ? tx.getIncomeSource().getId() : null);
+        data.put("relatedIncomeSourceId", tx.getRelatedIncomeSource() != null ? tx.getRelatedIncomeSource().getId() : null);
         data.put("attributedPersonId", tx.getAttributedPerson() != null ? tx.getAttributedPerson().getId() : null);
         data.put("attributedPersonName", tx.getAttributedPerson() != null ? tx.getAttributedPerson().getDisplayName() : null);
         data.put("voiceRecordId", tx.getVoiceRecordId());
