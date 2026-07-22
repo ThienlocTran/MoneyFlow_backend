@@ -1,7 +1,12 @@
 package com.moneyflowbackend;
 
+import com.moneyflowbackend.auth.dto.LoginRequest;
+import com.moneyflowbackend.auth.dto.RegisterRequest;
+import com.moneyflowbackend.auth.dto.TokenResponse;
+import com.moneyflowbackend.auth.dto.UserResponse;
 import com.moneyflowbackend.auth.model.User;
 import com.moneyflowbackend.auth.repository.UserRepository;
+import com.moneyflowbackend.auth.service.AuthService;
 import com.moneyflowbackend.common.exception.BusinessException;
 import com.moneyflowbackend.emergencyfund.dto.EmergencyFundPlanRequest;
 import com.moneyflowbackend.emergencyfund.dto.EmergencyFundPlanResponse;
@@ -21,7 +26,10 @@ import com.moneyflowbackend.workspace.repository.WorkspaceRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -29,8 +37,11 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest
+@AutoConfigureMockMvc
 @ActiveProfiles("test")
 @Transactional
 class EmergencyFundPlanApiIntegrationTests {
@@ -38,6 +49,8 @@ class EmergencyFundPlanApiIntegrationTests {
     @Autowired EmergencyFundPlanRepository planRepository;
     @Autowired EmergencyFundLedgerEntryRepository ledgerRepository;
     @Autowired UserRepository userRepository;
+    @Autowired AuthService authService;
+    @Autowired MockMvc mockMvc;
     @Autowired TransactionRepository transactionRepository;
     @Autowired WalletRepository walletRepository;
     @Autowired WorkspaceRepository workspaceRepository;
@@ -135,6 +148,30 @@ class EmergencyFundPlanApiIntegrationTests {
         assertThat(funded.getPlanStatus()).isEqualTo(EmergencyFundPlanStatus.PAUSED);
     }
 
+    @Test
+    void controllerRejectsInvalidJsonAndEnum() throws Exception {
+        String username = "ef_http_" + UUID.randomUUID().toString().substring(0, 8);
+        UserResponse registered = authService.register(registerRequest(username));
+        TokenResponse token = authService.login(loginRequest(username));
+        Workspace workspace = workspaceRepository.findAllByUserId(registered.getId()).getFirst();
+
+        mockMvc.perform(put("/api/workspaces/" + workspace.getId() + "/emergency-fund")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"targetMonths":6,"basisMode":"AUTO","manualMonthlyExpense":1000}
+                                """)
+                        .header("Authorization", "Bearer " + token.getAccessToken()))
+                .andExpect(status().isBadRequest());
+
+        mockMvc.perform(put("/api/workspaces/" + workspace.getId() + "/emergency-fund")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"targetMonths":
+                                """)
+                        .header("Authorization", "Bearer " + token.getAccessToken()))
+                .andExpect(status().isBadRequest());
+    }
+
     private EmergencyFundPlanRequest request(Integer targetMonths, String manualMonthlyExpense) {
         EmergencyFundPlanRequest request = new EmergencyFundPlanRequest();
         request.setTargetMonths(targetMonths);
@@ -171,6 +208,22 @@ class EmergencyFundPlanApiIntegrationTests {
                 .user(user)
                 .role(role)
                 .build();
+    }
+
+    private RegisterRequest registerRequest(String username) {
+        RegisterRequest request = new RegisterRequest();
+        request.setUsername(username);
+        request.setEmail(username + "@example.com");
+        request.setPassword("StrongPassword123");
+        request.setFullName("Emergency Fund API User");
+        return request;
+    }
+
+    private LoginRequest loginRequest(String username) {
+        LoginRequest request = new LoginRequest();
+        request.setIdentifier(username);
+        request.setPassword("StrongPassword123");
+        return request;
     }
 
     private void assertCode(Runnable action, String code) {
