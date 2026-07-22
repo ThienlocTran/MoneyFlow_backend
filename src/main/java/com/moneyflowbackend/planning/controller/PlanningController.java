@@ -1,5 +1,6 @@
 package com.moneyflowbackend.planning.controller;
 
+import com.moneyflowbackend.common.exception.BusinessException;
 import com.moneyflowbackend.dto.ApiResponse;
 import com.moneyflowbackend.planning.dto.ActuallySpendableResponse;
 import com.moneyflowbackend.planning.dto.PlanningPreferenceRequest;
@@ -35,13 +36,13 @@ public class PlanningController {
     @GetMapping("/actually-spendable")
     public ResponseEntity<ApiResponse<ActuallySpendableResponse>> actuallySpendable(
             @PathVariable UUID workspaceId,
-            @RequestParam(defaultValue = "CURRENT_MONTH") PlanningHorizon horizon,
-            @RequestParam(required = false) LocalDate from,
-            @RequestParam(required = false) LocalDate to,
+            @RequestParam(defaultValue = "CURRENT_MONTH") String horizon,
+            @RequestParam(required = false) String from,
+            @RequestParam(required = false) String to,
             @RequestParam(required = false) List<UUID> walletIds) {
         return ResponseEntity.ok(ApiResponse.ok(
                 "Planning loaded",
-                planningService.actuallySpendable(workspaceId, currentUserId(), horizon, from, to, walletIds)));
+                planningService.actuallySpendable(workspaceId, currentUserId(), parseHorizon(horizon), parseDate(from), parseDate(to), walletIds)));
     }
 
     @GetMapping("/preferences")
@@ -59,5 +60,21 @@ public class PlanningController {
     private UUID currentUserId() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         return UUID.fromString(auth.getName());
+    }
+
+    private PlanningHorizon parseHorizon(String raw) {
+        try {
+            return PlanningHorizon.valueOf((raw == null || raw.isBlank() ? "CURRENT_MONTH" : raw.trim().toUpperCase()));
+        } catch (Exception ex) {
+            throw new BusinessException("INVALID_PLANNING_HORIZON", "Planning horizon is invalid");
+        }
+    }
+
+    private LocalDate parseDate(String raw) {
+        try {
+            return raw == null || raw.isBlank() ? null : LocalDate.parse(raw);
+        } catch (Exception ex) {
+            throw new BusinessException("INVALID_PLANNING_DATE", "Planning date must use YYYY-MM-DD");
+        }
     }
 }

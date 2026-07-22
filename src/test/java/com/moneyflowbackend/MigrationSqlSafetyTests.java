@@ -84,7 +84,8 @@ class MigrationSqlSafetyTests {
                 "V16__savings_goals.sql",
                 "V17__savings_goal_ledger.sql",
                 "V18__emergency_fund_plan.sql",
-                "V19__emergency_fund_ledger.sql");
+                "V19__emergency_fund_ledger.sql",
+                "V20__planning_preferences.sql");
 
         for (String migrationName : migrationNames) {
             String sql = Files.readString(Path.of("src/main/resources/db/migration", migrationName));
@@ -128,6 +129,25 @@ class MigrationSqlSafetyTests {
         assertThat(normalized).contains("status in ('active', 'paid_off', 'paused', 'archived')");
         assertThat(normalized).doesNotContain("transactions");
         assertThat(normalized).doesNotContain("wallet");
+        assertThat(normalized).doesNotContain("insert ");
+        assertThat(normalized).doesNotContain("update ");
+        assertThat(normalized).doesNotContain("drop ");
+        assertThat(normalized).doesNotContain("truncate ");
+    }
+
+    @Test
+    void v20CreatesPlanningPreferencesOnly() throws Exception {
+        String sql = Files.readString(Path.of("src/main/resources/db/migration/V20__planning_preferences.sql"));
+        String normalized = sql.toLowerCase();
+
+        assertThat(normalized).contains("create table planning_preferences");
+        assertThat(normalized).contains("create table planning_preference_wallet_ids");
+        assertThat(Pattern.compile("create\\s+table", Pattern.CASE_INSENSITIVE).matcher(sql).results()).hasSize(2);
+        assertThat(normalized).contains("workspace_id uuid not null unique references workspaces(id)");
+        assertThat(normalized).contains("default_horizon in ('current_month', 'custom')");
+        assertThat(normalized).contains("version bigint not null default 0");
+        assertThat(normalized).doesNotContain("snapshot");
+        assertThat(normalized).doesNotContain("actually_spendable");
         assertThat(normalized).doesNotContain("insert ");
         assertThat(normalized).doesNotContain("update ");
         assertThat(normalized).doesNotContain("drop ");
