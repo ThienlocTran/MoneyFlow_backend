@@ -11,6 +11,7 @@ import com.moneyflowbackend.emergencyfund.dto.EmergencyFundPlanResponse;
 import com.moneyflowbackend.emergencyfund.model.EmergencyFundLedgerEntry;
 import com.moneyflowbackend.emergencyfund.model.EmergencyFundLedgerType;
 import com.moneyflowbackend.emergencyfund.model.EmergencyFundBasisMode;
+import com.moneyflowbackend.emergencyfund.model.EmergencyFundFundingStatus;
 import com.moneyflowbackend.emergencyfund.model.EmergencyFundPlan;
 import com.moneyflowbackend.emergencyfund.model.EmergencyFundPlanStatus;
 import com.moneyflowbackend.emergencyfund.repository.EmergencyFundLedgerEntryRepository;
@@ -27,6 +28,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.UUID;
@@ -224,19 +226,50 @@ public class EmergencyFundService {
     }
 
     private EmergencyFundPlanResponse map(EmergencyFundPlan plan, BigDecimal reservedAmount) {
+        BigDecimal basis = money(plan.getManualMonthlyExpense());
+        BigDecimal targetAmount = money(basis.multiply(BigDecimal.valueOf(plan.getTargetMonths())));
+        BigDecimal fundingGap = targetAmount.subtract(reservedAmount);
+        if (fundingGap.compareTo(BigDecimal.ZERO) < 0) {
+            fundingGap = BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+        }
         return EmergencyFundPlanResponse.builder()
                 .id(plan.getId())
                 .workspaceId(plan.getWorkspace().getId())
                 .targetMonths(plan.getTargetMonths())
                 .basisMode(plan.getBasisMode())
                 .manualMonthlyExpense(plan.getManualMonthlyExpense())
+                .essentialMonthlyExpenseBasis(basis)
+                .targetAmount(targetAmount)
                 .planStatus(plan.getPlanStatus())
-                .reservedAmount(reservedAmount)
+                .reservedAmount(money(reservedAmount))
+                .fundingGap(fundingGap)
+                .coverageMonths(coverageMonths(reservedAmount, basis))
+                .fundingStatus(fundingStatus(reservedAmount, fundingGap))
                 .createdByUserId(plan.getCreatedByUser().getId())
                 .createdAt(plan.getCreatedAt())
                 .updatedAt(plan.getUpdatedAt())
                 .version(plan.getVersion())
                 .build();
+    }
+
+    private BigDecimal money(BigDecimal value) {
+        return value == null ? BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP) : value.setScale(2, RoundingMode.HALF_UP);
+    }
+
+    private BigDecimal coverageMonths(BigDecimal reservedAmount, BigDecimal basis) {
+        if (basis.compareTo(BigDecimal.ZERO) <= 0) {
+            return BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+        }
+        return reservedAmount.divide(basis, 2, RoundingMode.HALF_UP);
+    }
+
+    private EmergencyFundFundingStatus fundingStatus(BigDecimal reservedAmount, BigDecimal fundingGap) {
+        if (reservedAmount.compareTo(BigDecimal.ZERO) == 0) {
+            return EmergencyFundFundingStatus.NOT_STARTED;
+        }
+        return fundingGap.compareTo(BigDecimal.ZERO) == 0
+                ? EmergencyFundFundingStatus.FUNDED
+                : EmergencyFundFundingStatus.UNDERFUNDED;
     }
 
     private EmergencyFundLedgerEntryResponse mapLedgerEntry(EmergencyFundLedgerEntry entry) {

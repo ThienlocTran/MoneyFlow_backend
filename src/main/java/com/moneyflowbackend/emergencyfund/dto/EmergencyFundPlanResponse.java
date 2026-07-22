@@ -1,6 +1,7 @@
 package com.moneyflowbackend.emergencyfund.dto;
 
 import com.moneyflowbackend.emergencyfund.model.EmergencyFundBasisMode;
+import com.moneyflowbackend.emergencyfund.model.EmergencyFundFundingStatus;
 import com.moneyflowbackend.emergencyfund.model.EmergencyFundPlanStatus;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -21,8 +22,13 @@ public class EmergencyFundPlanResponse {
     private Integer targetMonths;
     private EmergencyFundBasisMode basisMode;
     private BigDecimal manualMonthlyExpense;
+    private BigDecimal essentialMonthlyExpenseBasis;
+    private BigDecimal targetAmount;
     private EmergencyFundPlanStatus planStatus;
     private BigDecimal reservedAmount;
+    private BigDecimal fundingGap;
+    private BigDecimal coverageMonths;
+    private EmergencyFundFundingStatus fundingStatus;
     private UUID createdByUserId;
     private Instant createdAt;
     private Instant updatedAt;

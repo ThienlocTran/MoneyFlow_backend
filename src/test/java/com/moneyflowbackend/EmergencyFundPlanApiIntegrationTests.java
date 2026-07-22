@@ -6,6 +6,7 @@ import com.moneyflowbackend.common.exception.BusinessException;
 import com.moneyflowbackend.emergencyfund.dto.EmergencyFundPlanRequest;
 import com.moneyflowbackend.emergencyfund.dto.EmergencyFundPlanResponse;
 import com.moneyflowbackend.emergencyfund.model.EmergencyFundBasisMode;
+import com.moneyflowbackend.emergencyfund.model.EmergencyFundFundingStatus;
 import com.moneyflowbackend.emergencyfund.model.EmergencyFundPlanStatus;
 import com.moneyflowbackend.emergencyfund.repository.EmergencyFundLedgerEntryRepository;
 import com.moneyflowbackend.emergencyfund.repository.EmergencyFundPlanRepository;
@@ -105,12 +106,33 @@ class EmergencyFundPlanApiIntegrationTests {
 
         EmergencyFundPlanResponse updated = emergencyFundService.get(ctx.workspace().getId(), ctx.user().getId());
         assertThat(updated.getReservedAmount()).isEqualByComparingTo("275.00");
+        assertThat(updated.getEssentialMonthlyExpenseBasis()).isEqualByComparingTo("1000.00");
+        assertThat(updated.getTargetAmount()).isEqualByComparingTo("6000.00");
+        assertThat(updated.getFundingGap()).isEqualByComparingTo("5725.00");
+        assertThat(updated.getCoverageMonths()).isEqualByComparingTo("0.28");
+        assertThat(updated.getFundingStatus()).isEqualTo(EmergencyFundFundingStatus.UNDERFUNDED);
         assertThat(emergencyFundService.ledger(ctx.workspace().getId(), 0, 20, ctx.user().getId()).getContent()).hasSize(2);
         assertCode(() -> emergencyFundService.release(ctx.workspace().getId(), ledger("276.00"), ctx.user().getId()),
                 "EMERGENCY_FUND_RESERVED_NEGATIVE");
         assertThat(ledgerRepository.sumReservedAmount(ctx.workspace().getId(), plan.getId())).isEqualByComparingTo("275.00");
         assertThat(transactionRepository.count()).isEqualTo(transactionCount);
         assertThat(walletRepository.count()).isEqualTo(walletCount);
+    }
+
+    @Test
+    void fundingStatusUsesReservedLedgerAndDoesNotCollapsePlanStatus() {
+        TestContext ctx = createContext("ef_coverage", WorkspaceRole.OWNER);
+        EmergencyFundPlanResponse empty = emergencyFundService.put(ctx.workspace().getId(), request(2, "500.00"), ctx.user().getId());
+
+        assertThat(empty.getFundingStatus()).isEqualTo(EmergencyFundFundingStatus.NOT_STARTED);
+        assertThat(empty.getFundingGap()).isEqualByComparingTo("1000.00");
+        emergencyFundService.allocate(ctx.workspace().getId(), ledger("1000.00"), ctx.user().getId());
+        EmergencyFundPlanResponse funded = emergencyFundService.updateStatus(ctx.workspace().getId(), EmergencyFundPlanStatus.PAUSED, ctx.user().getId());
+
+        assertThat(funded.getFundingStatus()).isEqualTo(EmergencyFundFundingStatus.FUNDED);
+        assertThat(funded.getFundingGap()).isEqualByComparingTo("0.00");
+        assertThat(funded.getCoverageMonths()).isEqualByComparingTo("2.00");
+        assertThat(funded.getPlanStatus()).isEqualTo(EmergencyFundPlanStatus.PAUSED);
     }
 
     private EmergencyFundPlanRequest request(Integer targetMonths, String manualMonthlyExpense) {
