@@ -17,6 +17,8 @@ import java.util.UUID;
 public interface SavingsGoalRepository extends JpaRepository<SavingsGoal, UUID> {
     Optional<SavingsGoal> findByIdAndWorkspaceId(UUID id, UUID workspaceId);
 
+    List<SavingsGoal> findAllByWorkspaceIdAndStatusIn(UUID workspaceId, List<SavingsGoalStatus> statuses);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""
             SELECT g FROM SavingsGoal g
@@ -38,6 +40,18 @@ public interface SavingsGoalRepository extends JpaRepository<SavingsGoal, UUID> 
             @Param("statuses") List<SavingsGoalStatus> statuses,
             @Param("search") String search,
             Pageable pageable);
+
+    @Query("""
+            SELECT g FROM SavingsGoal g
+            WHERE g.workspace.id = :workspaceId
+              AND g.status IN :statuses
+              AND (:search IS NULL OR LOWER(g.name) LIKE :search OR LOWER(g.description) LIKE :search)
+            ORDER BY g.status ASC, g.targetDate ASC NULLS LAST, g.name ASC, g.createdAt ASC, g.id ASC
+            """)
+    List<SavingsGoal> findGoalsForSummary(
+            @Param("workspaceId") UUID workspaceId,
+            @Param("statuses") List<SavingsGoalStatus> statuses,
+            @Param("search") String search);
 
     @Query("""
             SELECT COUNT(g) > 0 FROM SavingsGoal g

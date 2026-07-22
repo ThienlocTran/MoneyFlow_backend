@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.UUID;
 
 public interface SavingsGoalLedgerEntryRepository extends JpaRepository<SavingsGoalLedgerEntry, UUID> {
@@ -22,4 +23,15 @@ public interface SavingsGoalLedgerEntryRepository extends JpaRepository<SavingsG
     BigDecimal sumReservedAmount(
             @Param("workspaceId") UUID workspaceId,
             @Param("goalId") UUID goalId);
+
+    @Query("""
+            SELECT e.savingsGoal.id, COALESCE(SUM(e.amountDelta), 0)
+            FROM SavingsGoalLedgerEntry e
+            WHERE e.workspace.id = :workspaceId
+              AND e.savingsGoal.id IN :goalIds
+            GROUP BY e.savingsGoal.id
+            """)
+    List<Object[]> sumReservedAmountByGoalIds(
+            @Param("workspaceId") UUID workspaceId,
+            @Param("goalIds") List<UUID> goalIds);
 }

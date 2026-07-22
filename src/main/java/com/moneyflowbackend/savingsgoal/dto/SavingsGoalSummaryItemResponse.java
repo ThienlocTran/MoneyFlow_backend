@@ -1,33 +1,22 @@
 package com.moneyflowbackend.savingsgoal.dto;
 
 import com.moneyflowbackend.savingsgoal.model.SavingsGoalStatus;
-import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
-import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
-import java.time.Instant;
 import java.time.LocalDate;
 import java.util.UUID;
 
 @Data
-@NoArgsConstructor
-@AllArgsConstructor
 @Builder
-public class SavingsGoalResponse {
-    private UUID id;
-    private UUID workspaceId;
+public class SavingsGoalSummaryItemResponse {
+    private UUID savingsGoalId;
     private String name;
-    private String description;
+    private SavingsGoalStatus status;
     private BigDecimal targetAmount;
     private BigDecimal reservedAmount;
     private BigDecimal remainingAmount;
     private BigDecimal progressPercent;
     private LocalDate targetDate;
-    private SavingsGoalStatus status;
-    private UUID createdByUserId;
-    private Instant createdAt;
-    private Instant updatedAt;
-    private Long version;
 }

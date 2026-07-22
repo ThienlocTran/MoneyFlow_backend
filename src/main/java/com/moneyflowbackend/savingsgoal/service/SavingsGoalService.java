@@ -9,6 +9,9 @@ import com.moneyflowbackend.savingsgoal.dto.SavingsGoalLedgerPageResponse;
 import com.moneyflowbackend.savingsgoal.dto.SavingsGoalLedgerRequest;
 import com.moneyflowbackend.savingsgoal.dto.SavingsGoalRequest;
 import com.moneyflowbackend.savingsgoal.dto.SavingsGoalResponse;
+import com.moneyflowbackend.savingsgoal.dto.SavingsGoalSummaryItemResponse;
+import com.moneyflowbackend.savingsgoal.dto.SavingsGoalSummaryListResponse;
+import com.moneyflowbackend.savingsgoal.dto.SavingsGoalWorkspaceSummaryResponse;
 import com.moneyflowbackend.savingsgoal.model.SavingsGoal;
 import com.moneyflowbackend.savingsgoal.model.SavingsGoalLedgerEntry;
 import com.moneyflowbackend.savingsgoal.model.SavingsGoalLedgerType;
@@ -29,11 +32,14 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.stream.Collectors;
 import java.util.UUID;
 
 @Service
@@ -80,8 +86,11 @@ public class SavingsGoalService {
                         Sort.Order.asc("name"),
                         Sort.Order.asc("createdAt"),
                         Sort.Order.asc("id"))));
+        Map<UUID, BigDecimal> reservedAmounts = reservedAmounts(workspaceId, result.getContent());
         return SavingsGoalPageResponse.builder()
-                .content(result.getContent().stream().map(goal -> mapToResponse(goal, member)).toList())
+                .content(result.getContent().stream()
+                        .map(goal -> mapToResponse(goal, member, reservedAmounts.getOrDefault(goal.getId(), BigDecimal.ZERO)))
+                        .toList())
                 .page(result.getNumber())
                 .size(result.getSize())
                 .totalElements(result.getTotalElements())
@@ -94,7 +103,50 @@ public class SavingsGoalService {
     @Transactional(readOnly = true)
     public SavingsGoalResponse get(UUID workspaceId, UUID goalId, UUID userId) {
         WorkspaceMember member = requireActiveMember(workspaceId, userId);
-        return mapToResponse(findGoal(workspaceId, goalId), member);
+        SavingsGoal goal = findGoal(workspaceId, goalId);
+        return mapToResponse(goal, member, ledgerRepository.sumReservedAmount(workspaceId, goalId));
+    }
+
+    @Transactional(readOnly = true)
+    public SavingsGoalSummaryListResponse summaries(UUID workspaceId, SavingsGoalStatus status, String search, boolean includeArchived, UUID userId) {
+        requireActiveMember(workspaceId, userId);
+        List<SavingsGoal> goals = goalRepository.findGoalsForSummary(
+                workspaceId,
+                statuses(status, includeArchived),
+                searchPattern(search));
+        Map<UUID, BigDecimal> reservedAmounts = reservedAmounts(workspaceId, goals);
+        return SavingsGoalSummaryListResponse.builder()
+                .items(goals.stream()
+                        .map(goal -> mapSummaryItem(goal, reservedAmounts.getOrDefault(goal.getId(), BigDecimal.ZERO)))
+                        .toList())
+                .build();
+    }
+
+    @Transactional(readOnly = true)
+    public SavingsGoalSummaryItemResponse summary(UUID workspaceId, UUID goalId, UUID userId) {
+        requireActiveMember(workspaceId, userId);
+        SavingsGoal goal = findGoal(workspaceId, goalId);
+        return mapSummaryItem(goal, ledgerRepository.sumReservedAmount(workspaceId, goalId));
+    }
+
+    @Transactional(readOnly = true)
+    public SavingsGoalWorkspaceSummaryResponse workspaceSummary(UUID workspaceId, boolean includeArchived, UUID userId) {
+        requireActiveMember(workspaceId, userId);
+        List<SavingsGoal> goals = goalRepository.findAllByWorkspaceIdAndStatusIn(workspaceId, statuses(null, includeArchived));
+        Map<UUID, BigDecimal> reservedAmounts = reservedAmounts(workspaceId, goals);
+        BigDecimal target = goals.stream()
+                .map(SavingsGoal::getTargetAmount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal reserved = goals.stream()
+                .map(goal -> reservedAmounts.getOrDefault(goal.getId(), BigDecimal.ZERO))
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        return SavingsGoalWorkspaceSummaryResponse.builder()
+                .goalCount(goals.size())
+                .totalTargetAmount(target)
+                .totalReservedAmount(reserved)
+                .totalRemainingAmount(target.subtract(reserved))
+                .progressPercent(progressPercent(reserved, target))
+                .build();
     }
 
     @Transactional
@@ -114,7 +166,7 @@ public class SavingsGoalService {
                 .createdByUser(user)
                 .build();
         try {
-            return mapToResponse(goalRepository.saveAndFlush(goal), member);
+            return mapToResponse(goalRepository.saveAndFlush(goal), member, BigDecimal.ZERO);
         } catch (DataIntegrityViolationException ex) {
             throw translateIntegrity(ex);
         }
@@ -135,7 +187,7 @@ public class SavingsGoalService {
         goal.setTargetDate(validated.targetDate());
         goal.setUpdatedAt(Instant.now(clock));
         try {
-            return mapToResponse(goalRepository.saveAndFlush(goal), member);
+            return mapToResponse(goalRepository.saveAndFlush(goal), member, ledgerRepository.sumReservedAmount(workspaceId, goalId));
         } catch (DataIntegrityViolationException ex) {
             throw translateIntegrity(ex);
         }
@@ -152,7 +204,7 @@ public class SavingsGoalService {
             goal.setStatus(status);
             goal.setUpdatedAt(Instant.now(clock));
         }
-        return mapToResponse(goalRepository.saveAndFlush(goal), member);
+        return mapToResponse(goalRepository.saveAndFlush(goal), member, ledgerRepository.sumReservedAmount(workspaceId, goalId));
     }
 
     @Transactional
@@ -289,6 +341,15 @@ public class SavingsGoalService {
                 : List.of(SavingsGoalStatus.ACTIVE, SavingsGoalStatus.PAUSED, SavingsGoalStatus.COMPLETED);
     }
 
+    private Map<UUID, BigDecimal> reservedAmounts(UUID workspaceId, List<SavingsGoal> goals) {
+        if (goals.isEmpty()) {
+            return Map.of();
+        }
+        return ledgerRepository.sumReservedAmountByGoalIds(workspaceId, goals.stream().map(SavingsGoal::getId).toList())
+                .stream()
+                .collect(Collectors.toMap(row -> (UUID) row[0], row -> (BigDecimal) row[1]));
+    }
+
     private void ensureUniqueOpenName(UUID workspaceId, String name, UUID excludeId) {
         boolean exists = excludeId == null
                 ? goalRepository.existsOpenNameInWorkspace(workspaceId, name)
@@ -360,13 +421,16 @@ public class SavingsGoalService {
         return new BusinessException("SAVINGS_GOAL_ARCHIVED", "Archived savings goal cannot be updated", HttpStatus.CONFLICT);
     }
 
-    private SavingsGoalResponse mapToResponse(SavingsGoal goal, WorkspaceMember member) {
+    private SavingsGoalResponse mapToResponse(SavingsGoal goal, WorkspaceMember member, BigDecimal reservedAmount) {
         return SavingsGoalResponse.builder()
                 .id(goal.getId())
                 .workspaceId(member.getWorkspace().getId())
                 .name(goal.getName())
                 .description(goal.getDescription())
                 .targetAmount(goal.getTargetAmount())
+                .reservedAmount(reservedAmount)
+                .remainingAmount(goal.getTargetAmount().subtract(reservedAmount))
+                .progressPercent(progressPercent(reservedAmount, goal.getTargetAmount()))
                 .targetDate(goal.getTargetDate())
                 .status(goal.getStatus())
                 .createdByUserId(goal.getCreatedByUser().getId())
@@ -374,6 +438,28 @@ public class SavingsGoalService {
                 .updatedAt(goal.getUpdatedAt())
                 .version(goal.getVersion())
                 .build();
+    }
+
+    private SavingsGoalSummaryItemResponse mapSummaryItem(SavingsGoal goal, BigDecimal reservedAmount) {
+        return SavingsGoalSummaryItemResponse.builder()
+                .savingsGoalId(goal.getId())
+                .name(goal.getName())
+                .status(goal.getStatus())
+                .targetAmount(goal.getTargetAmount())
+                .reservedAmount(reservedAmount)
+                .remainingAmount(goal.getTargetAmount().subtract(reservedAmount))
+                .progressPercent(progressPercent(reservedAmount, goal.getTargetAmount()))
+                .targetDate(goal.getTargetDate())
+                .build();
+    }
+
+    private BigDecimal progressPercent(BigDecimal reservedAmount, BigDecimal targetAmount) {
+        if (targetAmount == null || targetAmount.compareTo(BigDecimal.ZERO) <= 0) {
+            return BigDecimal.ZERO;
+        }
+        return reservedAmount
+                .multiply(new BigDecimal("100"))
+                .divide(targetAmount, 2, RoundingMode.HALF_UP);
     }
 
     private SavingsGoalLedgerEntryResponse mapLedgerEntry(SavingsGoalLedgerEntry entry) {

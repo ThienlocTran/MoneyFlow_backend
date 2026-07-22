@@ -8,6 +8,9 @@ import com.moneyflowbackend.savingsgoal.dto.SavingsGoalPageResponse;
 import com.moneyflowbackend.savingsgoal.dto.SavingsGoalRequest;
 import com.moneyflowbackend.savingsgoal.dto.SavingsGoalResponse;
 import com.moneyflowbackend.savingsgoal.dto.SavingsGoalStatusRequest;
+import com.moneyflowbackend.savingsgoal.dto.SavingsGoalSummaryItemResponse;
+import com.moneyflowbackend.savingsgoal.dto.SavingsGoalSummaryListResponse;
+import com.moneyflowbackend.savingsgoal.dto.SavingsGoalWorkspaceSummaryResponse;
 import com.moneyflowbackend.savingsgoal.model.SavingsGoalStatus;
 import com.moneyflowbackend.savingsgoal.service.SavingsGoalService;
 import jakarta.validation.Valid;
@@ -48,12 +51,39 @@ public class SavingsGoalController {
         return ResponseEntity.ok(ApiResponse.ok("Savings goals loaded", response));
     }
 
+    @GetMapping("/summary")
+    public ResponseEntity<ApiResponse<SavingsGoalWorkspaceSummaryResponse>> workspaceSummary(
+            @PathVariable UUID workspaceId,
+            @RequestParam(defaultValue = "false") boolean includeArchived) {
+        SavingsGoalWorkspaceSummaryResponse response = goalService.workspaceSummary(workspaceId, includeArchived, currentUserId());
+        return ResponseEntity.ok(ApiResponse.ok("Savings goals summary loaded", response));
+    }
+
+    @GetMapping("/summaries")
+    public ResponseEntity<ApiResponse<SavingsGoalSummaryListResponse>> summaries(
+            @PathVariable UUID workspaceId,
+            @RequestParam(required = false) SavingsGoalStatus status,
+            @RequestParam(required = false) String search,
+            @RequestParam(defaultValue = "false") boolean includeArchived) {
+        SavingsGoalSummaryListResponse response = goalService.summaries(
+                workspaceId, status, search, includeArchived, currentUserId());
+        return ResponseEntity.ok(ApiResponse.ok("Savings goal summaries loaded", response));
+    }
+
     @GetMapping("/{goalId}")
     public ResponseEntity<ApiResponse<SavingsGoalResponse>> get(
             @PathVariable UUID workspaceId,
             @PathVariable UUID goalId) {
         SavingsGoalResponse response = goalService.get(workspaceId, goalId, currentUserId());
         return ResponseEntity.ok(ApiResponse.ok("Savings goal loaded", response));
+    }
+
+    @GetMapping("/{goalId}/summary")
+    public ResponseEntity<ApiResponse<SavingsGoalSummaryItemResponse>> summary(
+            @PathVariable UUID workspaceId,
+            @PathVariable UUID goalId) {
+        SavingsGoalSummaryItemResponse response = goalService.summary(workspaceId, goalId, currentUserId());
+        return ResponseEntity.ok(ApiResponse.ok("Savings goal summary loaded", response));
     }
 
     @PostMapping
