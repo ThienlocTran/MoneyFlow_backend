@@ -3,10 +3,18 @@ spring:
     url: ${MONEYFLOW_DB_URL:${SPRING_DATASOURCE_URL:${DB_URL}}}
     username: ${MONEYFLOW_DB_USERNAME:${SPRING_DATASOURCE_USERNAME:${DB_USERNAME}}}
     password: ${MONEYFLOW_DB_PASSWORD:${SPRING_DATASOURCE_PASSWORD:${DB_PASSWORD}}}
+    hikari:
+      connection-init-sql: SET search_path TO public
   docker:
     compose:
       enabled: false
+  jpa:
+    properties:
+      hibernate:
+        default_schema: public
   flyway:
+    schemas: public
+    default-schema: public
     baseline-on-migrate: true
     baseline-version: 1
     baseline-description: MoneyFlow schema manually initialized
