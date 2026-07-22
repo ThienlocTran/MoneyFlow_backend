@@ -80,7 +80,9 @@ class MigrationSqlSafetyTests {
                 "V10__spending_scope_foundation.sql",
                 "V11__obligation_spending_scope.sql",
                 "V12__sinking_funds.sql",
-                "V14__student_loans.sql");
+                "V14__student_loans.sql",
+                "V16__savings_goals.sql",
+                "V17__savings_goal_ledger.sql");
 
         for (String migrationName : migrationNames) {
             String sql = Files.readString(Path.of("src/main/resources/db/migration", migrationName));
