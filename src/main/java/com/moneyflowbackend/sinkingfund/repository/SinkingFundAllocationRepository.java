@@ -12,7 +12,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 public interface SinkingFundAllocationRepository extends JpaRepository<SinkingFundAllocation, UUID> {
-    Page<SinkingFundAllocation> findAllByWorkspaceIdAndSinkingFundId(UUID workspaceId, UUID sinkingFundId, Pageable pageable);
+    Page<SinkingFundAllocation> findAllByWorkspaceIdAndSinkingFundIdOrderByOccurredAtDescCreatedAtDescIdDesc(UUID workspaceId, UUID sinkingFundId, Pageable pageable);
 
     @Query("""
             SELECT COALESCE(SUM(a.amountDelta), 0)

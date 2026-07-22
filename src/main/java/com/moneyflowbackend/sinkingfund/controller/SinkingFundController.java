@@ -2,6 +2,9 @@ package com.moneyflowbackend.sinkingfund.controller;
 
 import com.moneyflowbackend.common.exception.BusinessException;
 import com.moneyflowbackend.dto.ApiResponse;
+import com.moneyflowbackend.sinkingfund.dto.SinkingFundAllocationPageResponse;
+import com.moneyflowbackend.sinkingfund.dto.SinkingFundAllocationRequest;
+import com.moneyflowbackend.sinkingfund.dto.SinkingFundAllocationResponse;
 import com.moneyflowbackend.sinkingfund.dto.SinkingFundPageResponse;
 import com.moneyflowbackend.sinkingfund.dto.SinkingFundRequest;
 import com.moneyflowbackend.sinkingfund.dto.SinkingFundResponse;
@@ -65,6 +68,25 @@ public class SinkingFundController {
             @Valid @RequestBody SinkingFundRequest request) {
         SinkingFundResponse response = sinkingFundService.update(workspaceId, fundId, request, currentUserId());
         return ResponseEntity.ok(ApiResponse.ok("Sinking fund updated", response));
+    }
+
+    @GetMapping("/{fundId}/allocations")
+    public ResponseEntity<ApiResponse<SinkingFundAllocationPageResponse>> history(
+            @PathVariable UUID workspaceId,
+            @PathVariable UUID fundId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        SinkingFundAllocationPageResponse response = sinkingFundService.history(workspaceId, fundId, page, size, currentUserId());
+        return ResponseEntity.ok(ApiResponse.ok("Sinking fund allocation history loaded", response));
+    }
+
+    @PostMapping("/{fundId}/allocations")
+    public ResponseEntity<ApiResponse<SinkingFundAllocationResponse>> allocate(
+            @PathVariable UUID workspaceId,
+            @PathVariable UUID fundId,
+            @Valid @RequestBody SinkingFundAllocationRequest request) {
+        SinkingFundAllocationResponse response = sinkingFundService.allocate(workspaceId, fundId, request, currentUserId());
+        return ResponseEntity.ok(ApiResponse.ok("Sinking fund allocation recorded", response));
     }
 
     private UUID currentUserId() {

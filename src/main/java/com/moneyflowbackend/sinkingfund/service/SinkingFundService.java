@@ -3,11 +3,17 @@ package com.moneyflowbackend.sinkingfund.service;
 import com.moneyflowbackend.auth.model.User;
 import com.moneyflowbackend.auth.repository.UserRepository;
 import com.moneyflowbackend.common.exception.BusinessException;
+import com.moneyflowbackend.sinkingfund.dto.SinkingFundAllocationPageResponse;
+import com.moneyflowbackend.sinkingfund.dto.SinkingFundAllocationRequest;
+import com.moneyflowbackend.sinkingfund.dto.SinkingFundAllocationResponse;
 import com.moneyflowbackend.sinkingfund.dto.SinkingFundPageResponse;
 import com.moneyflowbackend.sinkingfund.dto.SinkingFundRequest;
 import com.moneyflowbackend.sinkingfund.dto.SinkingFundResponse;
 import com.moneyflowbackend.sinkingfund.model.SinkingFund;
+import com.moneyflowbackend.sinkingfund.model.SinkingFundAllocation;
+import com.moneyflowbackend.sinkingfund.model.SinkingFundAllocationType;
 import com.moneyflowbackend.sinkingfund.model.SinkingFundStatus;
+import com.moneyflowbackend.sinkingfund.repository.SinkingFundAllocationRepository;
 import com.moneyflowbackend.sinkingfund.repository.SinkingFundRepository;
 import com.moneyflowbackend.workspace.model.Workspace;
 import com.moneyflowbackend.workspace.model.WorkspaceMember;
@@ -35,9 +41,11 @@ import java.util.UUID;
 public class SinkingFundService {
     private static final int MAX_NAME_LENGTH = 160;
     private static final int MAX_DESCRIPTION_LENGTH = 500;
+    private static final int MAX_NOTE_LENGTH = 500;
     private static final String OPEN_NAME_INDEX = "uq_sinking_funds_workspace_open_name";
 
     private final SinkingFundRepository fundRepository;
+    private final SinkingFundAllocationRepository allocationRepository;
     private final WorkspaceRepository workspaceRepository;
     private final WorkspaceMemberRepository workspaceMemberRepository;
     private final UserRepository userRepository;
@@ -45,11 +53,13 @@ public class SinkingFundService {
 
     public SinkingFundService(
             SinkingFundRepository fundRepository,
+            SinkingFundAllocationRepository allocationRepository,
             WorkspaceRepository workspaceRepository,
             WorkspaceMemberRepository workspaceMemberRepository,
             UserRepository userRepository,
             Clock clock) {
         this.fundRepository = fundRepository;
+        this.allocationRepository = allocationRepository;
         this.workspaceRepository = workspaceRepository;
         this.workspaceMemberRepository = workspaceMemberRepository;
         this.userRepository = userRepository;
@@ -121,6 +131,50 @@ public class SinkingFundService {
         }
     }
 
+    @Transactional
+    public SinkingFundAllocationResponse allocate(UUID workspaceId, UUID fundId, SinkingFundAllocationRequest req, UUID userId) {
+        WorkspaceMember member = requireWritableMember(workspaceId, userId);
+        SinkingFund fund = findInWorkspaceForUpdate(workspaceId, fundId);
+        if (fund.getStatus() == SinkingFundStatus.COMPLETED || fund.getStatus() == SinkingFundStatus.ARCHIVED) {
+            throw new BusinessException("SINKING_FUND_READ_ONLY", "Completed or archived sinking fund cannot accept allocations", HttpStatus.CONFLICT);
+        }
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new BusinessException("USER_NOT_FOUND", "User not found", HttpStatus.NOT_FOUND));
+        ValidatedAllocation validated = validateAllocation(req);
+        BigDecimal current = reserved(workspaceId, fundId);
+        BigDecimal next = current.add(validated.amountDelta());
+        if (next.signum() < 0) {
+            throw new BusinessException("SINKING_FUND_RESERVED_AMOUNT_NEGATIVE", "Reserved amount cannot be below zero", HttpStatus.CONFLICT);
+        }
+        SinkingFundAllocation allocation = SinkingFundAllocation.builder()
+                .workspace(member.getWorkspace())
+                .sinkingFund(fund)
+                .allocationType(validated.type())
+                .amountDelta(validated.amountDelta())
+                .note(validated.note())
+                .actorUser(user)
+                .occurredAt(Instant.now(clock))
+                .build();
+        return mapAllocation(allocationRepository.saveAndFlush(allocation), next);
+    }
+
+    @Transactional(readOnly = true)
+    public SinkingFundAllocationPageResponse history(UUID workspaceId, UUID fundId, int page, int size, UUID userId) {
+        requireActiveMember(workspaceId, userId);
+        findInWorkspace(workspaceId, fundId);
+        Page<SinkingFundAllocation> result = allocationRepository.findAllByWorkspaceIdAndSinkingFundIdOrderByOccurredAtDescCreatedAtDescIdDesc(
+                workspaceId, fundId, PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), 100)));
+        return SinkingFundAllocationPageResponse.builder()
+                .content(result.getContent().stream().map(allocation -> mapAllocation(allocation, null)).toList())
+                .page(result.getNumber())
+                .size(result.getSize())
+                .totalElements(result.getTotalElements())
+                .totalPages(result.getTotalPages())
+                .first(result.isFirst())
+                .last(result.isLast())
+                .build();
+    }
+
     private ValidatedFund validateFund(SinkingFundRequest req, boolean create) {
         if (req == null) {
             throw new BusinessException("VALIDATION_ERROR", "Request body is required");
@@ -146,6 +200,37 @@ public class SinkingFundService {
         return new ValidatedFund(name, description, targetAmount, req.getTargetDate(), status);
     }
 
+    private ValidatedAllocation validateAllocation(SinkingFundAllocationRequest req) {
+        if (req == null) {
+            throw new BusinessException("VALIDATION_ERROR", "Request body is required");
+        }
+        SinkingFundAllocationType type = parseAllocationType(req.getType());
+        BigDecimal amount = req.getAmount();
+        if (amount == null || amount.signum() == 0) {
+            throw new BusinessException("VALIDATION_ERROR", "Allocation amount is invalid", Map.of("amount", "Allocation amount is required"));
+        }
+        String note = normalize(req.getNote());
+        if (note != null && note.length() > MAX_NOTE_LENGTH) {
+            throw new BusinessException("VALIDATION_ERROR", "Allocation note is too long", Map.of("note", "Allocation note is too long"));
+        }
+        if (type == SinkingFundAllocationType.ADJUST && note == null) {
+            throw new BusinessException("VALIDATION_ERROR", "Adjustment note is required", Map.of("note", "Adjustment note is required"));
+        }
+        BigDecimal delta = switch (type) {
+            case ALLOCATE -> requirePositive(amount, "ALLOCATE");
+            case RELEASE -> requirePositive(amount, "RELEASE").negate();
+            case ADJUST -> amount;
+        };
+        return new ValidatedAllocation(type, delta, note);
+    }
+
+    private BigDecimal requirePositive(BigDecimal amount, String type) {
+        if (amount.signum() <= 0) {
+            throw new BusinessException("VALIDATION_ERROR", type + " amount must be positive", Map.of("amount", type + " amount must be positive"));
+        }
+        return amount;
+    }
+
     private String normalize(String value) {
         if (value == null) {
             return null;
@@ -159,6 +244,17 @@ public class SinkingFundService {
             return SinkingFundStatus.valueOf(status.trim().toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException ex) {
             throw new BusinessException("VALIDATION_ERROR", "Sinking fund status is invalid");
+        }
+    }
+
+    private SinkingFundAllocationType parseAllocationType(String type) {
+        if (type == null || type.isBlank()) {
+            throw new BusinessException("VALIDATION_ERROR", "Allocation type is required");
+        }
+        try {
+            return SinkingFundAllocationType.valueOf(type.trim().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException ex) {
+            throw new BusinessException("VALIDATION_ERROR", "Allocation type is invalid");
         }
     }
 
@@ -236,7 +332,30 @@ public class SinkingFundService {
                 .build();
     }
 
+    private SinkingFundAllocationResponse mapAllocation(SinkingFundAllocation allocation, BigDecimal reservedAmount) {
+        return SinkingFundAllocationResponse.builder()
+                .id(allocation.getId())
+                .workspaceId(allocation.getWorkspace().getId())
+                .sinkingFundId(allocation.getSinkingFund().getId())
+                .type(allocation.getAllocationType())
+                .amountDelta(allocation.getAmountDelta())
+                .reservedAmount(reservedAmount)
+                .note(allocation.getNote())
+                .actorUserId(allocation.getActorUser().getId())
+                .occurredAt(allocation.getOccurredAt())
+                .createdAt(allocation.getCreatedAt())
+                .build();
+    }
+
+    private BigDecimal reserved(UUID workspaceId, UUID fundId) {
+        BigDecimal amount = allocationRepository.sumReservedAmount(workspaceId, fundId);
+        return amount == null ? BigDecimal.ZERO : amount;
+    }
+
     private record ValidatedFund(String name, String description, BigDecimal targetAmount,
                                  LocalDate targetDate, SinkingFundStatus status) {
+    }
+
+    private record ValidatedAllocation(SinkingFundAllocationType type, BigDecimal amountDelta, String note) {
     }
 }
