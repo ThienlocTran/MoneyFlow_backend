@@ -22,6 +22,7 @@ public class EmergencyFundPlanResponse {
     private EmergencyFundBasisMode basisMode;
     private BigDecimal manualMonthlyExpense;
     private EmergencyFundPlanStatus planStatus;
+    private BigDecimal reservedAmount;
     private UUID createdByUserId;
     private Instant createdAt;
     private Instant updatedAt;

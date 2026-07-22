@@ -7,8 +7,11 @@ import com.moneyflowbackend.emergencyfund.dto.EmergencyFundPlanRequest;
 import com.moneyflowbackend.emergencyfund.dto.EmergencyFundPlanResponse;
 import com.moneyflowbackend.emergencyfund.model.EmergencyFundBasisMode;
 import com.moneyflowbackend.emergencyfund.model.EmergencyFundPlanStatus;
+import com.moneyflowbackend.emergencyfund.repository.EmergencyFundLedgerEntryRepository;
 import com.moneyflowbackend.emergencyfund.repository.EmergencyFundPlanRepository;
 import com.moneyflowbackend.emergencyfund.service.EmergencyFundService;
+import com.moneyflowbackend.transaction.repository.TransactionRepository;
+import com.moneyflowbackend.wallet.repository.WalletRepository;
 import com.moneyflowbackend.workspace.model.Workspace;
 import com.moneyflowbackend.workspace.model.WorkspaceMember;
 import com.moneyflowbackend.workspace.model.WorkspaceRole;
@@ -32,7 +35,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class EmergencyFundPlanApiIntegrationTests {
     @Autowired EmergencyFundService emergencyFundService;
     @Autowired EmergencyFundPlanRepository planRepository;
+    @Autowired EmergencyFundLedgerEntryRepository ledgerRepository;
     @Autowired UserRepository userRepository;
+    @Autowired TransactionRepository transactionRepository;
+    @Autowired WalletRepository walletRepository;
     @Autowired WorkspaceRepository workspaceRepository;
     @Autowired WorkspaceMemberRepository workspaceMemberRepository;
 
@@ -87,11 +93,38 @@ class EmergencyFundPlanApiIntegrationTests {
                 "INVALID_EMERGENCY_FUND_PLAN_STATUS");
     }
 
+    @Test
+    void ledgerRowsDriveReservedAmountAndDoNotAffectWalletsOrTransactions() {
+        TestContext ctx = createContext("ef_ledger", WorkspaceRole.OWNER);
+        long transactionCount = transactionRepository.count();
+        long walletCount = walletRepository.count();
+
+        EmergencyFundPlanResponse plan = emergencyFundService.put(ctx.workspace().getId(), request(6, "1000.00"), ctx.user().getId());
+        emergencyFundService.allocate(ctx.workspace().getId(), ledger("400.00"), ctx.user().getId());
+        emergencyFundService.release(ctx.workspace().getId(), ledger("125.00"), ctx.user().getId());
+
+        EmergencyFundPlanResponse updated = emergencyFundService.get(ctx.workspace().getId(), ctx.user().getId());
+        assertThat(updated.getReservedAmount()).isEqualByComparingTo("275.00");
+        assertThat(emergencyFundService.ledger(ctx.workspace().getId(), 0, 20, ctx.user().getId()).getContent()).hasSize(2);
+        assertCode(() -> emergencyFundService.release(ctx.workspace().getId(), ledger("276.00"), ctx.user().getId()),
+                "EMERGENCY_FUND_RESERVED_NEGATIVE");
+        assertThat(ledgerRepository.sumReservedAmount(ctx.workspace().getId(), plan.getId())).isEqualByComparingTo("275.00");
+        assertThat(transactionRepository.count()).isEqualTo(transactionCount);
+        assertThat(walletRepository.count()).isEqualTo(walletCount);
+    }
+
     private EmergencyFundPlanRequest request(Integer targetMonths, String manualMonthlyExpense) {
         EmergencyFundPlanRequest request = new EmergencyFundPlanRequest();
         request.setTargetMonths(targetMonths);
         request.setBasisMode(EmergencyFundBasisMode.MANUAL);
         request.setManualMonthlyExpense(manualMonthlyExpense == null ? null : new BigDecimal(manualMonthlyExpense));
+        return request;
+    }
+
+    private com.moneyflowbackend.emergencyfund.dto.EmergencyFundLedgerRequest ledger(String amount) {
+        com.moneyflowbackend.emergencyfund.dto.EmergencyFundLedgerRequest request =
+                new com.moneyflowbackend.emergencyfund.dto.EmergencyFundLedgerRequest();
+        request.setAmount(new BigDecimal(amount));
         return request;
     }
 

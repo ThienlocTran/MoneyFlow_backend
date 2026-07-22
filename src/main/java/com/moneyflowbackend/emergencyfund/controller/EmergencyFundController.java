@@ -1,6 +1,9 @@
 package com.moneyflowbackend.emergencyfund.controller;
 
 import com.moneyflowbackend.dto.ApiResponse;
+import com.moneyflowbackend.emergencyfund.dto.EmergencyFundLedgerEntryResponse;
+import com.moneyflowbackend.emergencyfund.dto.EmergencyFundLedgerPageResponse;
+import com.moneyflowbackend.emergencyfund.dto.EmergencyFundLedgerRequest;
 import com.moneyflowbackend.emergencyfund.dto.EmergencyFundPlanRequest;
 import com.moneyflowbackend.emergencyfund.dto.EmergencyFundPlanResponse;
 import com.moneyflowbackend.emergencyfund.dto.EmergencyFundPlanStatusRequest;
@@ -15,6 +18,8 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.UUID;
@@ -49,6 +54,31 @@ public class EmergencyFundController {
         EmergencyFundPlanResponse response = emergencyFundService.updateStatus(
                 workspaceId, request == null ? null : request.getPlanStatus(), currentUserId());
         return ResponseEntity.ok(ApiResponse.ok("Emergency fund status updated", response));
+    }
+
+    @GetMapping("/ledger")
+    public ResponseEntity<ApiResponse<EmergencyFundLedgerPageResponse>> ledger(
+            @PathVariable UUID workspaceId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        EmergencyFundLedgerPageResponse response = emergencyFundService.ledger(workspaceId, page, size, currentUserId());
+        return ResponseEntity.ok(ApiResponse.ok("Emergency fund ledger loaded", response));
+    }
+
+    @PostMapping("/allocations")
+    public ResponseEntity<ApiResponse<EmergencyFundLedgerEntryResponse>> allocate(
+            @PathVariable UUID workspaceId,
+            @Valid @RequestBody EmergencyFundLedgerRequest request) {
+        EmergencyFundLedgerEntryResponse response = emergencyFundService.allocate(workspaceId, request, currentUserId());
+        return ResponseEntity.ok(ApiResponse.ok("Emergency fund allocation recorded", response));
+    }
+
+    @PostMapping("/releases")
+    public ResponseEntity<ApiResponse<EmergencyFundLedgerEntryResponse>> release(
+            @PathVariable UUID workspaceId,
+            @Valid @RequestBody EmergencyFundLedgerRequest request) {
+        EmergencyFundLedgerEntryResponse response = emergencyFundService.release(workspaceId, request, currentUserId());
+        return ResponseEntity.ok(ApiResponse.ok("Emergency fund release recorded", response));
     }
 
     private UUID currentUserId() {
