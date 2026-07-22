@@ -4,7 +4,9 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -34,5 +36,25 @@ class SinkingFundMigrationTests {
         assertThat(normalized).doesNotContain("update ");
         assertThat(normalized).doesNotContain("drop ");
         assertThat(normalized).doesNotContain("truncate ");
+    }
+
+    @Test
+    void sinkingFundMigrationsStayInV12OrV13AndUsePostgresqlObjectsOnlyInLocalFiles() throws Exception {
+        List<String> migrations;
+        try (Stream<Path> paths = Files.list(Path.of("src/main/resources/db/migration"))) {
+            migrations = paths
+                    .map(path -> path.getFileName().toString())
+                    .filter(name -> name.contains("sinking_fund"))
+                    .sorted()
+                    .toList();
+        }
+
+        assertThat(migrations).containsExactly("V12__sinking_funds.sql");
+        String sql = Files.readString(MIGRATION).toLowerCase();
+        assertThat(sql).contains("gen_random_uuid()");
+        assertThat(sql).contains("timestamptz");
+        assertThat(sql).contains("where status <> 'archived'");
+        assertThat(sql).doesNotContain("jdbc:");
+        assertThat(sql).doesNotContain("spring.profiles.active");
     }
 }

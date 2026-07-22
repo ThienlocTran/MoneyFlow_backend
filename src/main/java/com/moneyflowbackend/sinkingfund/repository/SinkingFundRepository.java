@@ -16,6 +16,8 @@ import java.util.UUID;
 public interface SinkingFundRepository extends JpaRepository<SinkingFund, UUID> {
     Optional<SinkingFund> findByIdAndWorkspaceId(UUID id, UUID workspaceId);
 
+    Page<SinkingFund> findAllByWorkspaceId(UUID workspaceId, Pageable pageable);
+
     Page<SinkingFund> findAllByWorkspaceIdAndStatus(UUID workspaceId, SinkingFundStatus status, Pageable pageable);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
