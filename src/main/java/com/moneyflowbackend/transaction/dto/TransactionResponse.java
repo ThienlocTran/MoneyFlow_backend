@@ -31,6 +31,8 @@ public class TransactionResponse {
     private String walletName;
     private UUID categoryId;
     private String categoryName;
+    private UUID incomeSourceId;
+    private UUID relatedIncomeSourceId;
     private UUID sourceWalletId;
     private String sourceWalletName;
     private UUID destinationWalletId;
