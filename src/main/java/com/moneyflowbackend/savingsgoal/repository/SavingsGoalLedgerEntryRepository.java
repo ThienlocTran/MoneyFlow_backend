@@ -34,4 +34,12 @@ public interface SavingsGoalLedgerEntryRepository extends JpaRepository<SavingsG
     List<Object[]> sumReservedAmountByGoalIds(
             @Param("workspaceId") UUID workspaceId,
             @Param("goalIds") List<UUID> goalIds);
+
+    @Query("""
+            SELECT COALESCE(SUM(e.amountDelta), 0)
+            FROM SavingsGoalLedgerEntry e
+            WHERE e.workspace.id = :workspaceId
+              AND e.savingsGoal.status = com.moneyflowbackend.savingsgoal.model.SavingsGoalStatus.ACTIVE
+            """)
+    BigDecimal sumActiveWorkspaceReservedAmount(@Param("workspaceId") UUID workspaceId);
 }

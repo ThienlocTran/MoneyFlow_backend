@@ -11,7 +11,9 @@ import java.util.UUID;
 
 public interface WalletRepository extends JpaRepository<Wallet, UUID> {
     List<Wallet> findAllByWorkspaceIdAndIsActiveTrue(UUID workspaceId);
+    List<Wallet> findAllByWorkspaceIdAndIsActiveTrueAndIncludeInTotalTrueOrderByCreatedAtAsc(UUID workspaceId);
     List<Wallet> findAllByWorkspaceIdOrderByCreatedAtAsc(UUID workspaceId);
+    List<Wallet> findAllByWorkspaceIdAndIdInAndIsActiveTrue(UUID workspaceId, List<UUID> walletIds);
     Optional<Wallet> findByIdAndWorkspaceId(UUID walletId, UUID workspaceId);
     Optional<Wallet> findByWorkspaceIdAndIsDefaultTrueAndIsActiveTrue(UUID workspaceId);
     long countByWorkspaceId(UUID workspaceId);
