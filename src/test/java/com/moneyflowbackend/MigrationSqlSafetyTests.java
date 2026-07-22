@@ -79,6 +79,7 @@ class MigrationSqlSafetyTests {
                 "V9__transaction_income_source_links.sql",
                 "V10__spending_scope_foundation.sql",
                 "V11__obligation_spending_scope.sql",
+                "V12__sinking_funds.sql",
                 "V14__student_loans.sql");
 
         for (String migrationName : migrationNames) {
