@@ -37,6 +37,7 @@ public class StudentLoanService {
     private final WorkspaceRepository workspaceRepository;
     private final WorkspaceMemberRepository workspaceMemberRepository;
     private final UserRepository userRepository;
+    private final StudentLoanProjectionCalculator projectionCalculator = new StudentLoanProjectionCalculator();
 
     public StudentLoanService(
             StudentLoanRepository studentLoanRepository,
@@ -69,6 +70,23 @@ public class StudentLoanService {
     public StudentLoanResponse get(UUID workspaceId, UUID loanId, UUID userId) {
         requireActiveMember(workspaceId, userId);
         return mapToResponse(findInWorkspace(workspaceId, loanId));
+    }
+
+    @Transactional(readOnly = true)
+    public com.moneyflowbackend.studentloan.dto.StudentLoanProjectionResponse projection(
+            UUID workspaceId, UUID loanId, boolean includeSchedule, int page, int size, UUID userId) {
+        requireActiveMember(workspaceId, userId);
+        StudentLoan loan = findInWorkspace(workspaceId, loanId);
+        return projectionCalculator.project(
+                loan.getId(),
+                loan.getCurrentPrincipal(),
+                loan.getAnnualInterestRate(),
+                loan.getMinimumMonthlyPayment(),
+                loan.getPlannedExtraMonthlyPayment(),
+                loan.getStartDate(),
+                includeSchedule,
+                page,
+                size);
     }
 
     @Transactional

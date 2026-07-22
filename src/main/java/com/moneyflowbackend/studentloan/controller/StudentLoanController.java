@@ -2,6 +2,7 @@ package com.moneyflowbackend.studentloan.controller;
 
 import com.moneyflowbackend.dto.ApiResponse;
 import com.moneyflowbackend.studentloan.dto.StudentLoanPageResponse;
+import com.moneyflowbackend.studentloan.dto.StudentLoanProjectionResponse;
 import com.moneyflowbackend.studentloan.dto.StudentLoanRequest;
 import com.moneyflowbackend.studentloan.dto.StudentLoanResponse;
 import com.moneyflowbackend.studentloan.dto.StudentLoanStatusRequest;
@@ -46,6 +47,17 @@ public class StudentLoanController {
             @PathVariable UUID loanId) {
         return ResponseEntity.ok(ApiResponse.ok("Student loan loaded",
                 studentLoanService.get(workspaceId, loanId, currentUserId())));
+    }
+
+    @GetMapping("/{loanId}/projection")
+    public ResponseEntity<ApiResponse<StudentLoanProjectionResponse>> projection(
+            @PathVariable UUID workspaceId,
+            @PathVariable UUID loanId,
+            @RequestParam(defaultValue = "false") boolean includeSchedule,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "24") int size) {
+        return ResponseEntity.ok(ApiResponse.ok("Student loan projection loaded",
+                studentLoanService.projection(workspaceId, loanId, includeSchedule, page, size, currentUserId())));
     }
 
     @PostMapping
