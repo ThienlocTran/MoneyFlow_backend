@@ -4,6 +4,8 @@ import com.moneyflowbackend.auth.model.User;
 import com.moneyflowbackend.auth.repository.UserRepository;
 import com.moneyflowbackend.common.exception.BusinessException;
 import com.moneyflowbackend.studentloan.dto.StudentLoanPageResponse;
+import com.moneyflowbackend.studentloan.dto.StudentLoanStrategyComparisonResponse;
+import com.moneyflowbackend.studentloan.dto.StudentLoanStrategyRequest;
 import com.moneyflowbackend.studentloan.dto.StudentLoanRequest;
 import com.moneyflowbackend.studentloan.dto.StudentLoanResponse;
 import com.moneyflowbackend.studentloan.model.StudentLoan;
@@ -38,6 +40,7 @@ public class StudentLoanService {
     private final WorkspaceMemberRepository workspaceMemberRepository;
     private final UserRepository userRepository;
     private final StudentLoanProjectionCalculator projectionCalculator = new StudentLoanProjectionCalculator();
+    private final StudentLoanStrategyCalculator strategyCalculator = new StudentLoanStrategyCalculator();
 
     public StudentLoanService(
             StudentLoanRepository studentLoanRepository,
@@ -87,6 +90,23 @@ public class StudentLoanService {
                 includeSchedule,
                 page,
                 size);
+    }
+
+    @Transactional(readOnly = true)
+    public StudentLoanStrategyComparisonResponse compareStrategies(UUID workspaceId, StudentLoanStrategyRequest req, UUID userId) {
+        WorkspaceMember member = requireActiveMember(workspaceId, userId);
+        BigDecimal extra = req == null || req.getExtraMonthlyBudget() == null ? BigDecimal.ZERO : req.getExtraMonthlyBudget();
+        if (extra.compareTo(BigDecimal.ZERO) < 0) {
+            throw validation("extraMonthlyBudget", "extraMonthlyBudget must be zero or greater");
+        }
+        return StudentLoanStrategyComparisonResponse.builder()
+                .workspaceId(workspaceId)
+                .extraMonthlyBudget(extra.setScale(2, java.math.RoundingMode.HALF_UP))
+                .results(strategyCalculator.compare(
+                        studentLoanRepository.findAllByWorkspaceIdAndStatusOrderByIdAsc(workspaceId, StudentLoanStatus.ACTIVE),
+                        extra,
+                        java.time.LocalDate.now()))
+                .build();
     }
 
     @Transactional

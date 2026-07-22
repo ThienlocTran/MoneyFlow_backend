@@ -11,6 +11,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.util.Optional;
+import java.util.List;
 import java.util.UUID;
 
 public interface StudentLoanRepository extends JpaRepository<StudentLoan, UUID> {
@@ -32,6 +33,8 @@ public interface StudentLoanRepository extends JpaRepository<StudentLoan, UUID> 
             @Param("workspaceId") UUID workspaceId,
             @Param("status") StudentLoanStatus status,
             Pageable pageable);
+
+    List<StudentLoan> findAllByWorkspaceIdAndStatusOrderByIdAsc(UUID workspaceId, StudentLoanStatus status);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""

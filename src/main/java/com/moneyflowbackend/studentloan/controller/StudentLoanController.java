@@ -5,6 +5,8 @@ import com.moneyflowbackend.studentloan.dto.StudentLoanPageResponse;
 import com.moneyflowbackend.studentloan.dto.StudentLoanProjectionResponse;
 import com.moneyflowbackend.studentloan.dto.StudentLoanRequest;
 import com.moneyflowbackend.studentloan.dto.StudentLoanResponse;
+import com.moneyflowbackend.studentloan.dto.StudentLoanStrategyComparisonResponse;
+import com.moneyflowbackend.studentloan.dto.StudentLoanStrategyRequest;
 import com.moneyflowbackend.studentloan.dto.StudentLoanStatusRequest;
 import com.moneyflowbackend.studentloan.service.StudentLoanService;
 import org.springframework.http.ResponseEntity;
@@ -58,6 +60,14 @@ public class StudentLoanController {
             @RequestParam(defaultValue = "24") int size) {
         return ResponseEntity.ok(ApiResponse.ok("Student loan projection loaded",
                 studentLoanService.projection(workspaceId, loanId, includeSchedule, page, size, currentUserId())));
+    }
+
+    @PostMapping("/strategies/compare")
+    public ResponseEntity<ApiResponse<StudentLoanStrategyComparisonResponse>> compareStrategies(
+            @PathVariable UUID workspaceId,
+            @RequestBody(required = false) StudentLoanStrategyRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok("Student loan strategies compared",
+                studentLoanService.compareStrategies(workspaceId, request, currentUserId())));
     }
 
     @PostMapping
