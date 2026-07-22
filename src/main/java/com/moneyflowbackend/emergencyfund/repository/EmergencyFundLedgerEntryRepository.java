@@ -22,4 +22,12 @@ public interface EmergencyFundLedgerEntryRepository extends JpaRepository<Emerge
     BigDecimal sumReservedAmount(
             @Param("workspaceId") UUID workspaceId,
             @Param("planId") UUID planId);
+
+    @Query("""
+            SELECT COALESCE(SUM(e.amountDelta), 0)
+            FROM EmergencyFundLedgerEntry e
+            WHERE e.workspace.id = :workspaceId
+              AND e.emergencyFundPlan.planStatus = com.moneyflowbackend.emergencyfund.model.EmergencyFundPlanStatus.ACTIVE
+            """)
+    BigDecimal sumActiveWorkspaceReservedAmount(@Param("workspaceId") UUID workspaceId);
 }
