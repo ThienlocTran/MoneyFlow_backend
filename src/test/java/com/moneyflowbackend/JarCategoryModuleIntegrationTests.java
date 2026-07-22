@@ -19,6 +19,7 @@ import com.moneyflowbackend.category.repository.CategoryRepository;
 import com.moneyflowbackend.category.service.CategoryKeywordService;
 import com.moneyflowbackend.category.service.CategoryService;
 import com.moneyflowbackend.common.exception.BusinessException;
+import com.moneyflowbackend.common.model.SpendingScope;
 import com.moneyflowbackend.jar.dto.JarAllocationRequest;
 import com.moneyflowbackend.jar.dto.JarListResponse;
 import com.moneyflowbackend.jar.dto.JarMonthlyDetailResponse;
@@ -53,6 +54,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 
 @SpringBootTest
@@ -224,6 +226,105 @@ class JarCategoryModuleIntegrationTests {
         CategoryResponse unused = categoryService.create(ctx.workspace().getId(), categoryRequest("Unused", "EXPENSE", jar.getId()), ctx.user().getId());
         categoryService.delete(ctx.workspace().getId(), unused.getId(), ctx.user().getId());
         assertThat(categoryRepository.findById(unused.getId())).isEmpty();
+    }
+
+    @Test
+    void categoryDefaultSpendingScopeCreateUpdateListDetailAndValidation() {
+        TestContext ctx = createContext("cat_scope", WorkspaceRole.OWNER);
+        TestContext viewer = createContext("cat_scope_viewer", WorkspaceRole.VIEWER);
+        TestContext editor = createContext("cat_scope_editor", WorkspaceRole.EDITOR);
+        TestContext other = createContext("cat_scope_other", WorkspaceRole.OWNER);
+        workspaceMemberRepository.save(WorkspaceMember.builder().workspace(ctx.workspace()).user(viewer.user()).role(WorkspaceRole.VIEWER).build());
+        workspaceMemberRepository.save(WorkspaceMember.builder().workspace(ctx.workspace()).user(editor.user()).role(WorkspaceRole.EDITOR).build());
+        JarResponse jar = jarService.create(ctx.workspace().getId(), jarRequest("SCOPE", "Scope", "10"), ctx.user().getId());
+
+        for (SpendingScope scope : SpendingScope.values()) {
+            CategoryResponse response = categoryService.create(ctx.workspace().getId(),
+                    categoryRequest("Expense " + scope.name(), "EXPENSE", jar.getId(), scope), ctx.user().getId());
+            assertThat(response.getDefaultSpendingScope()).isEqualTo(scope);
+            assertThat(categoryRepository.findById(response.getId()).orElseThrow().getDefaultSpendingScope()).isEqualTo(scope);
+        }
+
+        CategoryResponse expenseNull = categoryService.create(ctx.workspace().getId(),
+                categoryRequest("Expense Null", "EXPENSE", jar.getId(), null), ctx.user().getId());
+        CategoryResponse incomeNull = categoryService.create(ctx.workspace().getId(),
+                categoryRequest("Income Null", "INCOME", null, null), ctx.user().getId());
+        assertThat(expenseNull.getDefaultSpendingScope()).isNull();
+        assertThat(incomeNull.getDefaultSpendingScope()).isNull();
+        assertThatThrownBy(() -> categoryService.create(ctx.workspace().getId(),
+                categoryRequest("Income Scoped", "INCOME", null, SpendingScope.PERSONAL), ctx.user().getId()))
+                .isInstanceOf(BusinessException.class).extracting("code").isEqualTo("INVALID_CATEGORY_SPENDING_SCOPE");
+
+        CategoryResponse updateFromNull = categoryService.update(ctx.workspace().getId(), expenseNull.getId(),
+                categoryRequest("Expense Null", "EXPENSE", jar.getId(), SpendingScope.WORK), ctx.user().getId());
+        assertThat(updateFromNull.getDefaultSpendingScope()).isEqualTo(SpendingScope.WORK);
+
+        CategoryResponse personal = categoryService.create(ctx.workspace().getId(),
+                categoryRequest("Personal", "EXPENSE", jar.getId(), SpendingScope.PERSONAL), ctx.user().getId());
+        CategoryResponse familyThenClear = categoryService.update(ctx.workspace().getId(), personal.getId(),
+                categoryRequest("Personal", "EXPENSE", jar.getId(), SpendingScope.FAMILY), ctx.user().getId());
+        assertThat(familyThenClear.getDefaultSpendingScope()).isEqualTo(SpendingScope.FAMILY);
+        CategoryRequest clear = categoryRequest("Personal", "EXPENSE", jar.getId());
+        assertThat(categoryService.update(ctx.workspace().getId(), personal.getId(), clear, ctx.user().getId()).getDefaultSpendingScope()).isNull();
+
+        CategoryResponse keepCheck = categoryService.update(ctx.workspace().getId(), updateFromNull.getId(),
+                categoryRequest("Expense Null", "EXPENSE", jar.getId()), ctx.user().getId());
+        assertThat(keepCheck.getDefaultSpendingScope()).isNull();
+        CategoryResponse family = categoryService.create(ctx.workspace().getId(),
+                categoryRequest("Family", "EXPENSE", jar.getId(), SpendingScope.FAMILY), ctx.user().getId());
+        assertThat(categoryService.get(ctx.workspace().getId(), family.getId(), ctx.user().getId()).getDefaultSpendingScope()).isEqualTo(SpendingScope.FAMILY);
+        assertThat(categoryService.list(ctx.workspace().getId(), "EXPENSE", null, null, null, null, true, true, viewer.user().getId()))
+                .filteredOn(category -> category.getId().equals(family.getId()))
+                .singleElement()
+                .extracting(CategoryResponse::getDefaultSpendingScope)
+                .isEqualTo(SpendingScope.FAMILY);
+
+        Category historical = categoryRepository.saveAndFlush(Category.builder()
+                .workspace(ctx.workspace())
+                .name("Historical")
+                .categoryType(CategoryType.EXPENSE)
+                .jar(jarRepository.findById(jar.getId()).orElseThrow())
+                .build());
+        assertThat(categoryService.get(ctx.workspace().getId(), historical.getId(), ctx.user().getId()).getDefaultSpendingScope()).isNull();
+
+        assertThatThrownBy(() -> categoryService.update(ctx.workspace().getId(), family.getId(),
+                categoryRequest("Personal", "INCOME", null, SpendingScope.FAMILY), ctx.user().getId()))
+                .isInstanceOf(BusinessException.class).extracting("code").isEqualTo("INVALID_CATEGORY_SPENDING_SCOPE");
+        CategoryResponse incomeToExpense = categoryService.update(ctx.workspace().getId(), incomeNull.getId(),
+                categoryRequest("Income Null", "EXPENSE", jar.getId(), SpendingScope.SHARED), ctx.user().getId());
+        assertThat(incomeToExpense.getDefaultSpendingScope()).isEqualTo(SpendingScope.SHARED);
+
+        assertThatThrownBy(() -> categoryService.get(ctx.workspace().getId(), family.getId(), other.user().getId()))
+                .isInstanceOf(BusinessException.class).extracting("code").isEqualTo("WORKSPACE_ACCESS_DENIED");
+        assertThatThrownBy(() -> categoryService.update(ctx.workspace().getId(), family.getId(),
+                categoryRequest("Personal", "EXPENSE", jar.getId(), SpendingScope.OTHER), editor.user().getId()))
+                .isInstanceOf(BusinessException.class).extracting("code").isEqualTo("FORBIDDEN");
+        assertThatThrownBy(() -> categoryService.create(ctx.workspace().getId(),
+                categoryRequest("personal", "EXPENSE", jar.getId(), SpendingScope.OTHER), ctx.user().getId()))
+                .isInstanceOf(BusinessException.class).extracting("code").isEqualTo("CATEGORY_NAME_ALREADY_EXISTS");
+        assertThat(categoryRepository.findById(family.getId()).orElseThrow().getJar().getId()).isEqualTo(jar.getId());
+    }
+
+    @Test
+    void categoryDefaultSpendingScopeApiRejectsInvalidEnumSafely() throws Exception {
+        String username = "cat_scope_api_" + UUID.randomUUID().toString().substring(0, 8);
+        UserResponse user = authService.register(registerRequest(username));
+        TokenResponse token = authService.login(loginRequest(user.getUsername()));
+        Workspace workspace = workspaceRepository.findAllByUserId(user.getId()).get(0);
+
+        mockMvc.perform(post("/api/workspaces/" + workspace.getId() + "/categories")
+                        .contentType("application/json")
+                        .header("Authorization", "Bearer " + token.getAccessToken())
+                        .content("""
+                                {
+                                  "name": "Bad Scope",
+                                  "type": "EXPENSE",
+                                  "defaultSpendingScope": "NOT_A_SCOPE"
+                                }
+                                """))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isBadRequest())
+                .andExpect(jsonPath("$.message").exists())
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("default_spending_scope"))));
     }
 
     @Test
@@ -509,6 +610,12 @@ class JarCategoryModuleIntegrationTests {
         req.setType(type);
         req.setJarId(jarId);
         req.setIcon("folder");
+        return req;
+    }
+
+    private CategoryRequest categoryRequest(String name, String type, UUID jarId, SpendingScope defaultSpendingScope) {
+        CategoryRequest req = categoryRequest(name, type, jarId);
+        req.setDefaultSpendingScope(defaultSpendingScope);
         return req;
     }
 

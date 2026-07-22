@@ -1,5 +1,6 @@
 package com.moneyflowbackend.category.model;
 
+import com.moneyflowbackend.common.model.SpendingScope;
 import com.moneyflowbackend.workspace.model.Workspace;
 import com.moneyflowbackend.jar.model.Jar;
 import jakarta.persistence.*;
@@ -33,6 +34,10 @@ public class Category {
     @Enumerated(EnumType.STRING)
     @Column(name = "category_type", nullable = false, length = 20)
     private CategoryType categoryType;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "default_spending_scope", length = 20)
+    private SpendingScope defaultSpendingScope;
 
     @Column(length = 80)
     private String icon;

@@ -4,9 +4,10 @@ import com.moneyflowbackend.common.dto.ErrorResponse;
 import com.moneyflowbackend.security.RateLimitExceededException;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataAccessResourceFailureException;
-import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ControllerAdvice;
@@ -51,6 +52,18 @@ public class GlobalExceptionHandler {
                 .message("Dữ liệu nhập vào không hợp lệ.")
                 .timestamp(clock.instant().toString())
                 .fieldErrors(errors)
+                .build();
+        return ResponseEntity.badRequest().body(res);
+    }
+
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ErrorResponse> handleUnreadableMessage(HttpMessageNotReadableException ex) {
+        ErrorResponse res = ErrorResponse.builder()
+                .success(false)
+                .code("VALIDATION_ERROR")
+                .message("Dữ liệu nhập vào không hợp lệ.")
+                .timestamp(clock.instant().toString())
+                .fieldErrors(Collections.emptyMap())
                 .build();
         return ResponseEntity.badRequest().body(res);
     }

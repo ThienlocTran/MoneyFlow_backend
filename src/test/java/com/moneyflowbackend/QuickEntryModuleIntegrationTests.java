@@ -1,5 +1,10 @@
 package com.moneyflowbackend;
 
+import com.moneyflowbackend.auth.dto.LoginRequest;
+import com.moneyflowbackend.auth.dto.RegisterRequest;
+import com.moneyflowbackend.auth.dto.TokenResponse;
+import com.moneyflowbackend.auth.dto.UserResponse;
+import com.moneyflowbackend.auth.service.AuthService;
 import com.moneyflowbackend.auth.model.User;
 import com.moneyflowbackend.auth.repository.UserRepository;
 import com.moneyflowbackend.category.model.Category;
@@ -8,6 +13,7 @@ import com.moneyflowbackend.category.model.CategoryType;
 import com.moneyflowbackend.category.repository.CategoryKeywordRepository;
 import com.moneyflowbackend.category.repository.CategoryRepository;
 import com.moneyflowbackend.common.exception.BusinessException;
+import com.moneyflowbackend.common.model.SpendingScope;
 import com.moneyflowbackend.quickentry.dto.QuickEntryButtonRequest;
 import com.moneyflowbackend.quickentry.dto.QuickEntryConfirmRequest;
 import com.moneyflowbackend.quickentry.dto.QuickEntryPreviewResponse;
@@ -30,8 +36,10 @@ import com.moneyflowbackend.workspace.repository.WorkspaceMemberRepository;
 import com.moneyflowbackend.workspace.repository.WorkspaceRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -40,13 +48,21 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest
+@AutoConfigureMockMvc
 @ActiveProfiles("test")
 @Transactional
 class QuickEntryModuleIntegrationTests {
     @Autowired QuickEntryService quickEntryService;
     @Autowired WalletService walletService;
+    @Autowired AuthService authService;
+    @Autowired MockMvc mockMvc;
     @Autowired UserRepository userRepository;
     @Autowired WorkspaceRepository workspaceRepository;
     @Autowired WorkspaceMemberRepository workspaceMemberRepository;
@@ -120,6 +136,53 @@ class QuickEntryModuleIntegrationTests {
         var buttonTx = quickEntryService.button(ctx.workspace().getId(), button, ctx.user().getId());
         assertThat(transactionRepository.findById(buttonTx.getId()).orElseThrow().getSourceType()).isEqualTo(TransactionSourceType.QUICK_BUTTON);
         assertThat(walletService.calculateCurrentBalance(cash.getId())).isEqualByComparingTo("950000");
+    }
+
+    @Test
+    void spendingScopeIsManualOnlyAndConfirmDelegatesToTransactionService() throws Exception {
+        TestContext ctx = createContext("qe_scope", WorkspaceRole.OWNER);
+        Wallet cash = wallet(ctx, "Tien mat", WalletType.CASH, true, "0");
+        Category food = category(ctx, "Food", CategoryType.EXPENSE, true, false, false);
+        food.setDefaultSpendingScope(SpendingScope.PERSONAL);
+        categoryRepository.saveAndFlush(food);
+        Category salary = category(ctx, "Salary", CategoryType.INCOME, true, false, false);
+        keyword(ctx, food, "chi phi cong viec", 10);
+        keyword(ctx, salary, "luong", 10);
+
+        QuickEntryPreviewResponse preview = quickEntryService.parse(ctx.workspace().getId(), "chi phi cong viec 35k tien mat", ctx.user().getId());
+        assertThat(preview.getSpendingScope()).isNull();
+        assertThat(quickEntryService.confirm(ctx.workspace().getId(), confirm(preview), ctx.user().getId()).getSpendingScope())
+                .isEqualTo(SpendingScope.PERSONAL);
+
+        QuickEntryConfirmRequest work = confirm(preview);
+        work.setSpendingScope(SpendingScope.WORK);
+        assertThat(quickEntryService.confirm(ctx.workspace().getId(), work, ctx.user().getId()).getSpendingScope())
+                .isEqualTo(SpendingScope.WORK);
+
+        QuickEntryConfirmRequest explicitNull = confirm(preview);
+        explicitNull.setSpendingScope(null);
+        assertThat(quickEntryService.confirm(ctx.workspace().getId(), explicitNull, ctx.user().getId()).getSpendingScope()).isNull();
+
+        QuickEntryPreviewResponse incomePreview = quickEntryService.parse(ctx.workspace().getId(), "luong 5 trieu tien mat", ctx.user().getId());
+        assertThat(quickEntryService.confirm(ctx.workspace().getId(), confirm(incomePreview), ctx.user().getId()).getSpendingScope()).isNull();
+        QuickEntryConfirmRequest badIncome = confirm(incomePreview);
+        badIncome.setSpendingScope(SpendingScope.WORK);
+        assertBusinessCode(() -> quickEntryService.confirm(ctx.workspace().getId(), badIncome, ctx.user().getId()), "INVALID_TRANSACTION_SPENDING_SCOPE");
+
+        String username = "qe_scope_http_" + UUID.randomUUID().toString().substring(0, 8);
+        UserResponse registered = authService.register(registerRequest(username));
+        TokenResponse token = authService.login(loginRequest(username));
+        Workspace workspace = workspaceRepository.findAllByUserId(registered.getId()).getFirst();
+        mockMvc.perform(post("/api/workspaces/" + workspace.getId() + "/quick-entry/confirm")
+                        .contentType("application/json")
+                        .content("""
+                                {"type":"EXPENSE","amount":1,"transactionDate":"2026-07-21","spendingScope":"NOPE"}
+                                """)
+                        .header("Authorization", "Bearer " + token.getAccessToken()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.message", not(containsString("SpendingScope"))))
+                .andExpect(jsonPath("$.message", not(containsString("constraint"))));
     }
 
     @Test
@@ -289,6 +352,22 @@ class QuickEntryModuleIntegrationTests {
                 .keyword(value)
                 .priority(priority)
                 .build());
+    }
+
+    private RegisterRequest registerRequest(String username) {
+        RegisterRequest request = new RegisterRequest();
+        request.setUsername(username);
+        request.setEmail(username + "@example.com");
+        request.setPassword("Password123!");
+        request.setFullName("Quick Entry HTTP User");
+        return request;
+    }
+
+    private LoginRequest loginRequest(String username) {
+        LoginRequest request = new LoginRequest();
+        request.setIdentifier(username);
+        request.setPassword("Password123!");
+        return request;
     }
 
     private void assertBusinessCode(ThrowingRunnable runnable, String code) {

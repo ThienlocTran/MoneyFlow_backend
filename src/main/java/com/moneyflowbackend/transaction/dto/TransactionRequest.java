@@ -1,6 +1,7 @@
 package com.moneyflowbackend.transaction.dto;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.moneyflowbackend.common.model.SpendingScope;
 import com.moneyflowbackend.transaction.model.TransactionStatus;
 import com.moneyflowbackend.transaction.model.TransactionType;
 import jakarta.validation.constraints.DecimalMin;
@@ -28,10 +29,13 @@ public class TransactionRequest {
     private UUID categoryId;
     private UUID incomeSourceId;
     private UUID relatedIncomeSourceId;
+    private SpendingScope spendingScope;
     @JsonIgnore
     private boolean incomeSourceIdSet;
     @JsonIgnore
     private boolean relatedIncomeSourceIdSet;
+    @JsonIgnore
+    private boolean spendingScopeSet;
     private UUID attributedPersonId;
     private LocalDate transactionDate;
     private LocalTime transactionTime;
@@ -50,6 +54,11 @@ public class TransactionRequest {
         this.relatedIncomeSourceIdSet = true;
     }
 
+    public void setSpendingScope(SpendingScope spendingScope) {
+        this.spendingScope = spendingScope;
+        this.spendingScopeSet = true;
+    }
+
     @JsonIgnore
     public boolean hasIncomeSourceId() {
         return incomeSourceIdSet;
@@ -58,5 +67,10 @@ public class TransactionRequest {
     @JsonIgnore
     public boolean hasRelatedIncomeSourceId() {
         return relatedIncomeSourceIdSet;
+    }
+
+    @JsonIgnore
+    public boolean hasSpendingScope() {
+        return spendingScopeSet;
     }
 }
