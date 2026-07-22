@@ -1,5 +1,7 @@
 package com.moneyflowbackend.quickentry.dto;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.moneyflowbackend.common.model.SpendingScope;
 import com.moneyflowbackend.transaction.model.TransactionStatus;
 import com.moneyflowbackend.transaction.model.TransactionType;
 import lombok.Data;
@@ -23,9 +25,21 @@ public class QuickEntryConfirmRequest {
     private LocalTime transactionTime;
     private String description;
     private String note;
+    private SpendingScope spendingScope;
+    @JsonIgnore
+    private boolean spendingScopeSet;
     private UUID attributedPersonId;
     private String learnKeyword;
     private Integer durationSeconds;
     private String audioMimeType;
 
+    public void setSpendingScope(SpendingScope spendingScope) {
+        this.spendingScope = spendingScope;
+        this.spendingScopeSet = true;
+    }
+
+    @JsonIgnore
+    public boolean hasSpendingScope() {
+        return spendingScopeSet;
+    }
 }

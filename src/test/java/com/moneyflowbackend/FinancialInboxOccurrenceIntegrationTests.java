@@ -11,6 +11,7 @@ import com.moneyflowbackend.category.model.Category;
 import com.moneyflowbackend.category.model.CategoryType;
 import com.moneyflowbackend.category.repository.CategoryRepository;
 import com.moneyflowbackend.common.exception.BusinessException;
+import com.moneyflowbackend.common.model.SpendingScope;
 import com.moneyflowbackend.obligation.dto.FinancialInboxGroup;
 import com.moneyflowbackend.obligation.dto.FinancialInboxResponse;
 import com.moneyflowbackend.obligation.dto.ConfirmOccurrenceRequest;
@@ -320,6 +321,38 @@ class FinancialInboxOccurrenceIntegrationTests {
         assertThat(walletBalanceService.calculateCurrentBalance(wallet.getId())).isEqualByComparingTo("250");
         assertThat(dashboardService.getDashboard(ctx.workspace().getId(), "2026-07", "FULL_MONTH", ctx.user().getId()).getIncome())
                 .isEqualByComparingTo("250");
+        assertThat(response.getTransaction().getSpendingScope()).isNull();
+    }
+
+    @Test
+    void confirmPayablePropagatesTemplateScopeOrFallsBackToCategoryDefault() {
+        TestContext ctx = createContext("b5_scope", WorkspaceRole.OWNER);
+        Wallet wallet = wallet(ctx);
+        Category personal = category(ctx, CategoryType.EXPENSE);
+        personal.setDefaultSpendingScope(SpendingScope.PERSONAL);
+        categoryRepository.saveAndFlush(personal);
+        Category noDefault = category(ctx, CategoryType.EXPENSE);
+
+        RecurringObligationTemplate workTemplate = templateRepository.saveAndFlush(template(ctx, "Work", RecurringObligationStatus.ACTIVE, wallet, personal)
+                .spendingScope(SpendingScope.WORK)
+                .build());
+        RecurringObligationTemplate defaultTemplate = templateRepository.saveAndFlush(template(ctx, "Default", RecurringObligationStatus.ACTIVE, wallet, personal).build());
+        RecurringObligationTemplate nullTemplate = templateRepository.saveAndFlush(template(ctx, "Null", RecurringObligationStatus.ACTIVE, wallet, noDefault).build());
+
+        ConfirmOccurrenceResponse work = confirmationService.confirm(ctx.workspace().getId(),
+                occurrenceRepository.saveAndFlush(occurrence(ctx, workTemplate, "work", LocalDate.of(2026, 7, 20))).getId(),
+                confirmReq(true, null, null, null, null, null), ctx.user().getId());
+        ConfirmOccurrenceResponse defaulted = confirmationService.confirm(ctx.workspace().getId(),
+                occurrenceRepository.saveAndFlush(occurrence(ctx, defaultTemplate, "default", LocalDate.of(2026, 7, 21))).getId(),
+                confirmReq(true, null, null, null, null, null), ctx.user().getId());
+        ConfirmOccurrenceResponse none = confirmationService.confirm(ctx.workspace().getId(),
+                occurrenceRepository.saveAndFlush(occurrence(ctx, nullTemplate, "none", LocalDate.of(2026, 7, 22))).getId(),
+                confirmReq(true, null, null, null, null, null), ctx.user().getId());
+
+        assertThat(work.getTransaction().getSpendingScope()).isEqualTo(SpendingScope.WORK);
+        assertThat(defaulted.getTransaction().getSpendingScope()).isEqualTo(SpendingScope.PERSONAL);
+        assertThat(none.getTransaction().getSpendingScope()).isNull();
+        assertThat(work.getOccurrence().getSpendingScope()).isEqualTo(SpendingScope.WORK);
     }
 
     @Test

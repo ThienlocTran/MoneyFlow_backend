@@ -1,5 +1,7 @@
 package com.moneyflowbackend.quickentry.dto;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.moneyflowbackend.common.model.SpendingScope;
 import lombok.Data;
 
 import java.math.BigDecimal;
@@ -16,6 +18,18 @@ public class QuickEntryButtonRequest {
     private LocalTime transactionTime;
     private String description;
     private String note;
+    private SpendingScope spendingScope;
+    @JsonIgnore
+    private boolean spendingScopeSet;
     private UUID attributedPersonId;
 
+    public void setSpendingScope(SpendingScope spendingScope) {
+        this.spendingScope = spendingScope;
+        this.spendingScopeSet = true;
+    }
+
+    @JsonIgnore
+    public boolean hasSpendingScope() {
+        return spendingScopeSet;
+    }
 }

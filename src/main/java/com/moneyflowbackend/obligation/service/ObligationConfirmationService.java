@@ -94,13 +94,15 @@ public class ObligationConfirmationService {
                 transactionDate,
                 description,
                 note,
+                template.getDirection() == ObligationDirection.PAYABLE ? template.getSpendingScope() : null,
                 userId);
 
         Instant now = clock.instant();
-        occurrence.setStatus(ObligationOccurrenceStatus.CONFIRMED);
+        var linkedTransaction = transactionService.reference(workspaceId, transaction.getId());
         occurrence.setActualAmount(amount);
-        occurrence.setLinkedTransaction(transactionService.reference(workspaceId, transaction.getId()));
+        occurrence.setLinkedTransaction(linkedTransaction);
         occurrence.setCompletedAt(now);
+        occurrence.setStatus(ObligationOccurrenceStatus.CONFIRMED);
         occurrence.setSnoozedUntil(null);
         occurrence.setSkippedAt(null);
         occurrence.setSkipReason(null);

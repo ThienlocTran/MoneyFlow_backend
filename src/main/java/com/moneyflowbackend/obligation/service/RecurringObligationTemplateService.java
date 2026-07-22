@@ -6,6 +6,7 @@ import com.moneyflowbackend.category.model.Category;
 import com.moneyflowbackend.category.model.CategoryType;
 import com.moneyflowbackend.category.repository.CategoryRepository;
 import com.moneyflowbackend.common.exception.BusinessException;
+import com.moneyflowbackend.common.model.SpendingScope;
 import com.moneyflowbackend.obligation.dto.RecurringObligationPreviewRequest;
 import com.moneyflowbackend.obligation.dto.RecurringObligationPreviewResponse;
 import com.moneyflowbackend.obligation.dto.RecurringObligationTemplatePageResponse;
@@ -148,6 +149,7 @@ public class RecurringObligationTemplateService {
                 .reminderDaysBefore(validated.reminderDaysBefore())
                 .defaultWallet(validated.wallet())
                 .defaultCategory(validated.category())
+                .spendingScope(validated.spendingScope())
                 .note(validated.note())
                 .status(RecurringObligationStatus.ACTIVE)
                 .createdByUser(user)
@@ -176,6 +178,7 @@ public class RecurringObligationTemplateService {
         template.setReminderDaysBefore(validated.reminderDaysBefore());
         template.setDefaultWallet(validated.wallet());
         template.setDefaultCategory(validated.category());
+        template.setSpendingScope(validated.spendingScope());
         template.setNote(validated.note());
         if (!hasOccurrences) {
             template.setDirection(validated.direction());
@@ -260,8 +263,9 @@ public class RecurringObligationTemplateService {
         int reminderDays = requireReminderDays(req.getReminderDaysBefore());
         Wallet wallet = resolveWallet(workspaceId, req.getDefaultWalletId(), allowInactiveReferences);
         Category category = resolveCategory(workspaceId, req.getDefaultCategoryId(), direction, allowInactiveReferences);
+        SpendingScope spendingScope = validateSpendingScope(direction, req.getSpendingScope());
         return new ValidatedRequest(name, direction, amountMode, defaultAmount, frequency, interval, startDate, endDate,
-                reminderDays, wallet, category, normalizeText(req.getNote()));
+                reminderDays, wallet, category, spendingScope, normalizeText(req.getNote()));
     }
 
     private String normalizeName(String name) {
@@ -365,6 +369,15 @@ public class RecurringObligationTemplateService {
         return category;
     }
 
+    private SpendingScope validateSpendingScope(ObligationDirection direction, SpendingScope spendingScope) {
+        if (spendingScope != null && direction != ObligationDirection.PAYABLE) {
+            throw new BusinessException(
+                    "INVALID_OBLIGATION_SPENDING_SCOPE",
+                    "Spending scope is only supported for payable obligations.");
+        }
+        return spendingScope;
+    }
+
     private RecurringObligationTemplate findTemplate(UUID workspaceId, UUID templateId) {
         return templateRepository.findByIdAndWorkspaceIdWithReferences(templateId, workspaceId)
                 .orElseThrow(() -> notFound());
@@ -441,6 +454,7 @@ public class RecurringObligationTemplateService {
                 .reminderDaysBefore(template.getReminderDaysBefore())
                 .defaultWallet(walletSummary(template.getDefaultWallet()))
                 .defaultCategory(categorySummary(template.getDefaultCategory()))
+                .spendingScope(template.getSpendingScope())
                 .note(template.getNote())
                 .status(template.getStatus())
                 .nextDueDate(nextDueDate(template, workspace))
@@ -535,6 +549,7 @@ public class RecurringObligationTemplateService {
             Integer reminderDaysBefore,
             Wallet wallet,
             Category category,
+            SpendingScope spendingScope,
             String note) {
     }
 }

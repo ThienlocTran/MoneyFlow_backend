@@ -1,7 +1,9 @@
 package com.moneyflowbackend.transaction.controller;
 
 import com.moneyflowbackend.dto.ApiResponse;
+import com.moneyflowbackend.common.model.SpendingScope;
 import com.moneyflowbackend.transaction.audit.TransactionAuditService;
+import com.moneyflowbackend.common.exception.BusinessException;
 import com.moneyflowbackend.transaction.audit.dto.TransactionAuditResponse;
 import com.moneyflowbackend.transaction.dto.TransactionPageResponse;
 import com.moneyflowbackend.transaction.dto.TransactionRequest;
@@ -60,6 +62,7 @@ public class TransactionController {
             @RequestParam(required = false) UUID attributedPersonId,
             @RequestParam(required = false) UUID createdBy,
             @RequestParam(required = false) TransactionSourceType sourceType,
+            @RequestParam(required = false) String spendingScope,
             @RequestParam(required = false) String search,
             @RequestParam(required = false) String keyword,
             @RequestParam(defaultValue = "false") boolean includeDeleted,
@@ -81,6 +84,7 @@ public class TransactionController {
                 attributedPersonId,
                 sourceType,
                 createdBy,
+                spendingScope(spendingScope),
                 search != null ? search : keyword,
                 includeDeleted,
                 page,
@@ -106,6 +110,7 @@ public class TransactionController {
             @RequestParam(required = false) UUID attributedPersonId,
             @RequestParam(required = false) UUID createdBy,
             @RequestParam(required = false) TransactionSourceType sourceType,
+            @RequestParam(required = false) String spendingScope,
             @RequestParam(required = false) String search,
             @RequestParam(required = false) String keyword,
             @RequestParam(defaultValue = "false") boolean includeDeleted) {
@@ -121,6 +126,7 @@ public class TransactionController {
                 attributedPersonId,
                 sourceType,
                 createdBy,
+                spendingScope(spendingScope),
                 search != null ? search : keyword,
                 includeDeleted,
                 currentUserId());
@@ -149,6 +155,17 @@ public class TransactionController {
             effectiveTo = yearMonth.atEndOfMonth();
         }
         return effectiveTo;
+    }
+
+    private SpendingScope spendingScope(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return SpendingScope.valueOf(value.trim());
+        } catch (IllegalArgumentException ex) {
+            throw new BusinessException("VALIDATION_ERROR", "Invalid spendingScope");
+        }
     }
 
     @GetMapping("/{transactionId}")

@@ -1,6 +1,7 @@
 package com.moneyflowbackend.category.dto;
 
 import com.fasterxml.jackson.annotation.JsonAlias;
+import com.moneyflowbackend.common.model.SpendingScope;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
@@ -18,6 +19,7 @@ public class CategoryRequest {
     private String type;
 
     private UUID jarId;
+    private SpendingScope defaultSpendingScope;
     private String icon;
     private Boolean isActive;
     private Boolean isQuickAction;

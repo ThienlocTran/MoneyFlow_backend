@@ -193,6 +193,9 @@ public class QuickEntryService {
         txReq.setTransactionTime(req.getTransactionTime());
         txReq.setDescription(req.getDescription());
         txReq.setNote(req.getNote());
+        if (req.hasSpendingScope()) {
+            txReq.setSpendingScope(req.getSpendingScope());
+        }
         txReq.setAttributedPersonId(req.getAttributedPersonId());
         txReq.setCategoryId(category.getId());
         txReq.setWalletId(req.getWalletId() == null ? defaultWalletId(workspaceId) : req.getWalletId());
@@ -223,6 +226,9 @@ public class QuickEntryService {
         txReq.setDescription(req.getDescription());
         txReq.setNote(req.getNote());
         txReq.setAttributedPersonId(req.getAttributedPersonId());
+        if (req.hasSpendingScope()) {
+            txReq.setSpendingScope(req.getSpendingScope());
+        }
         if (req.getType() == TransactionType.TRANSFER) {
             if (req.getSourceWalletId() == null) {
                 throw new BusinessException("TRANSFER_SOURCE_REQUIRED", "Transfer source wallet is required");

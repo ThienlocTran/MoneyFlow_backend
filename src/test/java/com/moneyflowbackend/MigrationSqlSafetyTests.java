@@ -63,7 +63,7 @@ class MigrationSqlSafetyTests {
         try (Stream<Path> paths = Files.list(Path.of("src/main/resources/db/migration"))) {
             migrationNames = paths
                     .map(path -> path.getFileName().toString())
-                    .sorted()
+                    .sorted((left, right) -> Integer.compare(version(left), version(right)))
                     .toList();
         }
 
@@ -76,7 +76,9 @@ class MigrationSqlSafetyTests {
                 "V6__enforce_adjustment_direction_nullability.sql",
                 "V7__recurring_obligations.sql",
                 "V8__income_sources.sql",
-                "V9__transaction_income_source_links.sql");
+                "V9__transaction_income_source_links.sql",
+                "V10__spending_scope_foundation.sql",
+                "V11__obligation_spending_scope.sql");
 
         for (String migrationName : migrationNames) {
             String sql = Files.readString(Path.of("src/main/resources/db/migration", migrationName));
@@ -87,5 +89,26 @@ class MigrationSqlSafetyTests {
                     .doesNotContain(String.valueOf((char) 0x00C6))
                     .doesNotContain(String.valueOf((char) 0x00C2));
         }
+    }
+
+    @Test
+    void v11AddsNullableObligationSpendingScopeOnly() throws Exception {
+        String sql = Files.readString(Path.of("src/main/resources/db/migration/V11__obligation_spending_scope.sql"));
+        String normalized = sql.toLowerCase();
+
+        assertThat(normalized).contains("alter table recurring_obligation_templates");
+        assertThat(normalized).contains("add column spending_scope varchar(20)");
+        assertThat(normalized).contains("spending_scope in ('personal', 'family', 'shared', 'work', 'other')");
+        assertThat(normalized).contains("spending_scope is null");
+        assertThat(normalized).contains("direction = 'payable'");
+        assertThat(normalized).doesNotContain("default ");
+        assertThat(normalized).doesNotContain("update ");
+        assertThat(normalized).doesNotContain("insert ");
+        assertThat(normalized).doesNotContain("create index");
+    }
+
+    private int version(String migrationName) {
+        int marker = migrationName.indexOf("__");
+        return Integer.parseInt(migrationName.substring(1, marker));
     }
 }

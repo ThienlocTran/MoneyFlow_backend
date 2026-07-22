@@ -2,6 +2,7 @@ package com.moneyflowbackend.obligation.model;
 
 import com.moneyflowbackend.auth.model.User;
 import com.moneyflowbackend.category.model.Category;
+import com.moneyflowbackend.common.model.SpendingScope;
 import com.moneyflowbackend.wallet.model.Wallet;
 import com.moneyflowbackend.workspace.model.Workspace;
 import jakarta.persistence.*;
@@ -21,7 +22,9 @@ import java.util.UUID;
                 @CheckConstraint(name = "chk_recurring_obligation_templates_reminder_days_before", constraint = "reminder_days_before >= 0"),
                 @CheckConstraint(name = "chk_recurring_obligation_templates_end_date", constraint = "end_date IS NULL OR end_date >= start_date"),
                 @CheckConstraint(name = "chk_recurring_obligation_templates_default_amount", constraint = "default_amount IS NULL OR default_amount > 0"),
-                @CheckConstraint(name = "chk_recurring_obligation_templates_fixed_amount", constraint = "amount_mode <> 'FIXED' OR default_amount IS NOT NULL")
+                @CheckConstraint(name = "chk_recurring_obligation_templates_fixed_amount", constraint = "amount_mode <> 'FIXED' OR default_amount IS NOT NULL"),
+                @CheckConstraint(name = "chk_recurring_obligation_templates_spending_scope_values", constraint = "spending_scope IS NULL OR spending_scope IN ('PERSONAL', 'FAMILY', 'SHARED', 'WORK', 'OTHER')"),
+                @CheckConstraint(name = "chk_recurring_obligation_templates_spending_scope_payable_only", constraint = "spending_scope IS NULL OR direction = 'PAYABLE'")
         }
 )
 @Getter
@@ -77,6 +80,10 @@ public class RecurringObligationTemplate {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "default_category_id")
     private Category defaultCategory;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "spending_scope", length = 20)
+    private SpendingScope spendingScope;
 
     @Column(columnDefinition = "TEXT")
     private String note;

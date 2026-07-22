@@ -1,5 +1,6 @@
 package com.moneyflowbackend.obligation.dto;
 
+import com.moneyflowbackend.common.model.SpendingScope;
 import com.moneyflowbackend.obligation.model.ObligationAmountMode;
 import com.moneyflowbackend.obligation.model.ObligationDirection;
 import com.moneyflowbackend.obligation.model.ObligationFrequency;
@@ -32,6 +33,7 @@ public class RecurringObligationTemplateResponse {
     private Integer reminderDaysBefore;
     private ReferenceSummary defaultWallet;
     private ReferenceSummary defaultCategory;
+    private SpendingScope spendingScope;
     private String note;
     private RecurringObligationStatus status;
     private LocalDate nextDueDate;

@@ -11,6 +11,7 @@ import com.moneyflowbackend.category.model.Category;
 import com.moneyflowbackend.category.model.CategoryType;
 import com.moneyflowbackend.category.repository.CategoryRepository;
 import com.moneyflowbackend.common.exception.BusinessException;
+import com.moneyflowbackend.common.model.SpendingScope;
 import com.moneyflowbackend.obligation.dto.RecurringObligationPreviewRequest;
 import com.moneyflowbackend.obligation.dto.RecurringObligationPreviewResponse;
 import com.moneyflowbackend.obligation.dto.RecurringObligationTemplatePageResponse;
@@ -56,6 +57,8 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -99,10 +102,10 @@ class RecurringObligationTemplateApiIntegrationTests {
         Category expense = category(owner, "Rent", CategoryType.EXPENSE, true, false);
         Category income = category(owner, "Salary", CategoryType.INCOME, true, false);
 
-        RecurringObligationTemplateResponse created = templateService.create(owner.workspace().getId(),
-                request("  Rent   monthly  ", ObligationDirection.PAYABLE, ObligationAmountMode.FIXED, "3500000",
-                        ObligationFrequency.MONTHLY, 1, "2026-08-05", null, 3, wallet.getId(), expense.getId(), " note "),
-                owner.user().getId());
+        RecurringObligationTemplateRequest createRequest = request("  Rent   monthly  ", ObligationDirection.PAYABLE, ObligationAmountMode.FIXED, "3500000",
+                ObligationFrequency.MONTHLY, 1, "2026-08-05", null, 3, wallet.getId(), expense.getId(), " note ");
+        createRequest.setSpendingScope(SpendingScope.WORK);
+        RecurringObligationTemplateResponse created = templateService.create(owner.workspace().getId(), createRequest, owner.user().getId());
         RecurringObligationTemplateResponse ended = templateService.create(owner.workspace().getId(),
                 request("Ended", ObligationDirection.PAYABLE, ObligationAmountMode.FIXED, "1",
                         ObligationFrequency.MONTHLY, 1, "2026-06-01", "2026-06-30", 0, null, expense.getId(), null),
@@ -118,14 +121,18 @@ class RecurringObligationTemplateApiIntegrationTests {
         assertThat(created.getStatus()).isEqualTo(RecurringObligationStatus.ACTIVE);
         assertThat(created.getDefaultWallet().getName()).isEqualTo("Cash");
         assertThat(created.getDefaultCategory().getType()).isEqualTo("EXPENSE");
+        assertThat(created.getSpendingScope()).isEqualTo(SpendingScope.WORK);
         assertThat(created.getNextDueDate()).isEqualTo(LocalDate.of(2026, 8, 5));
         assertThat(created.isHasOccurrences()).isFalse();
         assertThat(templateService.get(owner.workspace().getId(), ended.getId(), owner.user().getId()).getNextDueDate()).isNull();
+        assertThat(templateService.get(owner.workspace().getId(), ended.getId(), owner.user().getId()).getSpendingScope()).isNull();
         assertThat(templateRepository.findById(created.getId()).orElseThrow().getStatus()).isEqualTo(RecurringObligationStatus.ACTIVE);
 
         RecurringObligationTemplatePageResponse defaultPage = templateService.list(
                 owner.workspace().getId(), null, null, null, false, 0, 20, viewer.user().getId());
         assertThat(defaultPage.getContent()).extracting(RecurringObligationTemplateResponse::getId).containsExactly(ended.getId(), created.getId());
+        assertThat(defaultPage.getContent()).extracting(RecurringObligationTemplateResponse::getSpendingScope)
+                .containsExactly(null, SpendingScope.WORK);
         RecurringObligationTemplatePageResponse archivedPage = templateService.list(
                 owner.workspace().getId(), RecurringObligationStatus.ARCHIVED, null, "salary", false, 0, 20, owner.user().getId());
         assertThat(archivedPage.getContent()).extracting(RecurringObligationTemplateResponse::getId).containsExactly(editorCreated.getId());
@@ -181,6 +188,10 @@ class RecurringObligationTemplateApiIntegrationTests {
                 ObligationFrequency.MONTHLY, 1, "2026-08-01", null, 0, wallet.getId(), income.getId(), null), ctx.user().getId()), "CATEGORY_TYPE_MISMATCH");
         assertBusinessCode(() -> templateService.create(ctx.workspace().getId(), request("Bad", ObligationDirection.RECEIVABLE, ObligationAmountMode.FIXED, "1",
                 ObligationFrequency.MONTHLY, 1, "2026-08-01", null, 0, wallet.getId(), expense.getId(), null), ctx.user().getId()), "CATEGORY_TYPE_MISMATCH");
+        RecurringObligationTemplateRequest receivableScope = request("Bad scope", ObligationDirection.RECEIVABLE, ObligationAmountMode.FIXED, "1",
+                ObligationFrequency.MONTHLY, 1, "2026-08-01", null, 0, wallet.getId(), income.getId(), null);
+        receivableScope.setSpendingScope(SpendingScope.WORK);
+        assertBusinessCode(() -> templateService.create(ctx.workspace().getId(), receivableScope, ctx.user().getId()), "INVALID_OBLIGATION_SPENDING_SCOPE");
     }
 
     @Test
@@ -218,6 +229,15 @@ class RecurringObligationTemplateApiIntegrationTests {
                 request("Rent updated", ObligationDirection.PAYABLE, ObligationAmountMode.VARIABLE, "150",
                         ObligationFrequency.WEEKLY, 2, "2026-08-06", "2026-08-20", 5, wallet.getId(), expense.getId(), "future only"),
                 ctx.user().getId());
+        RecurringObligationTemplateRequest scopedUpdate = request("Rent scoped", ObligationDirection.PAYABLE, ObligationAmountMode.VARIABLE, "150",
+                ObligationFrequency.WEEKLY, 2, "2026-08-06", "2026-08-20", 5, wallet.getId(), expense.getId(), "future only");
+        scopedUpdate.setSpendingScope(SpendingScope.FAMILY);
+        assertThat(templateService.update(ctx.workspace().getId(), created.getId(), scopedUpdate, ctx.user().getId()).getSpendingScope())
+                .isEqualTo(SpendingScope.FAMILY);
+        assertThat(templateService.update(ctx.workspace().getId(), created.getId(),
+                request("Rent cleared", ObligationDirection.PAYABLE, ObligationAmountMode.VARIABLE, "150",
+                        ObligationFrequency.WEEKLY, 2, "2026-08-06", "2026-08-20", 5, wallet.getId(), expense.getId(), "future only"),
+                ctx.user().getId()).getSpendingScope()).isNull();
 
         ObligationOccurrence occurrence = occurrenceRepository.findByTemplateIdAndPeriodKey(created.getId(), "2026-08-06").orElseThrow();
         assertThat(updated.isHasOccurrences()).isTrue();
@@ -316,6 +336,14 @@ class RecurringObligationTemplateApiIntegrationTests {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.totalElements").value(1))
                 .andExpect(jsonPath("$.data.content[0].nextDueDate").value("2026-08-05"));
+        mockMvc.perform(post("/api/workspaces/" + workspace.getId() + "/recurring-obligations")
+                        .contentType("application/json")
+                        .content(body.replace("\"direction\": \"PAYABLE\"", "\"direction\": \"PAYABLE\",\n  \"spendingScope\": \"NOPE\""))
+                        .header("Authorization", "Bearer " + token.getAccessToken()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.message", not(containsString("SpendingScope"))))
+                .andExpect(jsonPath("$.message", not(containsString("constraint"))));
 
         assertThat(occurrenceRepository.count()).isZero();
     }
