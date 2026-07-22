@@ -1,6 +1,9 @@
 package com.moneyflowbackend.savingsgoal.controller;
 
 import com.moneyflowbackend.dto.ApiResponse;
+import com.moneyflowbackend.savingsgoal.dto.SavingsGoalLedgerEntryResponse;
+import com.moneyflowbackend.savingsgoal.dto.SavingsGoalLedgerPageResponse;
+import com.moneyflowbackend.savingsgoal.dto.SavingsGoalLedgerRequest;
 import com.moneyflowbackend.savingsgoal.dto.SavingsGoalPageResponse;
 import com.moneyflowbackend.savingsgoal.dto.SavingsGoalRequest;
 import com.moneyflowbackend.savingsgoal.dto.SavingsGoalResponse;
@@ -86,6 +89,34 @@ public class SavingsGoalController {
             @PathVariable UUID goalId) {
         SavingsGoalResponse response = goalService.archive(workspaceId, goalId, currentUserId());
         return ResponseEntity.ok(ApiResponse.ok("Savings goal archived", response));
+    }
+
+    @GetMapping("/{goalId}/ledger")
+    public ResponseEntity<ApiResponse<SavingsGoalLedgerPageResponse>> ledger(
+            @PathVariable UUID workspaceId,
+            @PathVariable UUID goalId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        SavingsGoalLedgerPageResponse response = goalService.ledger(workspaceId, goalId, page, size, currentUserId());
+        return ResponseEntity.ok(ApiResponse.ok("Savings goal ledger loaded", response));
+    }
+
+    @PostMapping("/{goalId}/contributions")
+    public ResponseEntity<ApiResponse<SavingsGoalLedgerEntryResponse>> contribute(
+            @PathVariable UUID workspaceId,
+            @PathVariable UUID goalId,
+            @Valid @RequestBody SavingsGoalLedgerRequest request) {
+        SavingsGoalLedgerEntryResponse response = goalService.contribute(workspaceId, goalId, request, currentUserId());
+        return ResponseEntity.ok(ApiResponse.ok("Savings goal contribution recorded", response));
+    }
+
+    @PostMapping("/{goalId}/releases")
+    public ResponseEntity<ApiResponse<SavingsGoalLedgerEntryResponse>> release(
+            @PathVariable UUID workspaceId,
+            @PathVariable UUID goalId,
+            @Valid @RequestBody SavingsGoalLedgerRequest request) {
+        SavingsGoalLedgerEntryResponse response = goalService.release(workspaceId, goalId, request, currentUserId());
+        return ResponseEntity.ok(ApiResponse.ok("Savings goal release recorded", response));
     }
 
     private UUID currentUserId() {

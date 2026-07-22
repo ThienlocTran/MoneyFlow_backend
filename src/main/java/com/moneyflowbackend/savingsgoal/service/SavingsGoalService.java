@@ -4,10 +4,16 @@ import com.moneyflowbackend.auth.model.User;
 import com.moneyflowbackend.auth.repository.UserRepository;
 import com.moneyflowbackend.common.exception.BusinessException;
 import com.moneyflowbackend.savingsgoal.dto.SavingsGoalPageResponse;
+import com.moneyflowbackend.savingsgoal.dto.SavingsGoalLedgerEntryResponse;
+import com.moneyflowbackend.savingsgoal.dto.SavingsGoalLedgerPageResponse;
+import com.moneyflowbackend.savingsgoal.dto.SavingsGoalLedgerRequest;
 import com.moneyflowbackend.savingsgoal.dto.SavingsGoalRequest;
 import com.moneyflowbackend.savingsgoal.dto.SavingsGoalResponse;
 import com.moneyflowbackend.savingsgoal.model.SavingsGoal;
+import com.moneyflowbackend.savingsgoal.model.SavingsGoalLedgerEntry;
+import com.moneyflowbackend.savingsgoal.model.SavingsGoalLedgerType;
 import com.moneyflowbackend.savingsgoal.model.SavingsGoalStatus;
+import com.moneyflowbackend.savingsgoal.repository.SavingsGoalLedgerEntryRepository;
 import com.moneyflowbackend.savingsgoal.repository.SavingsGoalRepository;
 import com.moneyflowbackend.workspace.model.WorkspaceMember;
 import com.moneyflowbackend.workspace.model.WorkspaceRole;
@@ -34,9 +40,11 @@ import java.util.UUID;
 public class SavingsGoalService {
     private static final int MAX_NAME_LENGTH = 160;
     private static final int MAX_DESCRIPTION_LENGTH = 500;
+    private static final int MAX_NOTE_LENGTH = 500;
     private static final String OPEN_NAME_INDEX = "uq_savings_goals_workspace_open_name";
 
     private final SavingsGoalRepository goalRepository;
+    private final SavingsGoalLedgerEntryRepository ledgerRepository;
     private final WorkspaceRepository workspaceRepository;
     private final WorkspaceMemberRepository workspaceMemberRepository;
     private final UserRepository userRepository;
@@ -44,11 +52,13 @@ public class SavingsGoalService {
 
     public SavingsGoalService(
             SavingsGoalRepository goalRepository,
+            SavingsGoalLedgerEntryRepository ledgerRepository,
             WorkspaceRepository workspaceRepository,
             WorkspaceMemberRepository workspaceMemberRepository,
             UserRepository userRepository,
             Clock clock) {
         this.goalRepository = goalRepository;
+        this.ledgerRepository = ledgerRepository;
         this.workspaceRepository = workspaceRepository;
         this.workspaceMemberRepository = workspaceMemberRepository;
         this.userRepository = userRepository;
@@ -150,6 +160,72 @@ public class SavingsGoalService {
         return updateStatus(workspaceId, goalId, SavingsGoalStatus.ARCHIVED, userId);
     }
 
+    @Transactional(readOnly = true)
+    public SavingsGoalLedgerPageResponse ledger(UUID workspaceId, UUID goalId, int page, int size, UUID userId) {
+        requireActiveMember(workspaceId, userId);
+        findGoal(workspaceId, goalId);
+        int pageNumber = Math.max(page, 0);
+        int pageSize = Math.min(Math.max(size, 1), 100);
+        Page<SavingsGoalLedgerEntry> result = ledgerRepository.findAllByWorkspaceIdAndSavingsGoalId(
+                workspaceId,
+                goalId,
+                PageRequest.of(pageNumber, pageSize, Sort.by(
+                        Sort.Order.desc("occurredAt"),
+                        Sort.Order.desc("createdAt"),
+                        Sort.Order.desc("id"))));
+        return SavingsGoalLedgerPageResponse.builder()
+                .content(result.getContent().stream().map(this::mapLedgerEntry).toList())
+                .page(result.getNumber())
+                .size(result.getSize())
+                .totalElements(result.getTotalElements())
+                .totalPages(result.getTotalPages())
+                .first(result.isFirst())
+                .last(result.isLast())
+                .build();
+    }
+
+    @Transactional
+    public SavingsGoalLedgerEntryResponse contribute(UUID workspaceId, UUID goalId, SavingsGoalLedgerRequest req, UUID userId) {
+        return addLedgerEntry(workspaceId, goalId, req, userId, SavingsGoalLedgerType.CONTRIBUTION);
+    }
+
+    @Transactional
+    public SavingsGoalLedgerEntryResponse release(UUID workspaceId, UUID goalId, SavingsGoalLedgerRequest req, UUID userId) {
+        return addLedgerEntry(workspaceId, goalId, req, userId, SavingsGoalLedgerType.RELEASE);
+    }
+
+    private SavingsGoalLedgerEntryResponse addLedgerEntry(
+            UUID workspaceId,
+            UUID goalId,
+            SavingsGoalLedgerRequest req,
+            UUID userId,
+            SavingsGoalLedgerType type) {
+        WorkspaceMember member = requireWritableMember(workspaceId, userId);
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new BusinessException("USER_NOT_FOUND", "User not found", HttpStatus.NOT_FOUND));
+        SavingsGoal goal = findGoalForUpdate(workspaceId, goalId);
+        if (goal.getStatus() == SavingsGoalStatus.ARCHIVED) {
+            throw archived();
+        }
+        BigDecimal amount = validateLedgerAmount(req == null ? null : req.getAmount());
+        BigDecimal delta = type == SavingsGoalLedgerType.RELEASE ? amount.negate() : amount;
+        BigDecimal reserved = ledgerRepository.sumReservedAmount(workspaceId, goalId);
+        if (reserved.add(delta).compareTo(BigDecimal.ZERO) < 0) {
+            throw new BusinessException("SAVINGS_GOAL_RESERVED_NEGATIVE", "Savings goal reserved amount cannot be negative", HttpStatus.CONFLICT);
+        }
+        goal.setUpdatedAt(Instant.now(clock));
+        SavingsGoalLedgerEntry entry = SavingsGoalLedgerEntry.builder()
+                .workspace(member.getWorkspace())
+                .savingsGoal(goal)
+                .entryType(type)
+                .amountDelta(delta)
+                .note(validateNote(req == null ? null : req.getNote()))
+                .actorUser(user)
+                .occurredAt(req == null || req.getOccurredAt() == null ? Instant.now(clock) : req.getOccurredAt())
+                .build();
+        return mapLedgerEntry(ledgerRepository.saveAndFlush(entry));
+    }
+
     private ValidatedRequest validate(SavingsGoalRequest req) {
         if (req == null) {
             throw new BusinessException("VALIDATION_ERROR", "Request body is required");
@@ -180,6 +256,21 @@ public class SavingsGoalService {
         }
         String value = text.trim();
         return value.isEmpty() ? null : value;
+    }
+
+    private String validateNote(String note) {
+        String value = normalizeText(note);
+        if (value != null && value.length() > MAX_NOTE_LENGTH) {
+            throw new BusinessException("VALIDATION_ERROR", "Savings goal ledger note is too long");
+        }
+        return value;
+    }
+
+    private BigDecimal validateLedgerAmount(BigDecimal amount) {
+        if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new BusinessException("INVALID_SAVINGS_GOAL_LEDGER_AMOUNT", "Savings goal ledger amount must be positive");
+        }
+        return amount;
     }
 
     private String searchPattern(String search) {
@@ -282,6 +373,21 @@ public class SavingsGoalService {
                 .createdAt(goal.getCreatedAt())
                 .updatedAt(goal.getUpdatedAt())
                 .version(goal.getVersion())
+                .build();
+    }
+
+    private SavingsGoalLedgerEntryResponse mapLedgerEntry(SavingsGoalLedgerEntry entry) {
+        return SavingsGoalLedgerEntryResponse.builder()
+                .id(entry.getId())
+                .workspaceId(entry.getWorkspace().getId())
+                .savingsGoalId(entry.getSavingsGoal().getId())
+                .entryType(entry.getEntryType())
+                .amountDelta(entry.getAmountDelta())
+                .note(entry.getNote())
+                .actorUserId(entry.getActorUser().getId())
+                .occurredAt(entry.getOccurredAt())
+                .createdAt(entry.getCreatedAt())
+                .version(entry.getVersion())
                 .build();
     }
 
