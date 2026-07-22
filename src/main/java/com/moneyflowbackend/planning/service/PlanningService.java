@@ -2,14 +2,20 @@ package com.moneyflowbackend.planning.service;
 
 import com.moneyflowbackend.common.exception.BusinessException;
 import com.moneyflowbackend.emergencyfund.repository.EmergencyFundLedgerEntryRepository;
+import com.moneyflowbackend.obligation.model.ObligationOccurrence;
+import com.moneyflowbackend.obligation.repository.ObligationOccurrenceRepository;
 import com.moneyflowbackend.planning.dto.ActuallySpendableResponse;
 import com.moneyflowbackend.planning.dto.AdvisoryCommitmentsResponse;
 import com.moneyflowbackend.planning.dto.CommitmentBreakdownResponse;
 import com.moneyflowbackend.planning.dto.ReserveBreakdownResponse;
 import com.moneyflowbackend.planning.dto.SelectedWalletResponse;
+import com.moneyflowbackend.planning.dto.StudentLoanAdvisoryResponse;
 import com.moneyflowbackend.planning.model.PlanningHorizon;
 import com.moneyflowbackend.savingsgoal.repository.SavingsGoalLedgerEntryRepository;
 import com.moneyflowbackend.sinkingfund.repository.SinkingFundAllocationRepository;
+import com.moneyflowbackend.studentloan.model.StudentLoan;
+import com.moneyflowbackend.studentloan.model.StudentLoanStatus;
+import com.moneyflowbackend.studentloan.repository.StudentLoanRepository;
 import com.moneyflowbackend.wallet.model.Wallet;
 import com.moneyflowbackend.wallet.repository.WalletRepository;
 import com.moneyflowbackend.wallet.service.WalletBalanceService;
@@ -40,6 +46,8 @@ public class PlanningService {
     private final SinkingFundAllocationRepository sinkingFundAllocationRepository;
     private final SavingsGoalLedgerEntryRepository savingsGoalLedgerEntryRepository;
     private final EmergencyFundLedgerEntryRepository emergencyFundLedgerEntryRepository;
+    private final ObligationOccurrenceRepository obligationOccurrenceRepository;
+    private final StudentLoanRepository studentLoanRepository;
     private final Clock clock;
 
     public PlanningService(
@@ -50,6 +58,8 @@ public class PlanningService {
             SinkingFundAllocationRepository sinkingFundAllocationRepository,
             SavingsGoalLedgerEntryRepository savingsGoalLedgerEntryRepository,
             EmergencyFundLedgerEntryRepository emergencyFundLedgerEntryRepository,
+            ObligationOccurrenceRepository obligationOccurrenceRepository,
+            StudentLoanRepository studentLoanRepository,
             Clock clock) {
         this.workspaceService = workspaceService;
         this.workspaceRepository = workspaceRepository;
@@ -58,6 +68,8 @@ public class PlanningService {
         this.sinkingFundAllocationRepository = sinkingFundAllocationRepository;
         this.savingsGoalLedgerEntryRepository = savingsGoalLedgerEntryRepository;
         this.emergencyFundLedgerEntryRepository = emergencyFundLedgerEntryRepository;
+        this.obligationOccurrenceRepository = obligationOccurrenceRepository;
+        this.studentLoanRepository = studentLoanRepository;
         this.clock = clock;
     }
 
@@ -79,10 +91,13 @@ public class PlanningService {
         assumptions.add("availableLedger uses WalletBalanceService current ledger balance for selected wallets.");
         assumptions.add("Explicit reserve ledgers are treated as separate commitments; no cross-module deduplication is inferred.");
         assumptions.add("Reserve inclusion follows active-only planning: Sinking Fund ACTIVE reserves, Savings Goal ACTIVE reserves, Emergency Fund ACTIVE plan reserves. PAUSED, COMPLETED, and ARCHIVED sinking/savings reserves are excluded; PAUSED emergency fund reserves are excluded.");
+        assumptions.add("Student loan advisory commitments are not included in actuallySpendable because no confirmed loan-obligation deduplication contract exists.");
         List<String> warnings = new ArrayList<>();
         warnings.add("Reserve ledgers may overlap with each other because planning does not infer money movement between wallets or reserve modules.");
         ReserveBreakdownResponse reserveBreakdown = reserveBreakdown(workspaceId, warnings);
-        BigDecimal actuallySpendable = availableLedger.subtract(reserveBreakdown.total());
+        CommitmentBreakdownResponse commitmentBreakdown = commitmentBreakdown(workspaceId, range, warnings);
+        AdvisoryCommitmentsResponse advisoryCommitments = advisoryCommitments(workspaceId);
+        BigDecimal actuallySpendable = availableLedger.subtract(reserveBreakdown.total()).subtract(commitmentBreakdown.knownUpcomingObligations());
         return new ActuallySpendableResponse(
                 workspaceId,
                 clock.instant(),
@@ -92,10 +107,10 @@ public class PlanningService {
                 selectedWallets,
                 availableLedger,
                 reserveBreakdown,
-                new CommitmentBreakdownResponse(BigDecimal.ZERO, 0),
-                new AdvisoryCommitmentsResponse(List.of(), BigDecimal.ZERO, false),
+                commitmentBreakdown,
+                advisoryCommitments,
                 actuallySpendable,
-                warnings.stream().anyMatch(warning -> warning.contains("negative")),
+                commitmentBreakdown.variableUnknownCount() > 0 || warnings.stream().anyMatch(warning -> warning.contains("negative")),
                 warnings,
                 assumptions);
     }
@@ -147,6 +162,41 @@ public class PlanningService {
             return BigDecimal.ZERO;
         }
         return value;
+    }
+
+    private CommitmentBreakdownResponse commitmentBreakdown(UUID workspaceId, Range range, List<String> warnings) {
+        BigDecimal known = BigDecimal.ZERO;
+        long unknown = 0;
+        for (ObligationOccurrence occurrence : obligationOccurrenceRepository.findPendingPayablePlanningOccurrences(workspaceId, range.from(), range.to())) {
+            if (occurrence.getExpectedAmount() == null) {
+                unknown++;
+                warnings.add("Variable obligation occurrence " + occurrence.getId() + " due " + occurrence.getDueDate() + " has no expectedAmount and is excluded from knownUpcomingObligations.");
+            } else {
+                known = known.add(occurrence.getExpectedAmount());
+            }
+        }
+        return new CommitmentBreakdownResponse(known, unknown);
+    }
+
+    private AdvisoryCommitmentsResponse advisoryCommitments(UUID workspaceId) {
+        List<StudentLoanAdvisoryResponse> loans = studentLoanRepository.findAllByWorkspaceIdAndStatusOrderByIdAsc(workspaceId, StudentLoanStatus.ACTIVE).stream()
+                .map(this::studentLoanAdvisory)
+                .toList();
+        BigDecimal total = loans.stream()
+                .map(StudentLoanAdvisoryResponse::advisoryTotal)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        return new AdvisoryCommitmentsResponse(loans, total, false);
+    }
+
+    private StudentLoanAdvisoryResponse studentLoanAdvisory(StudentLoan loan) {
+        BigDecimal extra = loan.getPlannedExtraMonthlyPayment() == null ? BigDecimal.ZERO : loan.getPlannedExtraMonthlyPayment();
+        BigDecimal total = loan.getMinimumMonthlyPayment().add(extra);
+        return new StudentLoanAdvisoryResponse(
+                loan.getId(),
+                loan.getName(),
+                loan.getMinimumMonthlyPayment(),
+                loan.getPlannedExtraMonthlyPayment(),
+                total);
     }
 
     private ZoneId zone(String timezone) {

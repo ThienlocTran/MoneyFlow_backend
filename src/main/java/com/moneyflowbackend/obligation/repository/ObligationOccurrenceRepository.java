@@ -202,4 +202,22 @@ public interface ObligationOccurrenceRepository extends JpaRepository<Obligation
             @Param("templateId") UUID templateId,
             @Param("fromDate") LocalDate fromDate,
             @Param("toDate") LocalDate toDate);
+
+    @EntityGraph(attributePaths = {"template"})
+    @Query("""
+            select o
+            from ObligationOccurrence o
+            join o.template t
+            where o.workspace.id = :workspaceId
+              and t.workspace.id = :workspaceId
+              and o.status = com.moneyflowbackend.obligation.model.ObligationOccurrenceStatus.PENDING
+              and t.direction = com.moneyflowbackend.obligation.model.ObligationDirection.PAYABLE
+              and o.linkedTransaction is null
+              and o.dueDate between :fromDate and :toDate
+            order by o.dueDate asc, t.name asc, o.id asc
+            """)
+    List<ObligationOccurrence> findPendingPayablePlanningOccurrences(
+            @Param("workspaceId") UUID workspaceId,
+            @Param("fromDate") LocalDate fromDate,
+            @Param("toDate") LocalDate toDate);
 }
