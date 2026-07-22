@@ -9,6 +9,8 @@ import com.moneyflowbackend.sinkingfund.dto.SinkingFundAllocationResponse;
 import com.moneyflowbackend.sinkingfund.dto.SinkingFundPageResponse;
 import com.moneyflowbackend.sinkingfund.dto.SinkingFundRequest;
 import com.moneyflowbackend.sinkingfund.dto.SinkingFundResponse;
+import com.moneyflowbackend.sinkingfund.dto.SinkingFundSummaryPageResponse;
+import com.moneyflowbackend.sinkingfund.dto.SinkingFundSummaryResponse;
 import com.moneyflowbackend.sinkingfund.model.SinkingFund;
 import com.moneyflowbackend.sinkingfund.model.SinkingFundAllocation;
 import com.moneyflowbackend.sinkingfund.model.SinkingFundAllocationType;
@@ -30,9 +32,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
@@ -166,6 +171,38 @@ public class SinkingFundService {
                 workspaceId, fundId, PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), 100)));
         return SinkingFundAllocationPageResponse.builder()
                 .content(result.getContent().stream().map(allocation -> mapAllocation(allocation, null)).toList())
+                .page(result.getNumber())
+                .size(result.getSize())
+                .totalElements(result.getTotalElements())
+                .totalPages(result.getTotalPages())
+                .first(result.isFirst())
+                .last(result.isLast())
+                .build();
+    }
+
+    @Transactional(readOnly = true)
+    public SinkingFundSummaryResponse summary(UUID workspaceId, UUID fundId, UUID userId) {
+        requireActiveMember(workspaceId, userId);
+        SinkingFund fund = findInWorkspace(workspaceId, fundId);
+        BigDecimal activeTotal = allocationRepository.sumActiveWorkspaceReservedAmount(workspaceId);
+        return mapSummary(fund, reserved(workspaceId, fundId), activeTotal == null ? BigDecimal.ZERO : activeTotal);
+    }
+
+    @Transactional(readOnly = true)
+    public SinkingFundSummaryPageResponse summaries(UUID workspaceId, SinkingFundStatus status, int page, int size, UUID userId) {
+        requireActiveMember(workspaceId, userId);
+        Page<SinkingFund> result = status == null
+                ? fundRepository.findAllByWorkspaceId(workspaceId, pageRequest(page, size))
+                : fundRepository.findAllByWorkspaceIdAndStatus(workspaceId, status, pageRequest(page, size));
+        List<UUID> fundIds = result.getContent().stream().map(SinkingFund::getId).toList();
+        Map<UUID, BigDecimal> reserved = reservedMap(workspaceId, fundIds);
+        BigDecimal activeTotal = allocationRepository.sumActiveWorkspaceReservedAmount(workspaceId);
+        BigDecimal total = activeTotal == null ? BigDecimal.ZERO : activeTotal;
+        return SinkingFundSummaryPageResponse.builder()
+                .content(result.getContent().stream()
+                        .map(fund -> mapSummary(fund, reserved.getOrDefault(fund.getId(), BigDecimal.ZERO), total))
+                        .toList())
+                .activeWorkspaceReservedTotal(total)
                 .page(result.getNumber())
                 .size(result.getSize())
                 .totalElements(result.getTotalElements())
@@ -347,9 +384,44 @@ public class SinkingFundService {
                 .build();
     }
 
+    private SinkingFundSummaryResponse mapSummary(SinkingFund fund, BigDecimal reservedAmount, BigDecimal activeWorkspaceReservedTotal) {
+        BigDecimal target = fund.getTargetAmount();
+        BigDecimal remaining = target == null ? null : target.subtract(reservedAmount).max(BigDecimal.ZERO);
+        BigDecimal progress = target == null ? null : reservedAmount.multiply(BigDecimal.valueOf(100))
+                .divide(target, 2, RoundingMode.HALF_UP);
+        SinkingFundAllocationResponse latest = allocationRepository
+                .findFirstByWorkspaceIdAndSinkingFundIdOrderByOccurredAtDescCreatedAtDescIdDesc(fund.getWorkspace().getId(), fund.getId())
+                .map(allocation -> mapAllocation(allocation, null))
+                .orElse(null);
+        return SinkingFundSummaryResponse.builder()
+                .id(fund.getId())
+                .workspaceId(fund.getWorkspace().getId())
+                .name(fund.getName())
+                .status(fund.getStatus())
+                .reservedAmount(reservedAmount)
+                .targetAmount(target)
+                .remainingAmount(remaining)
+                .progressPercent(progress)
+                .targetDate(fund.getTargetDate())
+                .latestAllocation(latest)
+                .activeWorkspaceReservedTotal(activeWorkspaceReservedTotal)
+                .build();
+    }
+
     private BigDecimal reserved(UUID workspaceId, UUID fundId) {
         BigDecimal amount = allocationRepository.sumReservedAmount(workspaceId, fundId);
         return amount == null ? BigDecimal.ZERO : amount;
+    }
+
+    private Map<UUID, BigDecimal> reservedMap(UUID workspaceId, List<UUID> fundIds) {
+        if (fundIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<UUID, BigDecimal> totals = new HashMap<>();
+        for (Object[] row : allocationRepository.sumReservedAmounts(workspaceId, fundIds)) {
+            totals.put((UUID) row[0], (BigDecimal) row[1]);
+        }
+        return totals;
     }
 
     private record ValidatedFund(String name, String description, BigDecimal targetAmount,

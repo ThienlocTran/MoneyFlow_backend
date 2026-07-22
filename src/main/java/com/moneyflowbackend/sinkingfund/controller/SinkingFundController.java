@@ -8,6 +8,8 @@ import com.moneyflowbackend.sinkingfund.dto.SinkingFundAllocationResponse;
 import com.moneyflowbackend.sinkingfund.dto.SinkingFundPageResponse;
 import com.moneyflowbackend.sinkingfund.dto.SinkingFundRequest;
 import com.moneyflowbackend.sinkingfund.dto.SinkingFundResponse;
+import com.moneyflowbackend.sinkingfund.dto.SinkingFundSummaryPageResponse;
+import com.moneyflowbackend.sinkingfund.dto.SinkingFundSummaryResponse;
 import com.moneyflowbackend.sinkingfund.model.SinkingFundStatus;
 import com.moneyflowbackend.sinkingfund.service.SinkingFundService;
 import jakarta.validation.Valid;
@@ -45,12 +47,30 @@ public class SinkingFundController {
         return ResponseEntity.ok(ApiResponse.ok("Sinking funds loaded", response));
     }
 
+    @GetMapping("/summaries")
+    public ResponseEntity<ApiResponse<SinkingFundSummaryPageResponse>> summaries(
+            @PathVariable UUID workspaceId,
+            @RequestParam(required = false) String status,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        SinkingFundSummaryPageResponse response = sinkingFundService.summaries(workspaceId, parseStatus(status), page, size, currentUserId());
+        return ResponseEntity.ok(ApiResponse.ok("Sinking fund summaries loaded", response));
+    }
+
     @GetMapping("/{fundId}")
     public ResponseEntity<ApiResponse<SinkingFundResponse>> get(
             @PathVariable UUID workspaceId,
             @PathVariable UUID fundId) {
         SinkingFundResponse response = sinkingFundService.get(workspaceId, fundId, currentUserId());
         return ResponseEntity.ok(ApiResponse.ok("Sinking fund loaded", response));
+    }
+
+    @GetMapping("/{fundId}/summary")
+    public ResponseEntity<ApiResponse<SinkingFundSummaryResponse>> summary(
+            @PathVariable UUID workspaceId,
+            @PathVariable UUID fundId) {
+        SinkingFundSummaryResponse response = sinkingFundService.summary(workspaceId, fundId, currentUserId());
+        return ResponseEntity.ok(ApiResponse.ok("Sinking fund summary loaded", response));
     }
 
     @PostMapping
