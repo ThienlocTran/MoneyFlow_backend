@@ -79,7 +79,8 @@ class MigrationSqlSafetyTests {
                 "V9__transaction_income_source_links.sql",
                 "V10__spending_scope_foundation.sql",
                 "V11__obligation_spending_scope.sql",
-                "V12__sinking_funds.sql");
+                "V12__sinking_funds.sql",
+                "V14__student_loans.sql");
 
         for (String migrationName : migrationNames) {
             String sql = Files.readString(Path.of("src/main/resources/db/migration", migrationName));
@@ -106,6 +107,27 @@ class MigrationSqlSafetyTests {
         assertThat(normalized).doesNotContain("update ");
         assertThat(normalized).doesNotContain("insert ");
         assertThat(normalized).doesNotContain("create index");
+    }
+
+    @Test
+    void v14CreatesStudentLoansOnlyAndLeavesFinancialRuntimeAlone() throws Exception {
+        String sql = Files.readString(Path.of("src/main/resources/db/migration/V14__student_loans.sql"));
+        String normalized = sql.toLowerCase();
+
+        assertThat(normalized).contains("create table student_loans");
+        assertThat(Pattern.compile("create\\s+table", Pattern.CASE_INSENSITIVE).matcher(sql).results()).hasSize(1);
+        assertThat(normalized).contains("workspace_id uuid not null references workspaces(id)");
+        assertThat(normalized).contains("created_by_user_id uuid not null references users(id)");
+        assertThat(normalized).contains("current_principal numeric(19,2) not null");
+        assertThat(normalized).contains("annual_interest_rate numeric(9,6) not null");
+        assertThat(normalized).contains("minimum_monthly_payment numeric(19,2) not null");
+        assertThat(normalized).contains("status in ('active', 'paid_off', 'paused', 'archived')");
+        assertThat(normalized).doesNotContain("transactions");
+        assertThat(normalized).doesNotContain("wallet");
+        assertThat(normalized).doesNotContain("insert ");
+        assertThat(normalized).doesNotContain("update ");
+        assertThat(normalized).doesNotContain("drop ");
+        assertThat(normalized).doesNotContain("truncate ");
     }
 
     private int version(String migrationName) {
