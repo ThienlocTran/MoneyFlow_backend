@@ -12,8 +12,13 @@ import com.moneyflowbackend.workspace.model.Workspace;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -206,7 +211,8 @@ public class QuickEntryParser {
             }
         }
 
-        List<QuickEntryPreviewResponse.Candidate> candidates = buildCandidates(display, amountCandidates, keywords, categories, type, removableSpans);
+        List<QuickEntryPreviewResponse.Candidate> candidates = buildCandidates(display, amountCandidates, keywords, categories,
+                type, status, transactionDate, dateResult.time(), wallet, sourceWallet, destinationWallet);
         String description = amountCandidates.size() > 1
                 ? candidates.stream().findFirst().map(QuickEntryPreviewResponse.Candidate::getDescription).orElse(null)
                 : description(display, removableSpans, type, destinationWallet, amountCandidate, matchedWalletText);
@@ -416,7 +422,12 @@ public class QuickEntryParser {
             List<CategoryKeyword> keywords,
             List<Category> categories,
             TransactionType fallbackType,
-            List<Span> removableSpans) {
+            TransactionStatus status,
+            LocalDate transactionDate,
+            LocalTime transactionTime,
+            Wallet wallet,
+            Wallet sourceWallet,
+            Wallet destinationWallet) {
         if (amountCandidates.size() <= 1) {
             return List.of();
         }
@@ -434,20 +445,68 @@ public class QuickEntryParser {
                     ? null
                     : segmentCategory.category();
             String description = candidateDescription(segment, amountCandidate);
+            List<String> missingFields = new ArrayList<>();
             List<String> warnings = new ArrayList<>();
             if (category == null && segmentType != TransactionType.TRANSFER) {
+                missingFields.add("CATEGORY");
                 warnings.add("UNKNOWN_CATEGORY");
             }
+            if (segmentType == TransactionType.INCOME || segmentType == TransactionType.EXPENSE) {
+                if (wallet == null) {
+                    missingFields.add("WALLET");
+                }
+            } else if (segmentType == TransactionType.TRANSFER) {
+                if (sourceWallet == null) {
+                    missingFields.add("SOURCE_WALLET");
+                }
+                if (destinationWallet == null) {
+                    missingFields.add("DESTINATION_WALLET");
+                }
+            }
+            if (transactionDate == null) {
+                missingFields.add("DATE");
+            }
+            boolean ready = missingFields.isEmpty();
             candidates.add(QuickEntryPreviewResponse.Candidate.builder()
+                    .candidateId(candidateId(display, i, segment, amountCandidate.amount()))
+                    .originalText(segment)
                     .description(description)
                     .amount(amountCandidate.amount())
                     .type(segmentType)
+                    .status(status)
+                    .walletId(wallet == null ? null : wallet.getId())
+                    .walletName(wallet == null ? null : wallet.getName())
                     .categoryId(category == null ? null : category.getId())
                     .categoryName(category == null ? null : category.getName())
+                    .sourceWalletId(sourceWallet == null ? null : sourceWallet.getId())
+                    .sourceWalletName(sourceWallet == null ? null : sourceWallet.getName())
+                    .destinationWalletId(destinationWallet == null ? null : destinationWallet.getId())
+                    .destinationWalletName(destinationWallet == null ? null : destinationWallet.getName())
+                    .transactionDate(transactionDate)
+                    .transactionTime(transactionTime)
+                    .spendingScope(spendingScope(category))
+                    .confidence(ready ? 0.95 : 0.65)
+                    .readyToConfirm(ready)
+                    .validationStatus(ready ? "READY" : "NEEDS_REVIEW")
+                    .missingFields(missingFields)
                     .warnings(warnings)
                     .build());
         }
         return candidates;
+    }
+
+    private com.moneyflowbackend.common.model.SpendingScope spendingScope(Category category) {
+        return category == null ? null : category.getDefaultSpendingScope();
+    }
+
+    private String candidateId(String display, int index, String segment, BigDecimal amount) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest((display + "|" + index + "|" + segment + "|" + amount).getBytes(StandardCharsets.UTF_8));
+            return "cand_" + HexFormat.of().formatHex(hash, 0, 8);
+        } catch (NoSuchAlgorithmException ex) {
+            return "cand_" + index;
+        }
     }
 
     private String amountSegment(String display, List<QuickAmountParser.AmountCandidate> amountCandidates, int index) {
