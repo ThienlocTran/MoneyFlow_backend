@@ -95,6 +95,23 @@ public class CloudinaryVoiceAudioStorageService implements VoiceAudioStorageServ
     }
 
     @Override
+    public StoredVoiceAudioStream open(String storagePublicId, String mimeType) {
+        try {
+            VoiceAudioPlayback playback = playbackUrl(storagePublicId, mimeType);
+            HttpRequest request = HttpRequest.newBuilder(URI.create(playback.playbackUrl())).GET().build();
+            HttpResponse<byte[]> response = httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                throw storageFailed("Cloudinary playback failed");
+            }
+            return new StoredVoiceAudioStream(response.body(), mimeType, response.body().length);
+        } catch (BusinessException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            throw storageFailed("Cloudinary playback failed");
+        }
+    }
+
+    @Override
     public void delete(String storagePublicId) {
         try {
             long timestamp = Instant.now(clock).getEpochSecond();

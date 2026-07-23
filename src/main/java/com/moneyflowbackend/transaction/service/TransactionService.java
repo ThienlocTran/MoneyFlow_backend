@@ -1124,10 +1124,14 @@ public class TransactionService {
         if (tx.getVoiceRecordId() != null) {
             VoiceRecord voiceRecord = voiceRecords.get(tx.getVoiceRecordId());
             if (voiceRecord != null) {
-                boolean hasAudio = voiceRecord.getStoragePublicId() != null;
+                boolean hasAudio = voiceRecord.getAudioStorageKey() != null
+                        || voiceRecord.getStorageKey() != null
+                        || voiceRecord.getStoragePublicId() != null;
                 builder.hasVoiceAudio(hasAudio);
                 builder.voiceAudioAvailable(hasAudio);
                 builder.playbackAvailable(hasAudio);
+                builder.audioMimeType(voiceRecord.getMimeType());
+                builder.audioSizeBytes(voiceRecord.getFileSizeBytes());
                 builder.audioUploadedAt(voiceRecord.getAudioUploadedAt());
                 builder.voiceAudioStatus(voiceRecord.getVoiceStatus().name());
             }

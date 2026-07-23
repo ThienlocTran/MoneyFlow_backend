@@ -6,6 +6,7 @@ public interface VoiceAudioStorageService {
     boolean isEnabled();
     String provider();
     StoredVoiceAudio upload(String objectKey, MultipartFile file);
+    StoredVoiceAudioStream open(String storageKey, String mimeType);
     VoiceAudioPlayback playbackUrl(String storageKey, String mimeType);
     void delete(String storageKey);
 }

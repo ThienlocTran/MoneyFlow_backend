@@ -4,6 +4,10 @@ import com.moneyflowbackend.dto.ApiResponse;
 import com.moneyflowbackend.voice.dto.VoiceAudioPlaybackResponse;
 import com.moneyflowbackend.voice.dto.VoiceAudioUploadResponse;
 import com.moneyflowbackend.voice.service.VoiceAudioService;
+import com.moneyflowbackend.voice.storage.StoredVoiceAudioStream;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -49,9 +53,13 @@ public class VoiceRecordController {
     }
 
     @GetMapping("/{voiceRecordId}/audio")
-    public ResponseEntity<ApiResponse<VoiceAudioPlaybackResponse>> audio(@PathVariable UUID voiceRecordId) {
-        VoiceAudioPlaybackResponse res = voiceAudioService.playbackUrl(voiceRecordId, currentUserId());
-        return ResponseEntity.ok(ApiResponse.ok("Voice audio playback URL created", res));
+    public ResponseEntity<byte[]> audio(@PathVariable UUID voiceRecordId) {
+        StoredVoiceAudioStream audio = voiceAudioService.streamAudio(voiceRecordId, currentUserId());
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(audio.mimeType()))
+                .contentLength(audio.sizeBytes())
+                .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.inline().filename("voice-audio").build().toString())
+                .body(audio.bytes());
     }
 
     @DeleteMapping("/{voiceRecordId}/audio")

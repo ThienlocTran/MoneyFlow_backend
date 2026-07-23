@@ -41,6 +41,12 @@ public class VoiceRecord {
     @Column(name = "storage_key", length = 500)
     private String storageKey;
 
+    @Column(name = "audio_storage_provider", length = 40)
+    private String audioStorageProvider;
+
+    @Column(name = "audio_storage_key", length = 500)
+    private String audioStorageKey;
+
     @Column(name = "mime_type", length = 100)
     private String mimeType;
 

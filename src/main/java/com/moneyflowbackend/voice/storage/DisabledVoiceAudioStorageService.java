@@ -21,6 +21,11 @@ public class DisabledVoiceAudioStorageService implements VoiceAudioStorageServic
     }
 
     @Override
+    public StoredVoiceAudioStream open(String storageKey, String mimeType) {
+        throw notConfigured();
+    }
+
+    @Override
     public VoiceAudioPlayback playbackUrl(String storagePublicId, String mimeType) {
         throw notConfigured();
     }

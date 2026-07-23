@@ -50,6 +50,8 @@ public class TransactionResponse {
     private boolean hasVoiceAudio;
     private boolean voiceAudioAvailable;
     private boolean playbackAvailable;
+    private String audioMimeType;
+    private Long audioSizeBytes;
     private Instant audioUploadedAt;
     private String voiceAudioStatus;
     private boolean historical;

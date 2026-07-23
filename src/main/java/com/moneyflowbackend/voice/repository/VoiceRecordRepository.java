@@ -22,5 +22,10 @@ public interface VoiceRecordRepository extends JpaRepository<VoiceRecord, UUID> 
             @Param("workspaceId") UUID workspaceId,
             @Param("userId") UUID userId,
             @Param("idempotencyKey") String idempotencyKey);
-    List<VoiceRecord> findAllByRetentionUntilBeforeAndStoragePublicIdIsNotNull(LocalDate date);
+    @Query("""
+            SELECT v FROM VoiceRecord v
+            WHERE v.retentionUntil < :date
+              AND (v.audioStorageKey IS NOT NULL OR v.storageKey IS NOT NULL OR v.storagePublicId IS NOT NULL)
+            """)
+    List<VoiceRecord> findAllExpiredWithStoredAudio(@Param("date") LocalDate date);
 }

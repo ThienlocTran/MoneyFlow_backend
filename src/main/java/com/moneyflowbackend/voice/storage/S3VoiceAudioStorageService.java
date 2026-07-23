@@ -100,6 +100,23 @@ public class S3VoiceAudioStorageService implements VoiceAudioStorageService {
     }
 
     @Override
+    public StoredVoiceAudioStream open(String storageKey, String mimeType) {
+        try {
+            VoiceAudioPlayback playback = playbackUrl(storageKey, mimeType);
+            HttpRequest request = HttpRequest.newBuilder(URI.create(playback.playbackUrl())).GET().build();
+            HttpResponse<byte[]> response = httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                throw storageFailed("S3 voice audio playback failed");
+            }
+            return new StoredVoiceAudioStream(response.body(), mimeType, response.body().length);
+        } catch (BusinessException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            throw storageFailed("S3 voice audio playback failed");
+        }
+    }
+
+    @Override
     public void delete(String storageKey) {
         try {
             HttpResponse<String> response = httpClient.send(
