@@ -55,11 +55,27 @@ public class QuickEntryPreviewResponse {
     @AllArgsConstructor
     @Builder
     public static class Candidate {
+        private String candidateId;
+        private String originalText;
         private String description;
         private BigDecimal amount;
         private TransactionType type;
+        private TransactionStatus status;
+        private UUID walletId;
+        private String walletName;
         private UUID categoryId;
         private String categoryName;
+        private UUID sourceWalletId;
+        private String sourceWalletName;
+        private UUID destinationWalletId;
+        private String destinationWalletName;
+        private LocalDate transactionDate;
+        private LocalTime transactionTime;
+        private SpendingScope spendingScope;
+        private double confidence;
+        private boolean readyToConfirm;
+        private String validationStatus;
+        private List<String> missingFields;
         private List<String> warnings;
     }
 }
