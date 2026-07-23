@@ -503,6 +503,11 @@ public class TransactionService {
 
     @Transactional
     public TransactionResponse createWithSource(UUID workspaceId, TransactionRequest req, UUID userId, TransactionSourceType sourceType, String rawInput, UUID voiceRecordId) {
+        return createWithSource(workspaceId, req, userId, sourceType, rawInput, voiceRecordId, null);
+    }
+
+    @Transactional
+    public TransactionResponse createWithSource(UUID workspaceId, TransactionRequest req, UUID userId, TransactionSourceType sourceType, String rawInput, UUID voiceRecordId, String sourceReference) {
         requireWritableMember(workspaceId, userId);
         Workspace workspace = findWorkspace(workspaceId);
         User user = userRepository.findById(userId)
@@ -530,6 +535,7 @@ public class TransactionService {
                 .note(normalizeText(req.getNote()))
                 .sourceType(normalizedSourceType)
                 .rawInput(normalizeText(rawInput))
+                .sourceReference(normalizeText(sourceReference))
                 .walletUnknown(false)
                 .historical(false)
                 .affectsWalletBalance(true)
@@ -569,6 +575,11 @@ public class TransactionService {
         tx.setCategory(category);
         tx = transactionRepository.save(tx);
         transactionAuditService.record(tx, userId, TransactionAuditAction.CREATE, null, transactionAuditService.snapshot(tx));
+        return mapToResponse(tx);
+    }
+
+    @Transactional(readOnly = true)
+    public TransactionResponse mapExistingToResponse(Transaction tx) {
         return mapToResponse(tx);
     }
 

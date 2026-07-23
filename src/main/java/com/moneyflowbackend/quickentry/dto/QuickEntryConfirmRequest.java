@@ -13,6 +13,10 @@ import java.util.UUID;
 
 @Data
 public class QuickEntryConfirmRequest {
+    private String candidateId;
+    private String clientCandidateId;
+    private VoiceIntentType intentType;
+    private String idempotencyKey;
     private String rawInput;
     private TransactionType type;
     private TransactionStatus status;

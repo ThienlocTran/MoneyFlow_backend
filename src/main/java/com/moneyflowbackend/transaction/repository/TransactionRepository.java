@@ -31,6 +31,19 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID>,
     boolean existsByWorkspaceIdAndVoiceRecordIdAndSourceType(UUID workspaceId, UUID voiceRecordId, TransactionSourceType sourceType);
     Optional<Transaction> findByIdAndWorkspaceId(UUID transactionId, UUID workspaceId);
     Optional<Transaction> findByWorkspaceIdAndMigrationKey(UUID workspaceId, String migrationKey);
+    @Query("""
+            SELECT t FROM Transaction t
+            WHERE t.workspace.id = :workspaceId
+              AND t.createdByUser.id = :userId
+              AND t.sourceType = :sourceType
+              AND t.sourceReference = :sourceReference
+            ORDER BY t.createdAt ASC
+            """)
+    List<Transaction> findSourceReferenceMatches(
+            @Param("workspaceId") UUID workspaceId,
+            @Param("userId") UUID userId,
+            @Param("sourceType") TransactionSourceType sourceType,
+            @Param("sourceReference") String sourceReference);
 
     @Query("""
             SELECT t.id AS id,
