@@ -15,6 +15,8 @@ import com.moneyflowbackend.workspace.model.WorkspaceMember;
 import com.moneyflowbackend.workspace.model.WorkspaceRole;
 import com.moneyflowbackend.workspace.repository.WorkspaceMemberRepository;
 import com.moneyflowbackend.workspace.repository.WorkspaceRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -31,6 +33,8 @@ import java.util.UUID;
 
 @Service
 public class VoiceAudioService {
+    private static final Logger log = LoggerFactory.getLogger(VoiceAudioService.class);
+
     private final VoiceRecordRepository voiceRecordRepository;
     private final TransactionRepository transactionRepository;
     private final WorkspaceRepository workspaceRepository;
@@ -116,8 +120,9 @@ public class VoiceAudioService {
         LocalDate today = LocalDate.now(clock);
         int deleted = 0;
         for (VoiceRecord voiceRecord : voiceRecordRepository.findAllByRetentionUntilBeforeAndStoragePublicIdIsNotNull(today)) {
-            clearStoredAudio(voiceRecord);
-            deleted += 1;
+            if (clearStoredAudio(voiceRecord, true)) {
+                deleted += 1;
+            }
         }
         return deleted;
     }
@@ -127,14 +132,26 @@ public class VoiceAudioService {
         VoiceRecord voiceRecord = findVoiceRecord(voiceRecordId);
         requireWritableMember(voiceRecord, userId);
         requireVoiceTransaction(voiceRecord);
-        clearStoredAudio(voiceRecord);
+        clearStoredAudio(voiceRecord, false);
         return toUploadResponse(voiceRecord);
     }
 
-    private void clearStoredAudio(VoiceRecord voiceRecord) {
+    private boolean clearStoredAudio(VoiceRecord voiceRecord, boolean bestEffort) {
         String storagePublicId = voiceRecord.getStoragePublicId();
         if (storagePublicId != null && !storagePublicId.isBlank()) {
-            storageService.delete(storagePublicId);
+            if (!storageService.isEnabled()) {
+                log.warn("Voice audio cleanup skipped: voiceRecordId={}, reason=storage_disabled", voiceRecord.getId());
+                return false;
+            }
+            try {
+                storageService.delete(storagePublicId);
+            } catch (RuntimeException ex) {
+                if (!bestEffort) {
+                    throw ex;
+                }
+                log.warn("Voice audio cleanup skipped: voiceRecordId={}, reason=provider_delete_failed", voiceRecord.getId());
+                return false;
+            }
         }
         voiceRecord.setAudioUrl(null);
         voiceRecord.setStoragePublicId(null);
@@ -143,6 +160,7 @@ public class VoiceAudioService {
         voiceRecord.setDurationSeconds(null);
         voiceRecord.setVoiceStatus(VoiceRecordStatus.AUDIO_DELETED);
         voiceRecordRepository.save(voiceRecord);
+        return true;
     }
 
     private VoiceRecord findVoiceRecord(UUID voiceRecordId) {
