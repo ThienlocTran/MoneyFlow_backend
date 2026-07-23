@@ -137,6 +137,14 @@ public class QuickEntryService {
 
     @Transactional
     public TransactionResponse confirmVoice(UUID workspaceId, QuickEntryConfirmRequest req, UUID userId) {
+        String idempotencyKey = requireVoiceIdempotencyKey(req);
+        var existingVoiceRecord = voiceRecordRepository.findVoiceIdempotencyMatch(workspaceId, userId, idempotencyKey);
+        if (existingVoiceRecord.isPresent()) {
+            return transactionRepository.findByWorkspaceIdAndVoiceRecordIdAndSourceType(
+                            workspaceId, existingVoiceRecord.get().getId(), TransactionSourceType.VOICE)
+                    .map(transactionService::mapExistingToResponse)
+                    .orElseThrow(() -> new BusinessException("VOICE_CONFIRM_INCOMPLETE", "Voice confirmation is incomplete"));
+        }
         return confirmWithSource(workspaceId, req, userId, TransactionSourceType.VOICE);
     }
 
@@ -156,6 +164,7 @@ public class QuickEntryService {
                     .fileSizeBytes(null)
                     .originalTranscript(normalize(req.getRawInput()))
                     .editedTranscript(normalize(req.getRawInput()))
+                    .idempotencyKey(sourceType == TransactionSourceType.VOICE ? requireVoiceIdempotencyKey(req) : null)
                     .voiceStatus(VoiceRecordStatus.CONFIRMED)
                     .build());
             return transactionService.createWithSource(workspaceId, txReq, userId, sourceType, req.getRawInput(), voiceRecord.getId());
@@ -366,5 +375,16 @@ public class QuickEntryService {
         }
         String trimmed = value.trim();
         return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private String requireVoiceIdempotencyKey(QuickEntryConfirmRequest req) {
+        String key = req == null ? null : normalize(req.getIdempotencyKey());
+        if (key == null) {
+            throw new BusinessException("VOICE_IDEMPOTENCY_KEY_REQUIRED", "Voice idempotency key is required");
+        }
+        if (key.length() > 100) {
+            throw new BusinessException("VOICE_IDEMPOTENCY_KEY_INVALID", "Voice idempotency key is invalid");
+        }
+        return key;
     }
 }

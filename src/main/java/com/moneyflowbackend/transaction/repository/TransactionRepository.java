@@ -29,6 +29,7 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID>,
 
     long countByWorkspaceIdAndCategoryId(UUID workspaceId, UUID categoryId);
     boolean existsByWorkspaceIdAndVoiceRecordIdAndSourceType(UUID workspaceId, UUID voiceRecordId, TransactionSourceType sourceType);
+    Optional<Transaction> findByWorkspaceIdAndVoiceRecordIdAndSourceType(UUID workspaceId, UUID voiceRecordId, TransactionSourceType sourceType);
     Optional<Transaction> findByIdAndWorkspaceId(UUID transactionId, UUID workspaceId);
     Optional<Transaction> findByWorkspaceIdAndMigrationKey(UUID workspaceId, String migrationKey);
 
