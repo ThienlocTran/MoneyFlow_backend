@@ -37,7 +37,9 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest
@@ -98,13 +100,39 @@ class EmergencyFundPlanApiIntegrationTests {
     void planValidationRejectsInvalidBoundaries() {
         TestContext ctx = createContext("ef_validation", WorkspaceRole.OWNER);
 
-        assertCode(() -> emergencyFundService.get(ctx.workspace().getId(), ctx.user().getId()), "EMERGENCY_FUND_PLAN_NOT_FOUND");
+        assertThat(emergencyFundService.get(ctx.workspace().getId(), ctx.user().getId())).isNull();
         assertCode(() -> emergencyFundService.put(ctx.workspace().getId(), request(0, "1000.00"), ctx.user().getId()),
                 "INVALID_EMERGENCY_FUND_TARGET_MONTHS");
         assertCode(() -> emergencyFundService.put(ctx.workspace().getId(), request(1, "0.00"), ctx.user().getId()),
                 "INVALID_EMERGENCY_FUND_MANUAL_MONTHLY_EXPENSE");
         assertCode(() -> emergencyFundService.updateStatus(ctx.workspace().getId(), null, ctx.user().getId()),
                 "INVALID_EMERGENCY_FUND_PLAN_STATUS");
+    }
+
+    @Test
+    void getPlanRouteReturnsNullForUnconfiguredWorkspaceAndKeepsWorkspaceErrorsDistinct() throws Exception {
+        String username = "ef_get_" + UUID.randomUUID().toString().substring(0, 8);
+        UserResponse registered = authService.register(registerRequest(username));
+        TokenResponse token = authService.login(loginRequest(username));
+        Workspace workspace = workspaceRepository.findAllByUserId(registered.getId()).getFirst();
+
+        mockMvc.perform(get("/api/workspaces/" + workspace.getId() + "/emergency-fund")
+                        .header("Authorization", "Bearer " + token.getAccessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data").doesNotExist());
+
+        mockMvc.perform(get("/api/workspaces/" + UUID.randomUUID() + "/emergency-fund")
+                        .header("Authorization", "Bearer " + token.getAccessToken()))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("WORKSPACE_NOT_FOUND"));
+
+        String outsiderUsername = "ef_get_out_" + UUID.randomUUID().toString().substring(0, 8);
+        TokenResponse outsiderToken = authService.login(loginRequest(authService.register(registerRequest(outsiderUsername)).getUsername()));
+        mockMvc.perform(get("/api/workspaces/" + workspace.getId() + "/emergency-fund")
+                        .header("Authorization", "Bearer " + outsiderToken.getAccessToken()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("WORKSPACE_ACCESS_DENIED"));
     }
 
     @Test
