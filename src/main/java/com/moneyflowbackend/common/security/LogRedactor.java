@@ -11,6 +11,7 @@ public final class LogRedactor {
     private static final Pattern JDBC_URL = Pattern.compile("jdbc:postgresql://[^\\s,;]+", Pattern.CASE_INSENSITIVE);
     private static final Pattern POSTGRES_URL = Pattern.compile("postgresql://[^\\s,;]+", Pattern.CASE_INSENSITIVE);
     private static final Pattern CLOUDINARY_URL = Pattern.compile("cloudinary://[^\\s,;]+", Pattern.CASE_INSENSITIVE);
+    private static final Pattern CLOUDINARY_HTTP_URL = Pattern.compile("https?://[^\\s,;]*cloudinary\\.com/[^\\s,;]+", Pattern.CASE_INSENSITIVE);
     private static final Pattern SIGNED_AUDIO_URL = Pattern.compile("https?://[^\\s,;]*(cloudinary|audio|voice)[^\\s,;]*(signature|token|expires|expires_at|X-Amz-Signature)[^\\s,;]*", Pattern.CASE_INSENSITIVE);
     private static final Pattern STORAGE_KEY = Pattern.compile("(?i)(storagePublicId|storage_public_id|storageKey|storage_key|public_id|voice storage key)(\\s*[:=]\\s*)([^\\s,;]+)");
 
@@ -27,6 +28,7 @@ public final class LogRedactor {
         redacted = JDBC_URL.matcher(redacted).replaceAll(REDACTED);
         redacted = POSTGRES_URL.matcher(redacted).replaceAll(REDACTED);
         redacted = CLOUDINARY_URL.matcher(redacted).replaceAll(REDACTED);
+        redacted = CLOUDINARY_HTTP_URL.matcher(redacted).replaceAll(REDACTED);
         redacted = SIGNED_AUDIO_URL.matcher(redacted).replaceAll(REDACTED);
         redacted = KEY_VALUE_PRIVATE_TEXT.matcher(redacted).replaceAll("$1$2" + REDACTED);
         return STORAGE_KEY.matcher(redacted).replaceAll("$1$2" + REDACTED);

@@ -15,7 +15,7 @@ public class VoiceAudioStorageConfig {
     VoiceAudioStorageService voiceAudioStorageService(
             Clock clock,
             @Value("${VOICE_AUDIO_STORAGE_PROVIDER:${MONEYFLOW_AUDIO_STORAGE_PROVIDER:disabled}}") String provider,
-            @Value("${VOICE_AUDIO_STORAGE_ENABLED:false}") boolean enabled,
+            @Value("${VOICE_AUDIO_STORAGE_ENABLED:}") String enabled,
             @Value("${MONEYFLOW_CLOUDINARY_CLOUD_NAME:}") String cloudName,
             @Value("${MONEYFLOW_CLOUDINARY_API_KEY:}") String apiKey,
             @Value("${MONEYFLOW_CLOUDINARY_API_SECRET:}") String apiSecret,
@@ -26,7 +26,7 @@ public class VoiceAudioStorageConfig {
             @Value("${VOICE_AUDIO_S3_ACCESS_KEY:}") String s3AccessKey,
             @Value("${VOICE_AUDIO_S3_SECRET_KEY:}") String s3SecretKey,
             @Value("${VOICE_AUDIO_S3_PATH_STYLE_ACCESS:true}") boolean s3PathStyleAccess) {
-        if (!enabled || "disabled".equalsIgnoreCase(provider)) {
+        if (!isEnabled(enabled, provider)) {
             return new DisabledVoiceAudioStorageService();
         }
         if ("s3".equalsIgnoreCase(provider) || "r2".equalsIgnoreCase(provider)) {
@@ -69,5 +69,12 @@ public class VoiceAudioStorageConfig {
 
     private boolean isBlank(String value) {
         return value == null || value.isBlank();
+    }
+
+    private boolean isEnabled(String enabled, String provider) {
+        if ("disabled".equalsIgnoreCase(provider)) {
+            return false;
+        }
+        return isBlank(enabled) || Boolean.parseBoolean(enabled);
     }
 }

@@ -105,7 +105,7 @@ class VoiceAudioServiceTests {
         assertThat(response.getVoiceAudioStatus()).isEqualTo("AUDIO_STORED");
         assertThat(response.getRetentionUntil()).isNull();
         assertThat(ctx.voiceRecord().getStoragePublicId())
-                .startsWith("stored/workspaces/" + ctx.workspace().getId() + "/voice-records/" + ctx.voiceRecord().getId() + "/");
+                .startsWith("stored/2026-06/2026-06-15/");
         assertThat(ctx.voiceRecord().getStorageProvider()).isEqualTo("test");
         assertThat(ctx.voiceRecord().getStorageKey()).isEqualTo(ctx.voiceRecord().getStoragePublicId());
         assertThat(ctx.voiceRecord().getAudioStorageProvider()).isEqualTo("test");
@@ -133,16 +133,16 @@ class VoiceAudioServiceTests {
     }
 
     @Test
-    void playbackUrlDoesNotExposePermanentPublicUrl() {
+    void playbackUrlUsesBackendAudioEndpoint() {
         TestContext ctx = context(new FakeStorageService());
         ctx.voiceRecord().setStoragePublicId("stored/audio");
         ctx.voiceRecord().setMimeType("audio/webm");
 
         var response = ctx.service().playbackUrl(ctx.voiceRecord().getId(), ctx.user().getId());
 
-        assertThat(response.getPlaybackUrl()).startsWith("https://signed.example/");
-        assertThat(response.getPlaybackUrl()).doesNotContain("res.cloudinary.com/public");
-        assertThat(response.getExpiresAt()).isEqualTo(Instant.parse("2026-06-15T01:05:00Z"));
+        assertThat(response.getPlaybackUrl()).isEqualTo("/api/voice-records/" + ctx.voiceRecord().getId() + "/audio");
+        assertThat(response.getPlaybackUrl()).doesNotContain("cloudinary");
+        assertThat(response.getExpiresAt()).isNull();
     }
 
     @Test

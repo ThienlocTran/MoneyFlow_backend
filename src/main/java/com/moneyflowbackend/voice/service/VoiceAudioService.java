@@ -11,7 +11,6 @@ import com.moneyflowbackend.voice.model.VoiceRecordStatus;
 import com.moneyflowbackend.voice.repository.VoiceRecordRepository;
 import com.moneyflowbackend.voice.storage.StoredVoiceAudio;
 import com.moneyflowbackend.voice.storage.StoredVoiceAudioStream;
-import com.moneyflowbackend.voice.storage.VoiceAudioPlayback;
 import com.moneyflowbackend.voice.storage.VoiceAudioStorageService;
 import com.moneyflowbackend.workspace.model.WorkspaceMember;
 import com.moneyflowbackend.workspace.model.WorkspaceRole;
@@ -28,6 +27,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.util.Arrays;
 import java.util.Locale;
 import java.util.Set;
@@ -123,12 +123,11 @@ public class VoiceAudioService {
         if (storageKey(voiceRecord) == null || storageKey(voiceRecord).isBlank()) {
             throw new BusinessException("AUDIO_NOT_AVAILABLE", "Voice audio is not available", HttpStatus.NOT_FOUND);
         }
-        VoiceAudioPlayback playback = storageService.playbackUrl(storageKey(voiceRecord), voiceRecord.getMimeType());
         return VoiceAudioPlaybackResponse.builder()
                 .voiceRecordId(voiceRecord.getId())
-                .playbackUrl(playback.playbackUrl())
-                .expiresAt(playback.expiresAt())
-                .mimeType(playback.mimeType())
+                .playbackUrl("/api/voice-records/" + voiceRecord.getId() + "/audio")
+                .expiresAt(null)
+                .mimeType(voiceRecord.getMimeType())
                 .build();
     }
 
@@ -276,9 +275,10 @@ public class VoiceAudioService {
     }
 
     private String objectKey(VoiceRecord voiceRecord) {
-        return "workspaces/%s/voice-records/%s/%s.%s".formatted(
-                voiceRecord.getWorkspace().getId(),
-                voiceRecord.getId(),
+        LocalDate today = LocalDate.now(clock);
+        return "%s/%s/%s.%s".formatted(
+                YearMonth.from(today),
+                today,
                 UUID.randomUUID(),
                 extension(voiceRecord.getMimeType()));
     }
