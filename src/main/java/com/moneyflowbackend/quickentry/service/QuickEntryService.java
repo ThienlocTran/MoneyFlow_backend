@@ -192,6 +192,9 @@ public class QuickEntryService {
         if (selected.isEmpty()) {
             throw new BusinessException("VOICE_BATCH_EMPTY", "At least one selected candidate is required");
         }
+        for (QuickEntryBatchConfirmRequest.CandidateConfirmRequest candidate : selected) {
+            rejectUnsupportedVoiceIntent(candidate.getIntentType(), candidate.getType());
+        }
         VoiceRecord voiceRecord = voiceRecordRepository.save(VoiceRecord.builder()
                 .workspace(workspace)
                 .createdByUser(userRepository.findById(userId)
@@ -512,17 +515,20 @@ public class QuickEntryService {
     }
 
     private void rejectUnsupportedVoiceIntent(QuickEntryConfirmRequest req) {
-        VoiceIntentType intentType = req == null ? null : req.getIntentType();
+        rejectUnsupportedVoiceIntent(req == null ? null : req.getIntentType(), req == null ? null : req.getType());
+    }
+
+    private void rejectUnsupportedVoiceIntent(VoiceIntentType intentType, TransactionType type) {
         if (intentType == null) {
             return;
         }
-        if (intentType == VoiceIntentType.TRANSACTION_EXPENSE && req.getType() == TransactionType.EXPENSE) {
+        if (intentType == VoiceIntentType.TRANSACTION_EXPENSE && type == TransactionType.EXPENSE) {
             return;
         }
-        if (intentType == VoiceIntentType.TRANSACTION_INCOME && req.getType() == TransactionType.INCOME) {
+        if (intentType == VoiceIntentType.TRANSACTION_INCOME && type == TransactionType.INCOME) {
             return;
         }
-        if (intentType == VoiceIntentType.TRANSACTION_TRANSFER && req.getType() == TransactionType.TRANSFER) {
+        if (intentType == VoiceIntentType.TRANSACTION_TRANSFER && type == TransactionType.TRANSFER) {
             return;
         }
         throw new BusinessException("VOICE_INTENT_NOT_COMMITTABLE", "Voice intent is not supported for commit");

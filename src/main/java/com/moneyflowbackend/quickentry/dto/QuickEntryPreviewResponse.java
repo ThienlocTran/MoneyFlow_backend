@@ -45,6 +45,8 @@ public class QuickEntryPreviewResponse {
     private double confidence;
     private boolean readyToConfirm;
     private String unsupportedReason;
+    private String suggestedManualRoute;
+    private String suggestedManualActionLabel;
     @Builder.Default
     private List<String> missingFields = new ArrayList<>();
     @Builder.Default
@@ -87,6 +89,8 @@ public class QuickEntryPreviewResponse {
         @Builder.Default
         private List<String> missingFields = new ArrayList<>();
         private String unsupportedReason;
+        private String suggestedManualRoute;
+        private String suggestedManualActionLabel;
         private List<String> warnings;
     }
 }

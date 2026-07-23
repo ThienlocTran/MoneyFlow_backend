@@ -26,6 +26,7 @@ public class QuickEntryBatchConfirmRequest {
         private String candidateId;
         private String clientCandidateId;
         private Boolean selected;
+        private VoiceIntentType intentType;
         private TransactionType type;
         private TransactionStatus status;
         private BigDecimal amount;

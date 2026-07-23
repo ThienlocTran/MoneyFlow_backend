@@ -5,6 +5,7 @@ import com.moneyflowbackend.category.model.CategoryKeyword;
 import com.moneyflowbackend.category.model.CategoryType;
 import com.moneyflowbackend.quickentry.dto.VoiceCandidateStatus;
 import com.moneyflowbackend.quickentry.dto.VoiceIntentType;
+import com.moneyflowbackend.quickentry.dto.QuickEntryPreviewResponse;
 import com.moneyflowbackend.quickentry.parser.QuickAmountParser;
 import com.moneyflowbackend.quickentry.parser.QuickDateParser;
 import com.moneyflowbackend.quickentry.parser.QuickEntryParser;
@@ -71,6 +72,19 @@ class VoiceIntentFoundationParserTests {
     }
 
     @Test
+    void phaseTwoVietnameseDraftExamplesStayDraftOnly() {
+        Fixture f = fixture();
+
+        assertDraft(parser.parse("cho Bảo mượn 750k", f.workspace(), f.keywords(), f.categories(), f.wallets()), VoiceIntentType.DEBT_CREATE);
+        assertDraft(parser.parse("Bảo trả tôi 180k", f.workspace(), f.keywords(), f.categories(), f.wallets()), VoiceIntentType.DEBT_PAYMENT);
+        assertDraft(parser.parse("trả nợ 1 triệu cho chị Nga", f.workspace(), f.keywords(), f.categories(), f.wallets()), VoiceIntentType.DEBT_PAYMENT);
+        assertDraft(parser.parse("góp 300k vào mục tiêu du lịch", f.workspace(), f.keywords(), f.categories(), f.wallets()), VoiceIntentType.SAVINGS_GOAL_CONTRIBUTION);
+        assertDraft(parser.parse("góp 500k vào quỹ sửa xe", f.workspace(), f.keywords(), f.categories(), f.wallets()), VoiceIntentType.SINKING_FUND_CONTRIBUTION);
+        assertDraft(parser.parse("ví tiền mặt còn 2 triệu", f.workspace(), f.keywords(), f.categories(), f.wallets()), VoiceIntentType.WALLET_BALANCE_SNAPSHOT);
+        assertDraft(parser.parse("đã trả tiền điện tháng này", f.workspace(), f.keywords(), f.categories(), f.wallets()), VoiceIntentType.RECURRING_OBLIGATION_PAYMENT);
+    }
+
+    @Test
     void unknownUnsupportedIsNotCoercedToExpense() {
         Fixture f = fixture();
 
@@ -96,6 +110,15 @@ class VoiceIntentFoundationParserTests {
                 keyword(workspace, food, "an sang", 10),
                 keyword(workspace, salary, "luong", 10));
         return new Fixture(workspace, List.of(cash, bank), List.of(food, salary), keywords);
+    }
+
+    private void assertDraft(QuickEntryPreviewResponse preview, VoiceIntentType intentType) {
+        assertThat(preview.getIntentType()).isEqualTo(intentType);
+        assertThat(preview.getCandidateStatus()).isEqualTo(VoiceCandidateStatus.UNSUPPORTED);
+        assertThat(preview.isReadyToConfirm()).isFalse();
+        assertThat(preview.getType()).isNull();
+        assertThat(preview.getSuggestedManualRoute()).isNotBlank();
+        assertThat(preview.getWarnings()).contains("VOICE_INTENT_NOT_COMMITTABLE");
     }
 
     private Wallet wallet(String name, WalletType type, boolean isDefault) {

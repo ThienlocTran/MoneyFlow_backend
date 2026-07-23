@@ -18,6 +18,7 @@ import com.moneyflowbackend.quickentry.dto.QuickEntryBatchConfirmRequest;
 import com.moneyflowbackend.quickentry.dto.QuickEntryButtonRequest;
 import com.moneyflowbackend.quickentry.dto.QuickEntryConfirmRequest;
 import com.moneyflowbackend.quickentry.dto.QuickEntryPreviewResponse;
+import com.moneyflowbackend.quickentry.dto.VoiceIntentType;
 import com.moneyflowbackend.quickentry.service.QuickEntryService;
 import com.moneyflowbackend.transaction.model.Transaction;
 import com.moneyflowbackend.transaction.audit.TransactionAuditLogRepository;
@@ -323,6 +324,25 @@ class QuickEntryModuleIntegrationTests {
         req.getCandidates().get(1).setType(TransactionType.ADJUSTMENT);
 
         assertBusinessCode(() -> quickEntryService.confirmVoiceBatch(ctx.workspace().getId(), req, ctx.user().getId()), "INVALID_TRANSACTION_TYPE");
+        TestTransaction.flagForRollback();
+        TestTransaction.end();
+        TestTransaction.start();
+        assertThat(transactionRepository.findAll()).filteredOn(tx -> tx.getWorkspace().getId().equals(ctx.workspace().getId())).isEmpty();
+        assertThat(voiceRecordRepository.findAll()).filteredOn(vr -> vr.getWorkspace().getId().equals(ctx.workspace().getId())).isEmpty();
+    }
+
+    @Test
+    void voiceBatchConfirmRejectsSelectedUnsupportedIntentBeforeSavingVoiceRecord() {
+        TestContext ctx = createContext("qe_voice_unsupported", WorkspaceRole.OWNER);
+        wallet(ctx, "Tien mat", WalletType.CASH, true, "0");
+        Category food = category(ctx, "Food", CategoryType.EXPENSE, true, false, false);
+        keyword(ctx, food, "an sang", 10);
+        QuickEntryPreviewResponse preview = quickEntryService.parse(ctx.workspace().getId(), "an sang 35k cafe 20k", ctx.user().getId());
+        QuickEntryBatchConfirmRequest req = batch("voice-batch-unsupported-intent", preview);
+        req.getCandidates().get(1).setIntentType(VoiceIntentType.DEBT_CREATE);
+        req.getCandidates().get(1).setType(TransactionType.EXPENSE);
+
+        assertBusinessCode(() -> quickEntryService.confirmVoiceBatch(ctx.workspace().getId(), req, ctx.user().getId()), "VOICE_INTENT_NOT_COMMITTABLE");
         TestTransaction.flagForRollback();
         TestTransaction.end();
         TestTransaction.start();

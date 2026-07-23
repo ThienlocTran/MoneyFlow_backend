@@ -282,6 +282,8 @@ public class QuickEntryParser {
         warnings.add("VOICE_INTENT_NOT_COMMITTABLE");
         String reason = "VOICE_COMMIT_NOT_SUPPORTED";
         String candidateId = candidateId(display, 0, display, amount);
+        String route = suggestedManualRoute(intentType);
+        String label = suggestedManualActionLabel(intentType);
         return QuickEntryPreviewResponse.builder()
                 .candidateId(candidateId)
                 .intentType(intentType)
@@ -297,6 +299,8 @@ public class QuickEntryParser {
                 .missingFields(new ArrayList<>(missing))
                 .warnings(new ArrayList<>(warnings))
                 .unsupportedReason(reason)
+                .suggestedManualRoute(route)
+                .suggestedManualActionLabel(label)
                 .candidates(List.of(QuickEntryPreviewResponse.Candidate.builder()
                         .candidateId(candidateId)
                         .intentType(intentType)
@@ -310,6 +314,8 @@ public class QuickEntryParser {
                         .missingFields(new ArrayList<>(missing))
                         .warnings(new ArrayList<>(warnings))
                         .unsupportedReason(reason)
+                        .suggestedManualRoute(route)
+                        .suggestedManualActionLabel(label)
                         .build()))
                 .build();
     }
@@ -318,28 +324,53 @@ public class QuickEntryParser {
         if (hasAny(normalized, "xem bao cao", "bao cao", "thong ke", "xem thong ke", "report", "dashboard")) {
             return VoiceIntentType.UNKNOWN_UNSUPPORTED;
         }
-        if (hasAny(normalized, "so du", "cap nhat so du", "chot so du", "balance snapshot")) {
+        if ((hasAny(normalized, "vi", "wallet") && hasAny(normalized, "con", "con lai"))
+                || hasAny(normalized, "so du", "cap nhat so du", "chot so du", "balance snapshot")) {
             return VoiceIntentType.WALLET_BALANCE_SNAPSHOT;
         }
-        if (hasAny(normalized, "tra no", "thanh toan no", "dong no")) {
+        if (hasAny(normalized, "tra no", "thanh toan no", "dong no", "tra toi", "tra minh")) {
             return VoiceIntentType.DEBT_PAYMENT;
         }
-        if (hasAny(normalized, "tao no", "them no", "cho vay", "di vay", "muon no")) {
+        if (hasAny(normalized, "tao no", "them no", "cho vay", "di vay", "muon no", "muon")) {
             return VoiceIntentType.DEBT_CREATE;
         }
-        if (hasAny(normalized, "muc tieu tiet kiem", "tiet kiem cho", "gop tiet kiem")) {
+        if (hasAny(normalized, "muc tieu tiet kiem", "tiet kiem cho", "gop tiet kiem", "vao muc tieu")) {
             return VoiceIntentType.SAVINGS_GOAL_CONTRIBUTION;
         }
-        if (hasAny(normalized, "quy chim", "sinking fund", "gop quy")) {
+        if (hasAny(normalized, "quy chim", "sinking fund", "gop quy", "vao quy")) {
             return VoiceIntentType.SINKING_FUND_CONTRIBUTION;
         }
         if (hasAny(normalized, "quy khan cap", "emergency fund", "khan cap")) {
             return VoiceIntentType.EMERGENCY_FUND_CONTRIBUTION;
         }
-        if (hasAny(normalized, "hoa don dinh ky", "nghia vu dinh ky", "dong tien nha", "tra tien nha")) {
+        if (hasAny(normalized, "hoa don dinh ky", "nghia vu dinh ky", "dong tien nha", "tra tien nha", "tien dien", "tien wifi")) {
             return VoiceIntentType.RECURRING_OBLIGATION_PAYMENT;
         }
         return null;
+    }
+
+    private String suggestedManualRoute(VoiceIntentType intentType) {
+        return switch (intentType) {
+            case DEBT_CREATE, DEBT_PAYMENT -> "/debts";
+            case SAVINGS_GOAL_CONTRIBUTION -> "/savings-goals";
+            case SINKING_FUND_CONTRIBUTION -> "/sinking-funds";
+            case EMERGENCY_FUND_CONTRIBUTION -> "/emergency-fund";
+            case WALLET_BALANCE_SNAPSHOT -> "/wallets";
+            case RECURRING_OBLIGATION_PAYMENT -> "/recurring-obligations";
+            default -> null;
+        };
+    }
+
+    private String suggestedManualActionLabel(VoiceIntentType intentType) {
+        return switch (intentType) {
+            case DEBT_CREATE, DEBT_PAYMENT -> "Mở trang nợ";
+            case SAVINGS_GOAL_CONTRIBUTION -> "Mở mục tiêu tiết kiệm";
+            case SINKING_FUND_CONTRIBUTION -> "Mở quỹ";
+            case EMERGENCY_FUND_CONTRIBUTION -> "Mở quỹ dự phòng";
+            case WALLET_BALANCE_SNAPSHOT -> "Mở ví";
+            case RECURRING_OBLIGATION_PAYMENT -> "Mở khoản định kỳ";
+            default -> null;
+        };
     }
 
     private boolean hasAny(String normalized, String... phrases) {
