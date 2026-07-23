@@ -5,6 +5,7 @@ import org.springframework.web.multipart.MultipartFile;
 public interface VoiceAudioStorageService {
     boolean isEnabled();
     StoredVoiceAudio upload(String objectKey, MultipartFile file);
+    StoredVoiceAudioStream open(String storageKey, String mimeType);
     VoiceAudioPlayback playbackUrl(String storagePublicId, String mimeType);
     void delete(String storagePublicId);
 }

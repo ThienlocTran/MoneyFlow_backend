@@ -4,11 +4,13 @@ import com.moneyflowbackend.common.exception.BusinessException;
 import com.moneyflowbackend.transaction.model.TransactionSourceType;
 import com.moneyflowbackend.transaction.repository.TransactionRepository;
 import com.moneyflowbackend.voice.dto.VoiceAudioPlaybackResponse;
+import com.moneyflowbackend.voice.dto.VoiceAudioStorageStatusResponse;
 import com.moneyflowbackend.voice.dto.VoiceAudioUploadResponse;
 import com.moneyflowbackend.voice.model.VoiceRecord;
 import com.moneyflowbackend.voice.model.VoiceRecordStatus;
 import com.moneyflowbackend.voice.repository.VoiceRecordRepository;
 import com.moneyflowbackend.voice.storage.StoredVoiceAudio;
+import com.moneyflowbackend.voice.storage.StoredVoiceAudioStream;
 import com.moneyflowbackend.voice.storage.VoiceAudioPlayback;
 import com.moneyflowbackend.voice.storage.VoiceAudioStorageService;
 import com.moneyflowbackend.workspace.model.WorkspaceMember;
@@ -24,12 +26,13 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Arrays;
 import java.util.Locale;
 import java.util.Set;
-import java.util.stream.Collectors;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 public class VoiceAudioService {
@@ -52,9 +55,9 @@ public class VoiceAudioService {
             WorkspaceMemberRepository workspaceMemberRepository,
             VoiceAudioStorageService storageService,
             Clock clock,
-            @Value("${MONEYFLOW_AUDIO_MAX_BYTES:10485760}") long maxSizeBytes,
-            @Value("${MONEYFLOW_AUDIO_ALLOWED_TYPES:audio/webm,audio/mp4,audio/mpeg,audio/wav}") String allowedTypes,
-            @Value("${VOICE_AUDIO_RETENTION_DAYS:30}") int retentionDays) {
+            @Value("${VOICE_AUDIO_MAX_BYTES:${MONEYFLOW_AUDIO_MAX_BYTES:10485760}}") long maxSizeBytes,
+            @Value("${VOICE_AUDIO_ALLOWED_MIME_TYPES:${MONEYFLOW_AUDIO_ALLOWED_TYPES:audio/webm,audio/mp4,audio/mpeg,audio/wav}}") String allowedTypes,
+            @Value("${VOICE_AUDIO_RETENTION_DAYS:0}") int retentionDays) {
         this.voiceRecordRepository = voiceRecordRepository;
         this.transactionRepository = transactionRepository;
         this.workspaceRepository = workspaceRepository;
@@ -62,7 +65,7 @@ public class VoiceAudioService {
         this.storageService = storageService;
         this.clock = clock;
         this.maxSizeBytes = Math.max(1, maxSizeBytes);
-        this.retentionDays = Math.max(1, retentionDays);
+        this.retentionDays = Math.max(0, retentionDays);
         this.allowedMimeTypes = parseAllowedTypes(allowedTypes);
     }
 
@@ -74,25 +77,24 @@ public class VoiceAudioService {
         String mimeType = validateFile(file);
         Integer normalizedDuration = validateDuration(durationSeconds);
 
-        voiceRecord.setMimeType(mimeType);
-        voiceRecord.setFileSizeBytes(file.getSize());
-        voiceRecord.setDurationSeconds(normalizedDuration);
+        setAudioMetadata(voiceRecord, null, null, mimeType, file.getSize(), normalizedDuration, "PENDING");
         try {
             StoredVoiceAudio stored = storageService.upload(objectKey(voiceRecord), file);
-            voiceRecord.setStoragePublicId(stored.storagePublicId());
+            setAudioMetadata(voiceRecord, stored.provider(), stored.storageKey(), mimeType, file.getSize(), normalizedDuration, "STORED");
+            voiceRecord.setStoragePublicId(stored.storageKey());
             voiceRecord.setAudioUrl(stored.provider() + ":" + stored.audioUrl());
             voiceRecord.setVoiceStatus(VoiceRecordStatus.AUDIO_STORED);
-            voiceRecord.setRetentionUntil(LocalDate.now(clock).plusDays(retentionDays));
+            voiceRecord.setRetentionUntil(retentionDays > 0 ? LocalDate.now(clock).plusDays(retentionDays) : null);
             return toUploadResponse(voiceRecordRepository.save(voiceRecord));
         } catch (BusinessException ex) {
-            voiceRecord.setStoragePublicId(null);
-            voiceRecord.setAudioUrl(null);
+            clearAudioPointers(voiceRecord);
+            voiceRecord.setAudioUploadStatus("FAILED");
             voiceRecord.setVoiceStatus(VoiceRecordStatus.STORAGE_FAILED);
             voiceRecordRepository.save(voiceRecord);
             throw ex;
         } catch (RuntimeException ex) {
-            voiceRecord.setStoragePublicId(null);
-            voiceRecord.setAudioUrl(null);
+            clearAudioPointers(voiceRecord);
+            voiceRecord.setAudioUploadStatus("FAILED");
             voiceRecord.setVoiceStatus(VoiceRecordStatus.STORAGE_FAILED);
             voiceRecordRepository.save(voiceRecord);
             throw new BusinessException("AUDIO_STORAGE_FAILED", "Voice audio storage failed", HttpStatus.BAD_GATEWAY);
@@ -103,10 +105,10 @@ public class VoiceAudioService {
     public VoiceAudioPlaybackResponse playbackUrl(UUID voiceRecordId, UUID userId) {
         VoiceRecord voiceRecord = findVoiceRecord(voiceRecordId);
         requireActiveMember(voiceRecord, userId);
-        if (voiceRecord.getStoragePublicId() == null || voiceRecord.getStoragePublicId().isBlank()) {
+        if (storageKey(voiceRecord) == null) {
             throw new BusinessException("AUDIO_NOT_AVAILABLE", "Voice audio is not available", HttpStatus.NOT_FOUND);
         }
-        VoiceAudioPlayback playback = storageService.playbackUrl(voiceRecord.getStoragePublicId(), voiceRecord.getMimeType());
+        VoiceAudioPlayback playback = storageService.playbackUrl(storageKey(voiceRecord), audioMimeType(voiceRecord));
         return VoiceAudioPlaybackResponse.builder()
                 .voiceRecordId(voiceRecord.getId())
                 .playbackUrl(playback.playbackUrl())
@@ -115,11 +117,35 @@ public class VoiceAudioService {
                 .build();
     }
 
+    @Transactional(readOnly = true)
+    public StoredVoiceAudioStream streamAudio(UUID voiceRecordId, UUID userId) {
+        VoiceRecord voiceRecord = findVoiceRecord(voiceRecordId);
+        requireActiveMember(voiceRecord, userId);
+        if (storageKey(voiceRecord) == null) {
+            throw new BusinessException("AUDIO_NOT_AVAILABLE", "Voice audio is not available", HttpStatus.NOT_FOUND);
+        }
+        return storageService.open(storageKey(voiceRecord), audioMimeType(voiceRecord));
+    }
+
+    @Transactional(readOnly = true)
+    public VoiceAudioStorageStatusResponse storageStatus(UUID workspaceId, UUID userId) {
+        workspaceRepository.findById(workspaceId)
+                .filter(workspace -> workspace.getDeletedAt() == null)
+                .orElseThrow(() -> new BusinessException("WORKSPACE_NOT_FOUND", "Workspace not found", HttpStatus.NOT_FOUND));
+        workspaceMemberRepository.findByWorkspaceIdAndUserIdAndMemberStatus(workspaceId, userId, "ACTIVE")
+                .orElseThrow(() -> new BusinessException("WORKSPACE_ACCESS_DENIED", "Workspace access denied", HttpStatus.FORBIDDEN));
+        return VoiceAudioStorageStatusResponse.builder()
+                .workspaceId(workspaceId)
+                .enabled(storageService.isEnabled())
+                .status(storageService.isEnabled() ? "AVAILABLE" : "STORAGE_NOT_CONFIGURED")
+                .build();
+    }
+
     @Transactional
     public int deleteExpiredVoiceAudio() {
         LocalDate today = LocalDate.now(clock);
         int deleted = 0;
-        for (VoiceRecord voiceRecord : voiceRecordRepository.findAllByRetentionUntilBeforeAndStoragePublicIdIsNotNull(today)) {
+        for (VoiceRecord voiceRecord : voiceRecordRepository.findAllExpiredWithStoredAudio(today)) {
             if (clearStoredAudio(voiceRecord, true)) {
                 deleted += 1;
             }
@@ -137,7 +163,7 @@ public class VoiceAudioService {
     }
 
     private boolean clearStoredAudio(VoiceRecord voiceRecord, boolean bestEffort) {
-        String storagePublicId = voiceRecord.getStoragePublicId();
+        String storagePublicId = storageKey(voiceRecord);
         if (storagePublicId != null && !storagePublicId.isBlank()) {
             if (!storageService.isEnabled()) {
                 log.warn("Voice audio cleanup skipped: voiceRecordId={}, reason=storage_disabled", voiceRecord.getId());
@@ -153,11 +179,9 @@ public class VoiceAudioService {
                 return false;
             }
         }
-        voiceRecord.setAudioUrl(null);
-        voiceRecord.setStoragePublicId(null);
-        voiceRecord.setMimeType(null);
-        voiceRecord.setFileSizeBytes(null);
-        voiceRecord.setDurationSeconds(null);
+        clearAudioPointers(voiceRecord);
+        voiceRecord.setAudioDeletedAt(Instant.now(clock));
+        voiceRecord.setAudioUploadStatus("DELETED");
         voiceRecord.setVoiceStatus(VoiceRecordStatus.AUDIO_DELETED);
         voiceRecordRepository.save(voiceRecord);
         return true;
@@ -230,18 +254,81 @@ public class VoiceAudioService {
     }
 
     private String objectKey(VoiceRecord voiceRecord) {
-        return "workspaces/%s/voice/%s".formatted(voiceRecord.getWorkspace().getId(), voiceRecord.getId());
+        return "workspaces/%s/voice-records/%s/%s.%s".formatted(
+                voiceRecord.getWorkspace().getId(),
+                voiceRecord.getId(),
+                UUID.randomUUID(),
+                extension(audioMimeType(voiceRecord)));
     }
 
     private VoiceAudioUploadResponse toUploadResponse(VoiceRecord voiceRecord) {
         return VoiceAudioUploadResponse.builder()
                 .voiceRecordId(voiceRecord.getId())
-                .voiceAudioAvailable(voiceRecord.getStoragePublicId() != null)
+                .voiceAudioAvailable(storageKey(voiceRecord) != null)
                 .voiceAudioStatus(voiceRecord.getVoiceStatus().name())
-                .mimeType(voiceRecord.getMimeType())
-                .fileSizeBytes(voiceRecord.getFileSizeBytes())
-                .durationSeconds(voiceRecord.getDurationSeconds())
+                .mimeType(audioMimeType(voiceRecord))
+                .fileSizeBytes(voiceRecord.getAudioSizeBytes())
+                .durationSeconds(voiceRecord.getAudioDurationMs() == null ? null : voiceRecord.getAudioDurationMs() / 1000)
                 .retentionUntil(voiceRecord.getRetentionUntil())
                 .build();
+    }
+
+    private void setAudioMetadata(
+            VoiceRecord voiceRecord,
+            String provider,
+            String storageKey,
+            String mimeType,
+            long sizeBytes,
+            Integer durationSeconds,
+            String status) {
+        voiceRecord.setAudioStorageProvider(provider);
+        voiceRecord.setAudioStorageKey(storageKey);
+        voiceRecord.setAudioMimeType(mimeType);
+        voiceRecord.setAudioSizeBytes(sizeBytes);
+        voiceRecord.setAudioUploadedAt(storageKey == null ? null : Instant.now(clock));
+        voiceRecord.setAudioDeletedAt(null);
+        voiceRecord.setAudioDurationMs(durationSeconds == null ? null : durationSeconds * 1000);
+        voiceRecord.setAudioUploadStatus(status);
+        voiceRecord.setMimeType(mimeType);
+        voiceRecord.setFileSizeBytes(sizeBytes);
+        voiceRecord.setDurationSeconds(durationSeconds);
+    }
+
+    private void clearAudioPointers(VoiceRecord voiceRecord) {
+        voiceRecord.setAudioStorageProvider(null);
+        voiceRecord.setAudioStorageKey(null);
+        voiceRecord.setAudioMimeType(null);
+        voiceRecord.setAudioSizeBytes(null);
+        voiceRecord.setAudioDurationMs(null);
+        voiceRecord.setAudioUploadedAt(null);
+        voiceRecord.setStoragePublicId(null);
+        voiceRecord.setAudioUrl(null);
+        voiceRecord.setMimeType(null);
+        voiceRecord.setFileSizeBytes(null);
+        voiceRecord.setDurationSeconds(null);
+        voiceRecord.setRetentionUntil(null);
+    }
+
+    private String storageKey(VoiceRecord voiceRecord) {
+        if (voiceRecord.getAudioStorageKey() != null && !voiceRecord.getAudioStorageKey().isBlank()) {
+            return voiceRecord.getAudioStorageKey();
+        }
+        return voiceRecord.getStoragePublicId();
+    }
+
+    private String audioMimeType(VoiceRecord voiceRecord) {
+        if (voiceRecord.getAudioMimeType() != null && !voiceRecord.getAudioMimeType().isBlank()) {
+            return voiceRecord.getAudioMimeType();
+        }
+        return voiceRecord.getMimeType();
+    }
+
+    private String extension(String mimeType) {
+        return switch (mimeType) {
+            case "audio/mp4" -> "m4a";
+            case "audio/mpeg" -> "mp3";
+            case "audio/wav" -> "wav";
+            default -> "webm";
+        };
     }
 }

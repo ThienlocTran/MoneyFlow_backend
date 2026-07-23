@@ -10,6 +10,7 @@ import com.moneyflowbackend.voice.repository.VoiceRecordRepository;
 import com.moneyflowbackend.voice.service.VoiceAudioService;
 import com.moneyflowbackend.voice.storage.DisabledVoiceAudioStorageService;
 import com.moneyflowbackend.voice.storage.StoredVoiceAudio;
+import com.moneyflowbackend.voice.storage.StoredVoiceAudioStream;
 import com.moneyflowbackend.voice.storage.VoiceAudioPlayback;
 import com.moneyflowbackend.voice.storage.VoiceAudioStorageService;
 import com.moneyflowbackend.workspace.model.Workspace;
@@ -102,12 +103,17 @@ class VoiceAudioServiceTests {
 
         assertThat(response.isVoiceAudioAvailable()).isTrue();
         assertThat(response.getVoiceAudioStatus()).isEqualTo("AUDIO_STORED");
-        assertThat(response.getRetentionUntil()).isEqualTo(LocalDate.of(2026, 7, 15));
-        assertThat(ctx.voiceRecord().getStoragePublicId()).isEqualTo("stored/workspaces/" + ctx.workspace().getId() + "/voice/" + ctx.voiceRecord().getId());
+        assertThat(response.getRetentionUntil()).isNull();
+        assertThat(ctx.voiceRecord().getAudioStorageKey())
+                .startsWith("stored/workspaces/" + ctx.workspace().getId() + "/voice-records/" + ctx.voiceRecord().getId() + "/");
+        assertThat(ctx.voiceRecord().getStoragePublicId()).isEqualTo(ctx.voiceRecord().getAudioStorageKey());
         assertThat(ctx.voiceRecord().getAudioUrl()).isEqualTo("test:authenticated");
-        assertThat(ctx.voiceRecord().getMimeType()).isEqualTo("audio/webm");
-        assertThat(ctx.voiceRecord().getFileSizeBytes()).isEqualTo(3);
-        assertThat(ctx.voiceRecord().getDurationSeconds()).isEqualTo(12);
+        assertThat(ctx.voiceRecord().getAudioStorageProvider()).isEqualTo("test");
+        assertThat(ctx.voiceRecord().getAudioMimeType()).isEqualTo("audio/webm");
+        assertThat(ctx.voiceRecord().getAudioSizeBytes()).isEqualTo(3);
+        assertThat(ctx.voiceRecord().getAudioDurationMs()).isEqualTo(12000);
+        assertThat(ctx.voiceRecord().getAudioUploadedAt()).isEqualTo(Instant.parse("2026-06-15T01:00:00Z"));
+        assertThat(ctx.voiceRecord().getAudioUploadStatus()).isEqualTo("STORED");
         assertThat(ctx.voiceRecord().getVoiceStatus()).isEqualTo(VoiceRecordStatus.AUDIO_STORED);
     }
 
@@ -120,9 +126,33 @@ class VoiceAudioServiceTests {
                 () -> ctx.service().uploadAudio(ctx.voiceRecord().getId(), file, 12, ctx.user().getId()),
                 "AUDIO_STORAGE_FAILED");
 
+        assertThat(ctx.voiceRecord().getAudioStorageKey()).isNull();
         assertThat(ctx.voiceRecord().getStoragePublicId()).isNull();
         assertThat(ctx.voiceRecord().getOriginalTranscript()).isEqualTo("an sang 35k");
         assertThat(ctx.voiceRecord().getVoiceStatus()).isEqualTo(VoiceRecordStatus.STORAGE_FAILED);
+    }
+
+    @Test
+    void streamAudioRequiresWorkspaceMembership() {
+        TestContext ctx = context(new FakeStorageService());
+        ctx.voiceRecord().setAudioStorageKey("stored/audio");
+        ctx.voiceRecord().setAudioMimeType("audio/webm");
+
+        assertBusinessCode(
+                () -> ctx.service().streamAudio(ctx.voiceRecord().getId(), UUID.randomUUID()),
+                "WORKSPACE_ACCESS_DENIED");
+    }
+
+    @Test
+    void streamAudioReturnsStoredBytesForMember() {
+        TestContext ctx = context(new FakeStorageService());
+        ctx.voiceRecord().setAudioStorageKey("stored/audio");
+        ctx.voiceRecord().setAudioMimeType("audio/webm");
+
+        StoredVoiceAudioStream response = ctx.service().streamAudio(ctx.voiceRecord().getId(), ctx.user().getId());
+
+        assertThat(response.bytes()).containsExactly(9, 8, 7);
+        assertThat(response.mimeType()).isEqualTo("audio/webm");
     }
 
     @Test
@@ -151,25 +181,26 @@ class VoiceAudioServiceTests {
     void deleteExpiredVoiceAudioClearsAudioMetadataButKeepsTranscript() {
         FakeStorageService storage = new FakeStorageService();
         TestContext ctx = context(storage);
-        ctx.voiceRecord().setStoragePublicId("stored/audio");
+        ctx.voiceRecord().setAudioStorageKey("stored/audio");
         ctx.voiceRecord().setAudioUrl("private://voice");
-        ctx.voiceRecord().setMimeType("audio/webm");
-        ctx.voiceRecord().setFileSizeBytes(42L);
-        ctx.voiceRecord().setDurationSeconds(10);
+        ctx.voiceRecord().setAudioMimeType("audio/webm");
+        ctx.voiceRecord().setAudioSizeBytes(42L);
+        ctx.voiceRecord().setAudioDurationMs(10000);
         ctx.voiceRecord().setOriginalTranscript("an sang 35k");
         ctx.voiceRecord().setRetentionUntil(LocalDate.of(2026, 6, 14));
-        when(ctx.voiceRecordRepository().findAllByRetentionUntilBeforeAndStoragePublicIdIsNotNull(LocalDate.of(2026, 6, 15)))
+        when(ctx.voiceRecordRepository().findAllExpiredWithStoredAudio(LocalDate.of(2026, 6, 15)))
                 .thenReturn(List.of(ctx.voiceRecord()));
 
         int deleted = ctx.service().deleteExpiredVoiceAudio();
 
         assertThat(deleted).isEqualTo(1);
         assertThat(storage.deletedPublicId).isEqualTo("stored/audio");
-        assertThat(ctx.voiceRecord().getStoragePublicId()).isNull();
+        assertThat(ctx.voiceRecord().getAudioStorageKey()).isNull();
         assertThat(ctx.voiceRecord().getAudioUrl()).isNull();
-        assertThat(ctx.voiceRecord().getMimeType()).isNull();
-        assertThat(ctx.voiceRecord().getFileSizeBytes()).isNull();
-        assertThat(ctx.voiceRecord().getDurationSeconds()).isNull();
+        assertThat(ctx.voiceRecord().getAudioMimeType()).isNull();
+        assertThat(ctx.voiceRecord().getAudioSizeBytes()).isNull();
+        assertThat(ctx.voiceRecord().getAudioDurationMs()).isNull();
+        assertThat(ctx.voiceRecord().getAudioDeletedAt()).isEqualTo(Instant.parse("2026-06-15T01:00:00Z"));
         assertThat(ctx.voiceRecord().getOriginalTranscript()).isEqualTo("an sang 35k");
         assertThat(ctx.voiceRecord().getVoiceStatus()).isEqualTo(VoiceRecordStatus.AUDIO_DELETED);
     }
@@ -179,7 +210,7 @@ class VoiceAudioServiceTests {
         TestContext ctx = context(new DisabledVoiceAudioStorageService());
         ctx.voiceRecord().setStoragePublicId("stored/audio");
         ctx.voiceRecord().setRetentionUntil(LocalDate.of(2026, 6, 14));
-        when(ctx.voiceRecordRepository().findAllByRetentionUntilBeforeAndStoragePublicIdIsNotNull(LocalDate.of(2026, 6, 15)))
+        when(ctx.voiceRecordRepository().findAllExpiredWithStoredAudio(LocalDate.of(2026, 6, 15)))
                 .thenReturn(List.of(ctx.voiceRecord()));
 
         int deleted = ctx.service().deleteExpiredVoiceAudio();
@@ -194,7 +225,7 @@ class VoiceAudioServiceTests {
         TestContext ctx = context(new FailingStorageService());
         ctx.voiceRecord().setStoragePublicId("stored/audio");
         ctx.voiceRecord().setRetentionUntil(LocalDate.of(2026, 6, 14));
-        when(ctx.voiceRecordRepository().findAllByRetentionUntilBeforeAndStoragePublicIdIsNotNull(LocalDate.of(2026, 6, 15)))
+        when(ctx.voiceRecordRepository().findAllExpiredWithStoredAudio(LocalDate.of(2026, 6, 15)))
                 .thenReturn(List.of(ctx.voiceRecord()));
 
         int deleted = ctx.service().deleteExpiredVoiceAudio();
@@ -250,7 +281,7 @@ class VoiceAudioServiceTests {
                 CLOCK,
                 10485760,
                 "audio/webm,audio/mp4,audio/mpeg,audio/wav",
-                30);
+                0);
         return new TestContext(service, voiceRecordRepository, voiceRecord, workspace, user);
     }
 
@@ -280,6 +311,11 @@ class VoiceAudioServiceTests {
         }
 
         @Override
+        public StoredVoiceAudioStream open(String storagePublicId, String mimeType) {
+            return new StoredVoiceAudioStream(new byte[] {9, 8, 7}, mimeType, 3);
+        }
+
+        @Override
         public VoiceAudioPlayback playbackUrl(String storagePublicId, String mimeType) {
             return new VoiceAudioPlayback("https://signed.example/voice", Instant.parse("2026-06-15T01:05:00Z"), mimeType);
         }
@@ -303,6 +339,11 @@ class VoiceAudioServiceTests {
 
         @Override
         public VoiceAudioPlayback playbackUrl(String storagePublicId, String mimeType) {
+            throw new BusinessException("AUDIO_STORAGE_FAILED", "Storage failed");
+        }
+
+        @Override
+        public StoredVoiceAudioStream open(String storagePublicId, String mimeType) {
             throw new BusinessException("AUDIO_STORAGE_FAILED", "Storage failed");
         }
 

@@ -47,6 +47,11 @@ public class TransactionResponse {
     private PersonRef attributedPerson;
     private String sourceType;
     private UUID voiceRecordId;
+    private boolean hasVoiceAudio;
+    private String audioMimeType;
+    private Long audioSizeBytes;
+    private Instant audioUploadedAt;
+    private boolean playbackAvailable;
     private boolean voiceAudioAvailable;
     private String voiceAudioStatus;
     private boolean historical;

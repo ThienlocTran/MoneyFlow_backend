@@ -35,6 +35,30 @@ public class VoiceRecord {
     @Column(name = "storage_public_id", length = 255)
     private String storagePublicId;
 
+    @Column(name = "audio_storage_provider", length = 50)
+    private String audioStorageProvider;
+
+    @Column(name = "audio_storage_key", columnDefinition = "TEXT")
+    private String audioStorageKey;
+
+    @Column(name = "audio_mime_type", length = 100)
+    private String audioMimeType;
+
+    @Column(name = "audio_size_bytes")
+    private Long audioSizeBytes;
+
+    @Column(name = "audio_uploaded_at")
+    private Instant audioUploadedAt;
+
+    @Column(name = "audio_deleted_at")
+    private Instant audioDeletedAt;
+
+    @Column(name = "audio_duration_ms")
+    private Integer audioDurationMs;
+
+    @Column(name = "audio_upload_status", length = 30)
+    private String audioUploadStatus;
+
     @Column(name = "mime_type", length = 100)
     private String mimeType;
 

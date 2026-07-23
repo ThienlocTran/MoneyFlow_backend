@@ -1106,6 +1106,8 @@ public class TransactionService {
                 .rawInput(tx.getRawInput())
                 .sourceType(tx.getSourceType().name())
                 .voiceRecordId(tx.getVoiceRecordId())
+                .hasVoiceAudio(false)
+                .playbackAvailable(false)
                 .voiceAudioAvailable(false)
                 .voiceAudioStatus(null)
                 .historical(tx.isHistorical())
@@ -1121,7 +1123,18 @@ public class TransactionService {
         if (tx.getVoiceRecordId() != null) {
             VoiceRecord voiceRecord = voiceRecords.get(tx.getVoiceRecordId());
             if (voiceRecord != null) {
-                builder.voiceAudioAvailable(voiceRecord.getStoragePublicId() != null);
+                boolean hasVoiceAudio = voiceRecord.getAudioStorageKey() != null
+                        || voiceRecord.getStoragePublicId() != null;
+                builder.hasVoiceAudio(hasVoiceAudio);
+                builder.playbackAvailable(hasVoiceAudio);
+                builder.audioMimeType(voiceRecord.getAudioMimeType() != null
+                        ? voiceRecord.getAudioMimeType()
+                        : voiceRecord.getMimeType());
+                builder.audioSizeBytes(voiceRecord.getAudioSizeBytes() != null
+                        ? voiceRecord.getAudioSizeBytes()
+                        : voiceRecord.getFileSizeBytes());
+                builder.audioUploadedAt(voiceRecord.getAudioUploadedAt());
+                builder.voiceAudioAvailable(hasVoiceAudio);
                 builder.voiceAudioStatus(voiceRecord.getVoiceStatus().name());
             }
         }
