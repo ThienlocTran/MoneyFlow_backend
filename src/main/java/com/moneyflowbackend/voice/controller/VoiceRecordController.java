@@ -48,6 +48,12 @@ public class VoiceRecordController {
         return ResponseEntity.ok(ApiResponse.ok("Voice audio playback URL created", res));
     }
 
+    @GetMapping("/{voiceRecordId}/audio")
+    public ResponseEntity<ApiResponse<VoiceAudioPlaybackResponse>> audio(@PathVariable UUID voiceRecordId) {
+        VoiceAudioPlaybackResponse res = voiceAudioService.playbackUrl(voiceRecordId, currentUserId());
+        return ResponseEntity.ok(ApiResponse.ok("Voice audio playback URL created", res));
+    }
+
     @DeleteMapping("/{voiceRecordId}/audio")
     public ResponseEntity<ApiResponse<VoiceAudioUploadResponse>> deleteAudio(@PathVariable UUID voiceRecordId) {
         VoiceAudioUploadResponse res = voiceAudioService.deleteVoiceAudio(voiceRecordId, currentUserId());

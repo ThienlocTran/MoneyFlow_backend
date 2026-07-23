@@ -6,6 +6,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.time.LocalDate;
+import java.time.Instant;
 import java.util.UUID;
 
 @Data
@@ -19,5 +20,6 @@ public class VoiceAudioUploadResponse {
     private String mimeType;
     private Long fileSizeBytes;
     private Integer durationSeconds;
+    private Instant uploadedAt;
     private LocalDate retentionUntil;
 }

@@ -12,7 +12,7 @@ public final class LogRedactor {
     private static final Pattern POSTGRES_URL = Pattern.compile("postgresql://[^\\s,;]+", Pattern.CASE_INSENSITIVE);
     private static final Pattern CLOUDINARY_URL = Pattern.compile("cloudinary://[^\\s,;]+", Pattern.CASE_INSENSITIVE);
     private static final Pattern SIGNED_AUDIO_URL = Pattern.compile("https?://[^\\s,;]*(cloudinary|audio|voice)[^\\s,;]*(signature|token|expires|expires_at|X-Amz-Signature)[^\\s,;]*", Pattern.CASE_INSENSITIVE);
-    private static final Pattern STORAGE_KEY = Pattern.compile("(?i)(storagePublicId|storage_public_id|public_id|voice storage key)(\\s*[:=]\\s*)([^\\s,;]+)");
+    private static final Pattern STORAGE_KEY = Pattern.compile("(?i)(storagePublicId|storage_public_id|storageKey|storage_key|public_id|voice storage key)(\\s*[:=]\\s*)([^\\s,;]+)");
 
     private LogRedactor() {
     }

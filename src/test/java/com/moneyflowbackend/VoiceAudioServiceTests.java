@@ -104,10 +104,13 @@ class VoiceAudioServiceTests {
         assertThat(response.getVoiceAudioStatus()).isEqualTo("AUDIO_STORED");
         assertThat(response.getRetentionUntil()).isEqualTo(LocalDate.of(2026, 7, 15));
         assertThat(ctx.voiceRecord().getStoragePublicId()).isEqualTo("stored/workspaces/" + ctx.workspace().getId() + "/voice/" + ctx.voiceRecord().getId());
+        assertThat(ctx.voiceRecord().getStorageProvider()).isEqualTo("test");
+        assertThat(ctx.voiceRecord().getStorageKey()).isEqualTo("stored/workspaces/" + ctx.workspace().getId() + "/voice/" + ctx.voiceRecord().getId());
         assertThat(ctx.voiceRecord().getAudioUrl()).isEqualTo("test:authenticated");
         assertThat(ctx.voiceRecord().getMimeType()).isEqualTo("audio/webm");
         assertThat(ctx.voiceRecord().getFileSizeBytes()).isEqualTo(3);
         assertThat(ctx.voiceRecord().getDurationSeconds()).isEqualTo(12);
+        assertThat(ctx.voiceRecord().getAudioUploadedAt()).isEqualTo(Instant.parse("2026-06-15T01:00:00Z"));
         assertThat(ctx.voiceRecord().getVoiceStatus()).isEqualTo(VoiceRecordStatus.AUDIO_STORED);
     }
 
@@ -148,6 +151,41 @@ class VoiceAudioServiceTests {
     }
 
     @Test
+    void playbackRejectsOutsider() {
+        TestContext ctx = context(new FakeStorageService());
+        ctx.voiceRecord().setStoragePublicId("stored/audio");
+        ctx.voiceRecord().setMimeType("audio/webm");
+
+        assertBusinessCode(
+                () -> ctx.service().playbackUrl(ctx.voiceRecord().getId(), UUID.randomUUID()),
+                "WORKSPACE_ACCESS_DENIED");
+    }
+
+    @Test
+    void deleteRejectsOutsider() {
+        TestContext ctx = context(new FakeStorageService());
+        ctx.voiceRecord().setStoragePublicId("stored/audio");
+
+        assertBusinessCode(
+                () -> ctx.service().deleteVoiceAudio(ctx.voiceRecord().getId(), UUID.randomUUID()),
+                "WORKSPACE_ACCESS_DENIED");
+    }
+
+    @Test
+    void storageStatusRequiresWorkspaceMembership() {
+        TestContext ctx = context(new FakeStorageService());
+
+        var response = ctx.service().storageStatus(ctx.workspace().getId(), ctx.user().getId());
+
+        assertThat(response.isEnabled()).isTrue();
+        assertThat(response.getProvider()).isEqualTo("test");
+        assertThat(response.getMaxBytes()).isEqualTo(10485760);
+        assertBusinessCode(
+                () -> ctx.service().storageStatus(ctx.workspace().getId(), UUID.randomUUID()),
+                "WORKSPACE_ACCESS_DENIED");
+    }
+
+    @Test
     void deleteExpiredVoiceAudioClearsAudioMetadataButKeepsTranscript() {
         FakeStorageService storage = new FakeStorageService();
         TestContext ctx = context(storage);
@@ -166,10 +204,12 @@ class VoiceAudioServiceTests {
         assertThat(deleted).isEqualTo(1);
         assertThat(storage.deletedPublicId).isEqualTo("stored/audio");
         assertThat(ctx.voiceRecord().getStoragePublicId()).isNull();
+        assertThat(ctx.voiceRecord().getStorageKey()).isNull();
         assertThat(ctx.voiceRecord().getAudioUrl()).isNull();
         assertThat(ctx.voiceRecord().getMimeType()).isNull();
         assertThat(ctx.voiceRecord().getFileSizeBytes()).isNull();
         assertThat(ctx.voiceRecord().getDurationSeconds()).isNull();
+        assertThat(ctx.voiceRecord().getAudioDeletedAt()).isEqualTo(Instant.parse("2026-06-15T01:00:00Z"));
         assertThat(ctx.voiceRecord().getOriginalTranscript()).isEqualTo("an sang 35k");
         assertThat(ctx.voiceRecord().getVoiceStatus()).isEqualTo(VoiceRecordStatus.AUDIO_DELETED);
     }
@@ -275,6 +315,11 @@ class VoiceAudioServiceTests {
         }
 
         @Override
+        public String provider() {
+            return "test";
+        }
+
+        @Override
         public StoredVoiceAudio upload(String objectKey, org.springframework.web.multipart.MultipartFile file) {
             return new StoredVoiceAudio("test", "stored/" + objectKey, "authenticated");
         }
@@ -294,6 +339,11 @@ class VoiceAudioServiceTests {
         @Override
         public boolean isEnabled() {
             return true;
+        }
+
+        @Override
+        public String provider() {
+            return "test";
         }
 
         @Override

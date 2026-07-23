@@ -35,6 +35,12 @@ public class VoiceRecord {
     @Column(name = "storage_public_id", length = 255)
     private String storagePublicId;
 
+    @Column(name = "storage_provider", length = 40)
+    private String storageProvider;
+
+    @Column(name = "storage_key", length = 500)
+    private String storageKey;
+
     @Column(name = "mime_type", length = 100)
     private String mimeType;
 
@@ -60,6 +66,12 @@ public class VoiceRecord {
 
     @Column(name = "retention_until")
     private LocalDate retentionUntil;
+
+    @Column(name = "audio_uploaded_at")
+    private Instant audioUploadedAt;
+
+    @Column(name = "audio_deleted_at")
+    private Instant audioDeletedAt;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     @Builder.Default

@@ -51,6 +51,11 @@ public class CloudinaryVoiceAudioStorageService implements VoiceAudioStorageServ
     }
 
     @Override
+    public String provider() {
+        return PROVIDER;
+    }
+
+    @Override
     public StoredVoiceAudio upload(String objectKey, MultipartFile file) {
         try {
             String publicId = folder + "/" + trimSlashes(objectKey);

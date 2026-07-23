@@ -1106,7 +1106,10 @@ public class TransactionService {
                 .rawInput(tx.getRawInput())
                 .sourceType(tx.getSourceType().name())
                 .voiceRecordId(tx.getVoiceRecordId())
+                .hasVoiceAudio(false)
                 .voiceAudioAvailable(false)
+                .playbackAvailable(false)
+                .audioUploadedAt(null)
                 .voiceAudioStatus(null)
                 .historical(tx.isHistorical())
                 .affectsWalletBalance(tx.isAffectsWalletBalance())
@@ -1121,7 +1124,11 @@ public class TransactionService {
         if (tx.getVoiceRecordId() != null) {
             VoiceRecord voiceRecord = voiceRecords.get(tx.getVoiceRecordId());
             if (voiceRecord != null) {
-                builder.voiceAudioAvailable(voiceRecord.getStoragePublicId() != null);
+                boolean hasAudio = voiceRecord.getStoragePublicId() != null;
+                builder.hasVoiceAudio(hasAudio);
+                builder.voiceAudioAvailable(hasAudio);
+                builder.playbackAvailable(hasAudio);
+                builder.audioUploadedAt(voiceRecord.getAudioUploadedAt());
                 builder.voiceAudioStatus(voiceRecord.getVoiceStatus().name());
             }
         }
