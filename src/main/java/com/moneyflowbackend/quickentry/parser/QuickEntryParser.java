@@ -4,6 +4,8 @@ import com.moneyflowbackend.category.model.Category;
 import com.moneyflowbackend.category.model.CategoryKeyword;
 import com.moneyflowbackend.category.model.CategoryType;
 import com.moneyflowbackend.quickentry.dto.QuickEntryPreviewResponse;
+import com.moneyflowbackend.quickentry.dto.VoiceCandidateStatus;
+import com.moneyflowbackend.quickentry.dto.VoiceIntentType;
 import com.moneyflowbackend.transaction.model.TransactionStatus;
 import com.moneyflowbackend.transaction.model.TransactionType;
 import com.moneyflowbackend.wallet.model.Wallet;
@@ -18,8 +20,8 @@ import java.security.NoSuchAlgorithmException;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.ArrayList;
-import java.util.HexFormat;
 import java.util.Comparator;
+import java.util.HexFormat;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -133,12 +135,19 @@ public class QuickEntryParser {
             warnings.add("FUTURE_DATE_ASSUMED_PLANNED");
         }
 
+        VoiceIntentType explicitIntent = detectNonTransactionIntent(normalized);
+        if (explicitIntent != null) {
+            return unsupportedDraft(rawInput, display, explicitIntent, amount, transactionDate, dateResult.time(),
+                    confidence(false, missing, warnings), missing, warnings);
+        }
+
         boolean transferText = TRANSFER_PATTERN.matcher(normalized).find() || looksLikeBareWalletTransfer(normalized, display, wallets);
         CategoryMatch categoryMatch = matchCategory(normalized, display, keywords, categories).orElse(null);
         boolean ambiguousCategory = categoryMatch != null && categoryMatch.ambiguous();
         TransactionType type = inferType(normalized, transferText, categoryMatch);
         if (type == null) {
             missing.add("TYPE");
+            warnings.add("UNSUPPORTED_INTENT");
         }
 
         Category category = null;
@@ -220,6 +229,9 @@ public class QuickEntryParser {
         double confidence = confidence(ready, missing, warnings);
 
         return QuickEntryPreviewResponse.builder()
+                .candidateId(candidateId(display, 0, display, amount))
+                .intentType(intentType(type))
+                .candidateStatus(type == null ? VoiceCandidateStatus.UNSUPPORTED : ready ? VoiceCandidateStatus.READY : VoiceCandidateStatus.NEEDS_REVIEW)
                 .rawInput(rawInput)
                 .normalizedInput(display)
                 .type(type)
@@ -239,6 +251,7 @@ public class QuickEntryParser {
                 .note(null)
                 .confidence(confidence)
                 .readyToConfirm(ready)
+                .unsupportedReason(type == null ? "UNKNOWN_UNSUPPORTED" : null)
                 .missingFields(new ArrayList<>(missing))
                 .warnings(new ArrayList<>(warnings))
                 .matchedKeyword(matchedKeyword)
@@ -246,6 +259,112 @@ public class QuickEntryParser {
                 .matchedWalletText(matchedWalletText)
                 .candidates(candidates)
                 .build();
+    }
+
+    private QuickEntryPreviewResponse unsupportedDraft(
+            String rawInput,
+            String display,
+            VoiceIntentType intentType,
+            BigDecimal amount,
+            LocalDate date,
+            java.time.LocalTime time,
+            double confidence,
+            LinkedHashSet<String> missing,
+            LinkedHashSet<String> warnings) {
+        if (amount == null && amountIntent(intentType)) {
+            missing.add("AMOUNT");
+        }
+        if (date == null) {
+            missing.add("DATE");
+        }
+        missing.addAll(requiredReferenceFields(intentType));
+        warnings.add("UNSUPPORTED_INTENT");
+        warnings.add("VOICE_INTENT_NOT_COMMITTABLE");
+        String reason = "VOICE_COMMIT_NOT_SUPPORTED";
+        String candidateId = candidateId(display, 0, display, amount);
+        return QuickEntryPreviewResponse.builder()
+                .candidateId(candidateId)
+                .intentType(intentType)
+                .candidateStatus(VoiceCandidateStatus.UNSUPPORTED)
+                .rawInput(rawInput)
+                .normalizedInput(display)
+                .amount(amount)
+                .transactionDate(date)
+                .transactionTime(time)
+                .description(VietnameseTextNormalizer.capitalize(display))
+                .confidence(confidence)
+                .readyToConfirm(false)
+                .missingFields(new ArrayList<>(missing))
+                .warnings(new ArrayList<>(warnings))
+                .unsupportedReason(reason)
+                .candidates(List.of(QuickEntryPreviewResponse.Candidate.builder()
+                        .candidateId(candidateId)
+                        .intentType(intentType)
+                        .candidateStatus(VoiceCandidateStatus.UNSUPPORTED)
+                        .description(VietnameseTextNormalizer.capitalize(display))
+                        .amount(amount)
+                        .transactionDate(date)
+                        .transactionTime(time)
+                        .confidence(confidence)
+                        .readyToConfirm(false)
+                        .missingFields(new ArrayList<>(missing))
+                        .warnings(new ArrayList<>(warnings))
+                        .unsupportedReason(reason)
+                        .build()))
+                .build();
+    }
+
+    private VoiceIntentType detectNonTransactionIntent(String normalized) {
+        if (hasAny(normalized, "xem bao cao", "bao cao", "thong ke", "xem thong ke", "report", "dashboard")) {
+            return VoiceIntentType.UNKNOWN_UNSUPPORTED;
+        }
+        if (hasAny(normalized, "so du", "cap nhat so du", "chot so du", "balance snapshot")) {
+            return VoiceIntentType.WALLET_BALANCE_SNAPSHOT;
+        }
+        if (hasAny(normalized, "tra no", "thanh toan no", "dong no")) {
+            return VoiceIntentType.DEBT_PAYMENT;
+        }
+        if (hasAny(normalized, "tao no", "them no", "cho vay", "di vay", "muon no")) {
+            return VoiceIntentType.DEBT_CREATE;
+        }
+        if (hasAny(normalized, "muc tieu tiet kiem", "tiet kiem cho", "gop tiet kiem")) {
+            return VoiceIntentType.SAVINGS_GOAL_CONTRIBUTION;
+        }
+        if (hasAny(normalized, "quy chim", "sinking fund", "gop quy")) {
+            return VoiceIntentType.SINKING_FUND_CONTRIBUTION;
+        }
+        if (hasAny(normalized, "quy khan cap", "emergency fund", "khan cap")) {
+            return VoiceIntentType.EMERGENCY_FUND_CONTRIBUTION;
+        }
+        if (hasAny(normalized, "hoa don dinh ky", "nghia vu dinh ky", "dong tien nha", "tra tien nha")) {
+            return VoiceIntentType.RECURRING_OBLIGATION_PAYMENT;
+        }
+        return null;
+    }
+
+    private boolean hasAny(String normalized, String... phrases) {
+        for (String phrase : phrases) {
+            if (containsWordOrPhrase(normalized, phrase)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean amountIntent(VoiceIntentType intentType) {
+        return intentType != VoiceIntentType.UNKNOWN_UNSUPPORTED;
+    }
+
+    private List<String> requiredReferenceFields(VoiceIntentType intentType) {
+        return switch (intentType) {
+            case WALLET_BALANCE_SNAPSHOT -> List.of("WALLET");
+            case DEBT_PAYMENT -> List.of("DEBT");
+            case DEBT_CREATE -> List.of("COUNTERPARTY", "DIRECTION");
+            case SAVINGS_GOAL_CONTRIBUTION -> List.of("SAVINGS_GOAL");
+            case SINKING_FUND_CONTRIBUTION -> List.of("SINKING_FUND");
+            case RECURRING_OBLIGATION_PAYMENT -> List.of("RECURRING_OBLIGATION");
+            default -> List.of();
+        };
     }
 
 
@@ -469,6 +588,9 @@ public class QuickEntryParser {
             boolean ready = missingFields.isEmpty();
             candidates.add(QuickEntryPreviewResponse.Candidate.builder()
                     .candidateId(candidateId(display, i, segment, amountCandidate.amount()))
+                    .clientCandidateId(candidateId(display, i, segment, amountCandidate.amount()))
+                    .intentType(intentType(segmentType))
+                    .candidateStatus(ready ? VoiceCandidateStatus.READY : VoiceCandidateStatus.NEEDS_REVIEW)
                     .originalText(segment)
                     .description(description)
                     .amount(amountCandidate.amount())
@@ -497,6 +619,19 @@ public class QuickEntryParser {
 
     private com.moneyflowbackend.common.model.SpendingScope spendingScope(Category category) {
         return category == null ? null : category.getDefaultSpendingScope();
+    }
+
+    private VoiceIntentType intentType(TransactionType type) {
+        if (type == TransactionType.EXPENSE) {
+            return VoiceIntentType.TRANSACTION_EXPENSE;
+        }
+        if (type == TransactionType.INCOME) {
+            return VoiceIntentType.TRANSACTION_INCOME;
+        }
+        if (type == TransactionType.TRANSFER) {
+            return VoiceIntentType.TRANSACTION_TRANSFER;
+        }
+        return VoiceIntentType.UNKNOWN_UNSUPPORTED;
     }
 
     private String candidateId(String display, int index, String segment, BigDecimal amount) {

@@ -13,6 +13,7 @@ import com.moneyflowbackend.quickentry.dto.QuickEntryButtonRequest;
 import com.moneyflowbackend.quickentry.dto.QuickEntryConfirmRequest;
 import com.moneyflowbackend.quickentry.dto.QuickEntryOptionsResponse;
 import com.moneyflowbackend.quickentry.dto.QuickEntryPreviewResponse;
+import com.moneyflowbackend.quickentry.dto.VoiceIntentType;
 import com.moneyflowbackend.quickentry.parser.QuickEntryParser;
 import com.moneyflowbackend.quickentry.parser.VietnameseTextNormalizer;
 import com.moneyflowbackend.transaction.dto.TransactionRequest;
@@ -140,6 +141,7 @@ public class QuickEntryService {
 
     @Transactional
     public TransactionResponse confirmVoice(UUID workspaceId, QuickEntryConfirmRequest req, UUID userId) {
+        rejectUnsupportedVoiceIntent(req);
         String idempotencyKey = requireVoiceIdempotencyKey(req);
         var existingVoiceRecord = voiceRecordRepository.findVoiceIdempotencyMatch(workspaceId, userId, idempotencyKey);
         if (existingVoiceRecord.isPresent()) {
@@ -250,7 +252,7 @@ public class QuickEntryService {
                     .idempotencyKey(sourceType == TransactionSourceType.VOICE ? requireVoiceIdempotencyKey(req) : null)
                     .voiceStatus(VoiceRecordStatus.CONFIRMED)
                     .build());
-            return transactionService.createWithSource(workspaceId, txReq, userId, sourceType, req.getRawInput(), voiceRecord.getId());
+            return transactionService.createWithSource(workspaceId, txReq, userId, sourceType, req.getRawInput(), voiceRecord.getId(), voiceSourceReference(req));
         }
         return transactionService.createWithSource(workspaceId, txReq, userId, sourceType, req.getRawInput());
     }
@@ -507,5 +509,41 @@ public class QuickEntryService {
             throw new BusinessException("VOICE_IDEMPOTENCY_KEY_INVALID", "Voice idempotency key is invalid");
         }
         return key;
+    }
+
+    private void rejectUnsupportedVoiceIntent(QuickEntryConfirmRequest req) {
+        VoiceIntentType intentType = req == null ? null : req.getIntentType();
+        if (intentType == null) {
+            return;
+        }
+        if (intentType == VoiceIntentType.TRANSACTION_EXPENSE && req.getType() == TransactionType.EXPENSE) {
+            return;
+        }
+        if (intentType == VoiceIntentType.TRANSACTION_INCOME && req.getType() == TransactionType.INCOME) {
+            return;
+        }
+        if (intentType == VoiceIntentType.TRANSACTION_TRANSFER && req.getType() == TransactionType.TRANSFER) {
+            return;
+        }
+        throw new BusinessException("VOICE_INTENT_NOT_COMMITTABLE", "Voice intent is not supported for commit");
+    }
+
+    private String voiceSourceReference(QuickEntryConfirmRequest req) {
+        String key = normalize(req == null ? null : req.getIdempotencyKey());
+        if (key == null) {
+            return null;
+        }
+        if (key.length() > 180) {
+            throw new BusinessException("VOICE_IDEMPOTENCY_KEY_INVALID", "Voice idempotency key is invalid");
+        }
+        String candidateId = normalize(req.getCandidateId());
+        if (candidateId == null) {
+            candidateId = normalize(req.getClientCandidateId());
+        }
+        String sourceReference = candidateId == null ? "voice:" + key : "voice:" + key + ":" + candidateId;
+        if (sourceReference.length() > 255) {
+            throw new BusinessException("VOICE_IDEMPOTENCY_KEY_INVALID", "Voice idempotency key is invalid");
+        }
+        return sourceReference;
     }
 }

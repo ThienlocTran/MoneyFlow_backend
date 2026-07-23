@@ -578,6 +578,11 @@ public class TransactionService {
         return mapToResponse(tx);
     }
 
+    @Transactional(readOnly = true)
+    public TransactionResponse mapExistingToResponse(Transaction tx) {
+        return mapToResponse(tx);
+    }
+
     @Transactional
     public Transaction createAdjustment(
             UUID workspaceId,
@@ -1082,11 +1087,6 @@ public class TransactionService {
                 ? Map.of()
                 : voiceRecordRepository.findById(tx.getVoiceRecordId()).map(vr -> Map.of(tx.getVoiceRecordId(), vr)).orElseGet(Map::of);
         return mapToResponse(tx, transferDetails, voiceRecords);
-    }
-
-    @Transactional(readOnly = true)
-    public TransactionResponse mapExistingToResponse(Transaction tx) {
-        return mapToResponse(tx);
     }
 
     private TransactionResponse mapToResponse(

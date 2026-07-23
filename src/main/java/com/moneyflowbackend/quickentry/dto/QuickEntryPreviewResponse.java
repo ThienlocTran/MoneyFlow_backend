@@ -20,6 +20,10 @@ import java.util.UUID;
 @AllArgsConstructor
 @Builder
 public class QuickEntryPreviewResponse {
+    private String candidateId;
+    private String clientCandidateId;
+    private VoiceIntentType intentType;
+    private VoiceCandidateStatus candidateStatus;
     private String rawInput;
     private String normalizedInput;
     private TransactionType type;
@@ -40,6 +44,7 @@ public class QuickEntryPreviewResponse {
     private SpendingScope spendingScope;
     private double confidence;
     private boolean readyToConfirm;
+    private String unsupportedReason;
     @Builder.Default
     private List<String> missingFields = new ArrayList<>();
     @Builder.Default
@@ -57,6 +62,9 @@ public class QuickEntryPreviewResponse {
     public static class Candidate {
         private String candidateId;
         private String originalText;
+        private String clientCandidateId;
+        private VoiceIntentType intentType;
+        private VoiceCandidateStatus candidateStatus;
         private String description;
         private BigDecimal amount;
         private TransactionType type;
@@ -71,11 +79,14 @@ public class QuickEntryPreviewResponse {
         private String destinationWalletName;
         private LocalDate transactionDate;
         private LocalTime transactionTime;
+        private String note;
         private SpendingScope spendingScope;
         private double confidence;
         private boolean readyToConfirm;
         private String validationStatus;
-        private List<String> missingFields;
+        @Builder.Default
+        private List<String> missingFields = new ArrayList<>();
+        private String unsupportedReason;
         private List<String> warnings;
     }
 }
