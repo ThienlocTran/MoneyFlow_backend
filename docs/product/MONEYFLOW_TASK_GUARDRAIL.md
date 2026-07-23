@@ -1,39 +1,79 @@
 # MoneyFlow Task Guardrail
 
-Đọc checklist này trước mọi task coding/design/migration của MoneyFlow.
+Last synced: 2026-07-23.
 
-## Không được làm lệch mô hình
-- Không coi hũ/jar là category.
-- Không coi hũ/jar là ví vật lý.
-- Category thuộc jar; transaction thuộc category.
-- Wallet = tiền đang nằm ở đâu.
-- Income Source = tiền đến từ đâu.
-- Debt movement không phải thu/chi sinh hoạt thường.
-- Historical Excel transaction có thể là analytics-only; không bắt buộc có wallet nếu nguồn cũ không ghi.
+## Before-Task Checklist
 
-## Không được làm sai dữ liệu
-- Không recalculate current wallet balance từ historical import nếu chưa được duyệt rõ.
-- Không biến wallet snapshots thành income.
-- Không tạo transaction từ summary totals nếu detailed rows đã tồn tại.
-- Không đoán dòng ambiguous; đưa vào review.
-- Không invent/mock/sample runtime data.
-- Không hardcode workspace/user/wallet/category IDs.
+- Read this guardrail and the relevant source-of-truth doc.
+- Search before reading broad files.
+- Inspect only the files needed for the task.
+- State root cause before editing; if unknown, keep investigating.
+- Patch minimally and keep existing style.
+- Do not touch production config, secrets, DB, Docker, deploy files, package files, migrations, or SQL schema without confirmation.
+- Do not run build, dev, test, deploy, import, or repair commands without confirmation.
 
-## Confirmation first
-- Quick text/voice: parse -> draft -> user confirm -> save.
-- Recurring/fixed commitment: setup once -> app reminds/prepares -> user confirms -> transaction.
-- Cutover/opening balance: user confirms snapshot/date -> then live ledger starts.
-- App must never auto-create real posted transactions from recurring commitments without confirmation.
+## Data Safety Checklist
 
-## UI clarity rule
-Mỗi số quan trọng phải trả lời được:
-1. Số này là gì?
-2. Nó đến từ đâu?
-3. User nên làm gì tiếp?
+- No fake, mock, sample, random, demo, or fallback financial data in runtime code.
+- No hardcoded workspace, user, wallet, category, jar, debt, or production IDs.
+- No broad importer, repair, delete, truncate, or overwrite without explicit approval.
+- No transaction from summary totals when detailed rows exist.
+- No guessed wallet for historical Excel transactions.
+- No wallet snapshot converted into income.
+- No historical analytics-only transaction replayed into live wallet balance.
+- Draft, planned, void, deleted, and historical analytics-only records must not affect live balances.
 
-## Lazy-user rule
-Ưu tiên flow:
-setup once -> confirm monthly/daily -> app creates transaction.
+## DB And Test Datasource Safety Checklist
 
-Không ưu tiên feature mới hơn sự rõ ràng của user.
-Không build AI/forecast/advice trước khi ledger, wallet balance, recurring commitments, debt, dashboard explanation ổn.
+- Confirm the datasource before any DB write.
+- Prefer readonly reports for forensic work.
+- Backup before repair.
+- Dry-run before insert/update.
+- Use duplicate guards and transaction boundaries.
+- Validate totals after write.
+- Never mutate production DB by accident.
+- Tests must not run against Neon production-like DB.
+- Never expose secrets from `.env`, application properties, logs, or shell history.
+
+## Frontend And Backend Responsibility Split
+
+- Backend owns money rules, balances, status effects, debt remaining, dashboard totals, validation, audit, idempotency.
+- Frontend owns clear forms, previews, empty/error states, route-level flows, confirmation UX, and explaining numbers.
+- Frontend must not compute authoritative financial totals when backend provides them.
+- Backend must not auto-post user-facing records from ambiguous voice/text/recurring input.
+
+## UTF-8 And Vietnamese Text Rules
+
+- Save source, Markdown, Vue, TypeScript/JavaScript, Java, SQL, JSON, YAML, and reports as real UTF-8.
+- Preserve real Vietnamese Unicode.
+- Before completion, scan touched text files for mojibake patterns.
+- Never report success while touched Vietnamese text is corrupted.
+
+Scan for mojibake codepoints/fragments:
+
+- U+00C3, U+00C4, U+00C6, U+00C2, U+FFFD
+- broken fragments of Vietnamese words such as Công, nợ, Tài, Hũ
+
+## No Fake Runtime Data Rule
+
+Runtime UI must use backend APIs. Empty backend data means empty state. Backend failure means error state.
+
+Allowed fake data only in tests, fixtures under test paths, stories if already present, or documentation examples.
+
+## Confirmation-Before-Commit Rules
+
+- Ask before changing protected config/deploy/DB/package/migration files.
+- Ask before running build/dev/test/deploy/import/repair commands.
+- Ask before committing if the task did not explicitly request commit.
+- If commit is requested, stage only the requested files and report the hash.
+- Push only to the requested branch/remote; never force push.
+
+## Validation And Reporting Standard
+
+- Run `git diff --check`.
+- Run a mojibake scan on touched text files.
+- Report exactly what was changed.
+- Report duplicate docs merged.
+- Report conflicts and facts needing confirmation.
+- Report what was not tested.
+- Report risks and next step.
