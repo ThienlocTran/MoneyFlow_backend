@@ -33,6 +33,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -171,6 +172,36 @@ class VoiceAudioServiceTests {
         assertThat(ctx.voiceRecord().getDurationSeconds()).isNull();
         assertThat(ctx.voiceRecord().getOriginalTranscript()).isEqualTo("an sang 35k");
         assertThat(ctx.voiceRecord().getVoiceStatus()).isEqualTo(VoiceRecordStatus.AUDIO_DELETED);
+    }
+
+    @Test
+    void deleteExpiredVoiceAudioIsSafeWhenStorageIsDisabled() {
+        TestContext ctx = context(new DisabledVoiceAudioStorageService());
+        ctx.voiceRecord().setStoragePublicId("stored/audio");
+        ctx.voiceRecord().setRetentionUntil(LocalDate.of(2026, 6, 14));
+        when(ctx.voiceRecordRepository().findAllByRetentionUntilBeforeAndStoragePublicIdIsNotNull(LocalDate.of(2026, 6, 15)))
+                .thenReturn(List.of(ctx.voiceRecord()));
+
+        int deleted = ctx.service().deleteExpiredVoiceAudio();
+
+        assertThat(deleted).isZero();
+        assertThat(ctx.voiceRecord().getStoragePublicId()).isEqualTo("stored/audio");
+        verify(ctx.voiceRecordRepository(), never()).save(any(VoiceRecord.class));
+    }
+
+    @Test
+    void deleteExpiredVoiceAudioRetriesLaterWhenProviderDeleteFails() {
+        TestContext ctx = context(new FailingStorageService());
+        ctx.voiceRecord().setStoragePublicId("stored/audio");
+        ctx.voiceRecord().setRetentionUntil(LocalDate.of(2026, 6, 14));
+        when(ctx.voiceRecordRepository().findAllByRetentionUntilBeforeAndStoragePublicIdIsNotNull(LocalDate.of(2026, 6, 15)))
+                .thenReturn(List.of(ctx.voiceRecord()));
+
+        int deleted = ctx.service().deleteExpiredVoiceAudio();
+
+        assertThat(deleted).isZero();
+        assertThat(ctx.voiceRecord().getStoragePublicId()).isEqualTo("stored/audio");
+        verify(ctx.voiceRecordRepository(), never()).save(any(VoiceRecord.class));
     }
 
     private static TestContext context(VoiceAudioStorageService storageService) {

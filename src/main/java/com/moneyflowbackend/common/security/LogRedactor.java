@@ -6,7 +6,8 @@ public final class LogRedactor {
     private static final String REDACTED = "[REDACTED]";
     private static final Pattern BEARER_TOKEN = Pattern.compile("(?i)Bearer\\s+[A-Za-z0-9._~+/=-]+");
     private static final Pattern AUTH_HEADER = Pattern.compile("(?i)(Authorization\\s*[:=]\\s*)[^\\s,;]+");
-    private static final Pattern KEY_VALUE_SECRET = Pattern.compile("(?i)(JWT_SECRET|DB_PASSWORD|DATABASE_URL|MONEYFLOW_DB_URL|SPRING_DATASOURCE_PASSWORD|CLOUDINARY_API_SECRET|CLOUDINARY_URL|api_secret|access_token|refresh_token|password|token)(\\s*[:=]\\s*)([^\\s,;]+)");
+    private static final Pattern KEY_VALUE_SECRET = Pattern.compile("(?i)(JWT_SECRET|DB_PASSWORD|DATABASE_URL|MONEYFLOW_DB_URL|SPRING_DATASOURCE_PASSWORD|CLOUDINARY_API_SECRET|CLOUDINARY_URL|api_secret|access_token|refresh_token|password|token|signature)(\\s*[:=]\\s*)([^\\s,;]+)");
+    private static final Pattern KEY_VALUE_PRIVATE_TEXT = Pattern.compile("(?i)(originalTranscript|editedTranscript|transcript|rawInput|prompt|response|playbackUrl)(\\s*[:=]\\s*)([^\\r\\n,;]+)");
     private static final Pattern JDBC_URL = Pattern.compile("jdbc:postgresql://[^\\s,;]+", Pattern.CASE_INSENSITIVE);
     private static final Pattern POSTGRES_URL = Pattern.compile("postgresql://[^\\s,;]+", Pattern.CASE_INSENSITIVE);
     private static final Pattern CLOUDINARY_URL = Pattern.compile("cloudinary://[^\\s,;]+", Pattern.CASE_INSENSITIVE);
@@ -27,6 +28,7 @@ public final class LogRedactor {
         redacted = POSTGRES_URL.matcher(redacted).replaceAll(REDACTED);
         redacted = CLOUDINARY_URL.matcher(redacted).replaceAll(REDACTED);
         redacted = SIGNED_AUDIO_URL.matcher(redacted).replaceAll(REDACTED);
+        redacted = KEY_VALUE_PRIVATE_TEXT.matcher(redacted).replaceAll("$1$2" + REDACTED);
         return STORAGE_KEY.matcher(redacted).replaceAll("$1$2" + REDACTED);
     }
 }
