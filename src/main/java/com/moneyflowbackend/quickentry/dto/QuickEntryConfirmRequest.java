@@ -32,6 +32,7 @@ public class QuickEntryConfirmRequest {
     private String learnKeyword;
     private Integer durationSeconds;
     private String audioMimeType;
+    private String idempotencyKey;
 
     public void setSpendingScope(SpendingScope spendingScope) {
         this.spendingScope = spendingScope;

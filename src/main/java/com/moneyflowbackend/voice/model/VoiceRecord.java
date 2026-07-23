@@ -50,6 +50,9 @@ public class VoiceRecord {
     @Column(name = "edited_transcript", columnDefinition = "TEXT")
     private String editedTranscript;
 
+    @Column(name = "idempotency_key", length = 100)
+    private String idempotencyKey;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "voice_status", nullable = false, length = 20)
     @Builder.Default

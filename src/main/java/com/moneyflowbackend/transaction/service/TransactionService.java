@@ -1078,6 +1078,11 @@ public class TransactionService {
         return mapToResponse(tx, transferDetails, voiceRecords);
     }
 
+    @Transactional(readOnly = true)
+    public TransactionResponse mapExistingToResponse(Transaction tx) {
+        return mapToResponse(tx);
+    }
+
     private TransactionResponse mapToResponse(
             Transaction tx,
             Map<UUID, TransferDetail> transferDetails,
