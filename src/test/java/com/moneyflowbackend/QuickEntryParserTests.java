@@ -158,6 +158,9 @@ class QuickEntryParserTests {
         assertThat(preview.getMissingFields()).doesNotContain("AMOUNT");
         assertThat(preview.getWarnings()).contains("MULTIPLE_ITEMS_DETECTED").doesNotContain("AMBIGUOUS_AMOUNT");
         assertThat(preview.getCandidates()).hasSize(2);
+        assertThat(preview.getCandidates()).extracting("candidateId").doesNotContainNull();
+        assertThat(preview.getCandidates()).extracting("transactionDate")
+                .containsExactly(preview.getTransactionDate(), preview.getTransactionDate());
         assertThat(preview.getCandidates()).extracting("amount")
                 .containsExactly(new java.math.BigDecimal("15000"), new java.math.BigDecimal("15000"));
         assertThat(preview.getCandidates()).extracting("description")
@@ -189,6 +192,8 @@ class QuickEntryParserTests {
                 .containsExactly(new java.math.BigDecimal("50000"), new java.math.BigDecimal("5000"));
         assertThat(preview.getCandidates()).extracting("categoryName")
                 .containsExactly("Transport", "Transport");
+        assertThat(preview.getCandidates()).extracting("validationStatus")
+                .containsExactly("READY", "READY");
     }
 
     @Test

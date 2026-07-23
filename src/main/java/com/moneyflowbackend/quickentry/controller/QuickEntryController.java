@@ -1,6 +1,8 @@
 package com.moneyflowbackend.quickentry.controller;
 
 import com.moneyflowbackend.dto.ApiResponse;
+import com.moneyflowbackend.quickentry.dto.QuickEntryBatchConfirmRequest;
+import com.moneyflowbackend.quickentry.dto.QuickEntryBatchConfirmResponse;
 import com.moneyflowbackend.quickentry.dto.QuickEntryButtonRequest;
 import com.moneyflowbackend.quickentry.dto.QuickEntryConfirmRequest;
 import com.moneyflowbackend.quickentry.dto.QuickEntryOptionsResponse;
@@ -57,6 +59,14 @@ public class QuickEntryController {
             @RequestBody QuickEntryConfirmRequest req) {
         TransactionResponse res = quickEntryService.confirmVoice(workspaceId, req, currentUserId());
         return ResponseEntity.ok(ApiResponse.ok("Voice transaction created", res));
+    }
+
+    @PostMapping("/confirm-voice-batch")
+    public ResponseEntity<ApiResponse<QuickEntryBatchConfirmResponse>> confirmVoiceBatch(
+            @PathVariable UUID workspaceId,
+            @RequestBody QuickEntryBatchConfirmRequest req) {
+        QuickEntryBatchConfirmResponse res = quickEntryService.confirmVoiceBatch(workspaceId, req, currentUserId());
+        return ResponseEntity.ok(ApiResponse.ok("Voice transactions created", res));
     }
 
     @PostMapping("/button")
