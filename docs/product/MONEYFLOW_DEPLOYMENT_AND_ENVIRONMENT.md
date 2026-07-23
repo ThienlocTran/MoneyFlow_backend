@@ -23,6 +23,8 @@ DB_USERNAME
 DB_PASSWORD
 ```
 
+Remove `DB_URL`, `DB_USERNAME`, and `DB_PASSWORD` from MoneyFlow terminals and IDE run configs when they belong to another project. Use the `MONEYFLOW_*` names for MoneyFlow. Rotate any Neon credential that appears in chat, logs, screenshots, or committed files.
+
 Precedence:
 
 ```text
@@ -66,6 +68,22 @@ MONEYFLOW_AUDIO_STORAGE_PROVIDER=disabled
 ```
 
 Production uses `SPRING_PROFILES_ACTIVE=production` and production-only values. Never commit real values.
+
+For free Neon or development environments where compute sleep matters, prefer:
+
+```text
+DB_MIN_IDLE=0
+DB_MAX_POOL_SIZE=2
+```
+
+Production may keep larger pool values when traffic requires them; keep pool sizing environment-driven.
+
+## Keep-Alive And Health Checks
+
+- Render health check path should be `/api/public/health/live`.
+- UptimeRobot and other keep-alive monitors should ping `/api/public/health/live` only.
+- Do not use `/api/public/health/ready` for keep-alive because it checks DB connectivity.
+- Disable external keep-alive temporarily when saving Neon CU-hours matters more than cold-start avoidance.
 
 ## Audio Storage
 

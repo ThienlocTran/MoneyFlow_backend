@@ -3,6 +3,9 @@ spring:
     url: ${MONEYFLOW_DB_URL:${SPRING_DATASOURCE_URL:${DB_URL:jdbc:postgresql://localhost:5432/moneyflow}}}
     username: ${MONEYFLOW_DB_USERNAME:${SPRING_DATASOURCE_USERNAME:${DB_USERNAME:moneyflow}}}
     password: ${MONEYFLOW_DB_PASSWORD:${SPRING_DATASOURCE_PASSWORD:${DB_PASSWORD:moneyflow}}}
+    hikari:
+      maximum-pool-size: ${DB_MAX_POOL_SIZE:2}
+      minimum-idle: ${DB_MIN_IDLE:0}
   docker:
     compose:
       enabled: ${SPRING_DOCKER_COMPOSE_ENABLED:false}
