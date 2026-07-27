@@ -59,16 +59,18 @@ Voice command browser UAT must not run against Neon or any shared remote databas
 
 ```text
 host=localhost
+port=55432
 database=moneyflow_voice_uat
 ```
 
 Windows PowerShell:
 
 ```powershell
+.\scripts\start-voice-uat-db.ps1
 .\scripts\run-local-voice-uat.ps1
 ```
 
-The script sets `MONEYFLOW_DB_URL` to `jdbc:postgresql://localhost:5432/moneyflow_voice_uat`, removes generic fallback DB variables for that process, prints only the host/database, and starts the backend with the `local` profile.
+The DB script starts `postgres:16` with local-only placeholder credentials on `127.0.0.1:55432`. The backend script sets `MONEYFLOW_DB_URL` to `jdbc:postgresql://localhost:55432/moneyflow_voice_uat`, removes generic fallback DB variables for that process, prints only the host/database, and starts the backend with the `local` profile.
 
 If the current shell resolves to `neondb`, do not run browser UAT or disposable write checks from that shell. Start a fresh shell with the command above.
 

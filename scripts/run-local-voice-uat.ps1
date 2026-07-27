@@ -1,9 +1,9 @@
 param(
     [string]$Database = "moneyflow_voice_uat",
-    [string]$Username = "moneyflow",
-    [string]$Password = "moneyflow",
+    [string]$Username = "moneyflow_local",
+    [string]$Password = "moneyflow_local_password",
     [string]$HostName = "localhost",
-    [int]$Port = 5432
+    [int]$Port = 55432
 )
 
 $ErrorActionPreference = "Stop"
@@ -29,5 +29,5 @@ Remove-Item Env:\SPRING_DATASOURCE_URL -ErrorAction SilentlyContinue
 Remove-Item Env:\SPRING_DATASOURCE_USERNAME -ErrorAction SilentlyContinue
 Remove-Item Env:\SPRING_DATASOURCE_PASSWORD -ErrorAction SilentlyContinue
 
-Write-Host "MoneyFlow voice UAT DB target: host=$HostName database=$Database"
+Write-Host "MoneyFlow voice UAT DB target: host=$HostName port=$Port database=$Database"
 .\mvnw.cmd spring-boot:run
