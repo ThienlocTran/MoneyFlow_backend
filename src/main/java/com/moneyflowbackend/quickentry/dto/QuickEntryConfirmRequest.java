@@ -18,7 +18,6 @@ public class QuickEntryConfirmRequest {
     private VoiceIntentType intentType;
     private String idempotencyKey;
     private String rawInput;
-    private String idempotencyKey;
     private TransactionType type;
     private TransactionStatus status;
     private BigDecimal amount;
