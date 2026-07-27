@@ -45,17 +45,17 @@ public class QuickEntryParser {
             new AliasRule(CategoryType.EXPENSE, List.of("cafe", "ca phe"),
                     List.of("Mua nuoc uong")),
             new AliasRule(CategoryType.EXPENSE, List.of("xang", "xang xe"),
-                    List.of("Xang xe")),
+                    List.of("Xang xe", "car")),
             new AliasRule(CategoryType.EXPENSE, List.of("gui xe"),
                     List.of("Gui xe")),
             new AliasRule(CategoryType.EXPENSE, List.of("an", "an sang", "an trua", "an toi", "com", "bun", "pho", "do an", "tien an"),
-                    List.of("An uong", "An", "Food", "Food & Drink")),
+                    List.of("An uong", "An", "Food", "Food & Drink", "food")),
             new AliasRule(CategoryType.EXPENSE, List.of("ca phe", "cafe", "coffee", "uong ca phe", "tra sua", "nuoc", "uong nuoc"),
-                    List.of("Ca phe", "An uong", "Do uong", "Food & Drink")),
+                    List.of("Ca phe", "An uong", "Do uong", "Food & Drink", "coffee")),
             new AliasRule(CategoryType.EXPENSE, List.of("xang", "xang xe", "gui xe", "grab", "taxi"),
-                    List.of("Di lai", "Di chuyen", "Transport")),
+                    List.of("Di lai", "Di chuyen", "Transport", "car")),
             new AliasRule(CategoryType.INCOME, List.of("luong", "thuong"),
-                    List.of("Luong", "Thu nhap")),
+                    List.of("Luong", "Thu nhap", "salary")),
             new AliasRule(CategoryType.INCOME, List.of("me cho", "duoc cho", "nhan tien"),
                     List.of("Thu nhap khac", "Qua tang", "Thu nhap"))
     );
@@ -223,7 +223,7 @@ public class QuickEntryParser {
             }
         }
 
-        List<QuickEntryPreviewResponse.Candidate> candidates = buildCandidates(display, amountCandidates, keywords, categories,
+        List<QuickEntryPreviewResponse.Candidate> candidates = buildCandidates(display, amountCandidates, keywords, categories, wallets,
                 type, status, transactionDate, dateResult.time(), wallet, sourceWallet, destinationWallet);
         String description = amountCandidates.size() > 1
                 ? candidates.stream().findFirst().map(QuickEntryPreviewResponse.Candidate::getDescription).orElse(null)
@@ -341,7 +341,8 @@ public class QuickEntryParser {
                 "tra toi", "tra minh", "tra cho", "tra chi", "tra anh", "tra em")) {
             return VoiceIntentType.DEBT_PAYMENT;
         }
-        if (hasAny(normalized, "tao no", "them no", "cho vay", "cho muon", "di vay", "muon no", "muon", "no toi", "no minh")) {
+        if (hasAny(normalized, "tao no", "them no", "cho vay", "cho muon", "di vay", "muon no", "muon", "no toi", "no minh",
+                "toi no", "minh no", "anh no", "em no")) {
             return VoiceIntentType.DEBT_CREATE;
         }
         if (hasAny(normalized, "gui tiet kiem", "muc tieu tiet kiem", "tiet kiem cho", "gop tiet kiem", "vao muc tieu")) {
@@ -570,7 +571,8 @@ public class QuickEntryParser {
             Optional<Category> match = (categories == null ? List.<Category>of() : categories).stream()
                     .filter(category -> category.isActive() && !category.isArchived())
                     .filter(category -> category.getCategoryType() == type)
-                    .filter(category -> VietnameseTextNormalizer.comparable(category.getName()).equals(comparableName))
+                    .filter(category -> VietnameseTextNormalizer.comparable(category.getName()).equals(comparableName)
+                            || VietnameseTextNormalizer.comparable(category.getIcon()).equals(comparableName))
                     .findFirst();
             if (match.isPresent()) {
                 return match;
@@ -584,6 +586,7 @@ public class QuickEntryParser {
             List<QuickAmountParser.AmountCandidate> amountCandidates,
             List<CategoryKeyword> keywords,
             List<Category> categories,
+            List<Wallet> wallets,
             TransactionType fallbackType,
             TransactionStatus status,
             LocalDate transactionDate,
@@ -625,7 +628,12 @@ public class QuickEntryParser {
                 continue;
             }
             CategoryMatch segmentCategory = matchCategory(normalizedSegment, segment, keywords, categories).orElse(null);
-            TransactionType segmentType = inferType(normalizedSegment, false, segmentCategory);
+            boolean segmentTransfer = TRANSFER_PATTERN.matcher(normalizedSegment).find()
+                    || looksLikeBareWalletTransfer(normalizedSegment, segment, wallets);
+            TransferWallets segmentTransferWallets = segmentTransfer
+                    ? matchTransferWallets(normalizedSegment, segment, List.of(), wallets)
+                    : new TransferWallets(sourceWallet, destinationWallet, null, null);
+            TransactionType segmentType = inferType(normalizedSegment, segmentTransfer, segmentCategory);
             if (segmentType == null) {
                 segmentType = fallbackType == TransactionType.INCOME || fallbackType == TransactionType.EXPENSE
                         ? fallbackType
@@ -646,10 +654,10 @@ public class QuickEntryParser {
                     missingFields.add("WALLET");
                 }
             } else if (segmentType == TransactionType.TRANSFER) {
-                if (sourceWallet == null) {
+                if (segmentTransferWallets.source() == null) {
                     missingFields.add("SOURCE_WALLET");
                 }
-                if (destinationWallet == null) {
+                if (segmentTransferWallets.destination() == null) {
                     missingFields.add("DESTINATION_WALLET");
                 }
             }
@@ -671,10 +679,10 @@ public class QuickEntryParser {
                     .walletName(wallet == null ? null : wallet.getName())
                     .categoryId(category == null ? null : category.getId())
                     .categoryName(category == null ? null : category.getName())
-                    .sourceWalletId(sourceWallet == null ? null : sourceWallet.getId())
-                    .sourceWalletName(sourceWallet == null ? null : sourceWallet.getName())
-                    .destinationWalletId(destinationWallet == null ? null : destinationWallet.getId())
-                    .destinationWalletName(destinationWallet == null ? null : destinationWallet.getName())
+                    .sourceWalletId(segmentTransferWallets.source() == null ? null : segmentTransferWallets.source().getId())
+                    .sourceWalletName(segmentTransferWallets.source() == null ? null : segmentTransferWallets.source().getName())
+                    .destinationWalletId(segmentTransferWallets.destination() == null ? null : segmentTransferWallets.destination().getId())
+                    .destinationWalletName(segmentTransferWallets.destination() == null ? null : segmentTransferWallets.destination().getName())
                     .transactionDate(transactionDate)
                     .transactionTime(transactionTime)
                     .spendingScope(spendingScope(category))
@@ -717,10 +725,22 @@ public class QuickEntryParser {
 
     private String amountSegment(String display, List<QuickAmountParser.AmountCandidate> amountCandidates, int index) {
         QuickAmountParser.AmountCandidate current = amountCandidates.get(index);
-        int start = index == 0 ? 0 : amountCandidates.get(index - 1).end();
-        int end = current.end();
+        int previousEnd = index == 0 ? 0 : amountCandidates.get(index - 1).end();
+        int nextStart = index + 1 < amountCandidates.size() ? amountCandidates.get(index + 1).start() : display.length();
+        int commaStart = Math.max(display.lastIndexOf(',', current.start()), display.lastIndexOf(';', current.start()));
+        int commaEnd = nextSeparator(display, current.end());
+        int start = commaStart >= previousEnd ? commaStart + 1 : previousEnd;
+        int end = commaEnd >= 0 && commaEnd <= nextStart ? commaEnd : current.end();
         String segment = displayText(display, start, end);
         return segment.isBlank() ? display : segment;
+    }
+
+    private int nextSeparator(String display, int start) {
+        int comma = display.indexOf(',', start);
+        int semicolon = display.indexOf(';', start);
+        if (comma < 0) return semicolon;
+        if (semicolon < 0) return comma;
+        return Math.min(comma, semicolon);
     }
 
     private String candidateDescription(String segment, QuickAmountParser.AmountCandidate amountCandidate) {
