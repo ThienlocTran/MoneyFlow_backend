@@ -40,6 +40,14 @@ Local DB credentials are pre-configured in `application-local.yml`:
 - User: `moneyflow`
 - Password: `moneyflow`
 
+For isolated voice command UAT, use a separate local database:
+
+```powershell
+.\scripts\run-local-voice-uat.ps1
+```
+
+It targets `localhost` database `moneyflow_voice_uat` and clears generic DB fallback variables for that backend process.
+
 ### Option 2: Neon PostgreSQL (Cloud)
 
 1. Copy `.env.example` to `.env` and fill in your Neon credentials:
