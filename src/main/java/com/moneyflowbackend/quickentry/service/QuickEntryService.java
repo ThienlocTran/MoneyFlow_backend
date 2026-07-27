@@ -51,6 +51,7 @@ import java.util.UUID;
 @Service
 public class QuickEntryService {
     private static final String FALLBACK_ZONE = "Asia/Ho_Chi_Minh";
+    private static final String VOICE_BATCH_IDEMPOTENCY_PREFIX = "voice-batch:";
 
     private final WorkspaceRepository workspaceRepository;
     private final WorkspaceMemberRepository workspaceMemberRepository;
@@ -155,7 +156,7 @@ public class QuickEntryService {
     }
 
     @Transactional
-    public synchronized QuickEntryBatchConfirmResponse confirmVoiceBatch(UUID workspaceId, QuickEntryBatchConfirmRequest req, UUID userId) {
+    public QuickEntryBatchConfirmResponse confirmVoiceBatch(UUID workspaceId, QuickEntryBatchConfirmRequest req, UUID userId) {
         Workspace workspace = requireWritableMember(workspaceId, userId).getWorkspace();
         if (req == null) {
             throw new BusinessException("QUICK_ENTRY_BATCH_REQUIRED", "Voice batch request is required");
@@ -164,25 +165,10 @@ public class QuickEntryService {
         if (idempotencyKey == null) {
             throw new BusinessException("IDEMPOTENCY_KEY_REQUIRED", "Idempotency key is required");
         }
-        String sourcePrefix = batchSourcePrefix(idempotencyKey);
-        var existingVoiceRecord = voiceRecordRepository.findVoiceIdempotencyMatch(workspaceId, userId, idempotencyKey);
+        String storedIdempotencyKey = batchIdempotencyKey(idempotencyKey);
+        var existingVoiceRecord = voiceRecordRepository.findVoiceIdempotencyMatch(workspaceId, userId, storedIdempotencyKey);
         if (existingVoiceRecord.isPresent()) {
-            var replayedTransactions = transactionRepository
-                    .findAllByWorkspaceIdAndVoiceRecordIdAndSourceTypeOrderByCreatedAtAsc(
-                            workspaceId, existingVoiceRecord.get().getId(), TransactionSourceType.VOICE);
-            List<QuickEntryBatchConfirmResponse.Item> replayedItems = replayedTransactions.stream()
-                    .map(tx -> QuickEntryBatchConfirmResponse.Item.builder()
-                            .candidateId(tx.getSourceReference() == null ? null : tx.getSourceReference().substring(sourcePrefix.length()))
-                            .transaction(transactionService.mapToResponse(tx))
-                            .build())
-                    .toList();
-            return QuickEntryBatchConfirmResponse.builder()
-                    .idempotencyKey(idempotencyKey)
-                    .voiceRecordId(existingVoiceRecord.get().getId())
-                    .committedCount(replayedItems.size())
-                    .idempotentReplay(true)
-                    .items(replayedItems)
-                    .build();
+            return replayBatch(idempotencyKey, workspaceId, existingVoiceRecord.get().getId());
         }
 
         List<QuickEntryBatchConfirmRequest.CandidateConfirmRequest> selected = req.getCandidates() == null
@@ -197,7 +183,7 @@ public class QuickEntryService {
             requireReadyVoiceCandidate(candidate.getCandidateStatus());
             rejectUnsupportedVoiceIntent(candidate.getIntentType(), candidate.getType());
         }
-        VoiceRecord voiceRecord = voiceRecordRepository.save(VoiceRecord.builder()
+        VoiceRecord voiceRecord = voiceRecordRepository.saveAndFlush(VoiceRecord.builder()
                 .workspace(workspace)
                 .createdByUser(userRepository.findById(userId)
                         .orElseThrow(() -> new BusinessException("USER_NOT_FOUND", "User not found", HttpStatus.NOT_FOUND)))
@@ -208,7 +194,7 @@ public class QuickEntryService {
                 .fileSizeBytes(null)
                 .originalTranscript(normalize(req.getRawInput()))
                 .editedTranscript(normalize(req.getRawInput()))
-                .idempotencyKey(idempotencyKey)
+                .idempotencyKey(storedIdempotencyKey)
                 .voiceStatus(VoiceRecordStatus.CONFIRMED)
                 .build());
 
@@ -223,7 +209,7 @@ public class QuickEntryService {
                     TransactionSourceType.VOICE,
                     req.getRawInput(),
                     voiceRecord.getId(),
-                    sourcePrefix + candidateId);
+                    candidateId);
             items.add(QuickEntryBatchConfirmResponse.Item.builder()
                     .candidateId(candidateId)
                     .transaction(tx)
@@ -389,8 +375,30 @@ public class QuickEntryService {
         return id;
     }
 
-    private String batchSourcePrefix(String idempotencyKey) {
-        return "voice-batch:" + idempotencyKey + ":";
+    private String batchIdempotencyKey(String idempotencyKey) {
+        return VOICE_BATCH_IDEMPOTENCY_PREFIX + idempotencyKey;
+    }
+
+    private QuickEntryBatchConfirmResponse replayBatch(String idempotencyKey, UUID workspaceId, UUID voiceRecordId) {
+        var replayedTransactions = transactionRepository
+                .findAllByWorkspaceIdAndVoiceRecordIdAndSourceTypeOrderByCreatedAtAsc(
+                        workspaceId, voiceRecordId, TransactionSourceType.VOICE);
+        if (replayedTransactions.isEmpty()) {
+            throw new BusinessException("VOICE_CONFIRM_INCOMPLETE", "Voice batch confirmation is incomplete");
+        }
+        List<QuickEntryBatchConfirmResponse.Item> replayedItems = replayedTransactions.stream()
+                .map(tx -> QuickEntryBatchConfirmResponse.Item.builder()
+                        .candidateId(tx.getSourceReference())
+                        .transaction(transactionService.mapToResponse(tx))
+                        .build())
+                .toList();
+        return QuickEntryBatchConfirmResponse.builder()
+                .idempotencyKey(idempotencyKey)
+                .voiceRecordId(voiceRecordId)
+                .committedCount(replayedItems.size())
+                .idempotentReplay(true)
+                .items(replayedItems)
+                .build();
     }
 
     private void learnKeywordIfRequested(Workspace workspace, QuickEntryConfirmRequest req) {
