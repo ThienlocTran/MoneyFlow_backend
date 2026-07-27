@@ -16,6 +16,7 @@ public class QuickAmountParser {
     private static final Pattern COMPOSITE_MILLION = Pattern.compile("(?<![\\d])(-?\\d+(?:[.,]\\d+)?)\\s*(?:tr|trieu)\\s*(\\d{1,3})(?:\\s*(?:k|nghin|ngan))?\\b");
     private static final Pattern MILLION = Pattern.compile("(?<![\\d])(-?\\d+(?:[.,]\\d+)?)\\s*(?:tr|trieu)\\b");
     private static final Pattern THOUSAND = Pattern.compile("(?<![\\d])(-?\\d+(?:[.,]\\d+)?)\\s*(?:k|nghin|ngan)\\b");
+    private static final Pattern TENS_THOUSAND_WORDS = Pattern.compile("\\b(mot|hai|ba|bon|tu|nam|sau|bay|tam|chin)\\s+chuc(?:\\s*(?:k|nghin|ngan))?\\b");
     private static final Pattern GROUPED = Pattern.compile("(?<![\\d/:.-])-?\\d{1,3}(?:[.,\\s]\\d{3})+(?:\\s*(?:d|vnd))?\\b");
     private static final Pattern VND = Pattern.compile("(?<![\\d/:.-])-?\\d+(?:\\s*(?:d|vnd))\\b");
     private static final Pattern BARE = Pattern.compile("(?<![\\d/:.-])-?\\d+(?![\\d/:.-])");
@@ -33,23 +34,18 @@ public class QuickAmountParser {
         addCompositeMatches(COMPOSITE_MILLION.matcher(normalized), display, blocked, candidates, zero);
         addUnitMatches(MILLION.matcher(normalized), display, blocked, candidates, zero, new BigDecimal("1000000"));
         addUnitMatches(THOUSAND.matcher(normalized), display, blocked, candidates, zero, new BigDecimal("1000"));
+        addTensThousandWordMatches(TENS_THOUSAND_WORDS.matcher(normalized), display, blocked, candidates, zero);
         addPlainMatches(GROUPED.matcher(normalized), display, blocked, candidates, zero, false, false);
         addPlainMatches(VND.matcher(normalized), display, blocked, candidates, zero, false, false);
         addPlainMatches(BARE.matcher(normalized), display, blocked, candidates, zero, true, true);
 
         candidates.sort(Comparator.comparingInt(AmountCandidate::start));
-        if (candidates.size() == 1 && candidates.get(0).unitlessPlain()
-                && candidates.get(0).amount().compareTo(new BigDecimal("1000")) < 0
-                && "THOUSAND".equalsIgnoreCase(quickAmountUnit == null ? "" : quickAmountUnit.trim())) {
-            AmountCandidate current = candidates.get(0);
-            candidates = List.of(new AmountCandidate(
-                    current.amount().multiply(new BigDecimal("1000")),
-                    current.start(),
-                    current.end(),
-                    current.text(),
-                    false,
-                    true,
-                    current.unitlessPlain()));
+        if ("THOUSAND".equalsIgnoreCase(quickAmountUnit == null ? "" : quickAmountUnit.trim())) {
+            candidates = candidates.stream()
+                    .map(candidate -> candidate.unitlessPlain() && candidate.amount().compareTo(new BigDecimal("1000")) < 0
+                            ? new AmountCandidate(candidate.amount().multiply(new BigDecimal("1000")), candidate.start(), candidate.end(), candidate.text(), false, true, candidate.unitlessPlain())
+                            : candidate)
+                    .toList();
         }
         return new AmountParseResult(candidates, negative, zero.value, candidates.size() > 1);
     }
@@ -84,6 +80,35 @@ public class QuickAmountParser {
             BigDecimal amount = decimalNumber(matcher.group(1)).multiply(multiplier);
             addCandidate(amount, matcher.start(), matcher.end(), display, candidates, zero, false, false);
         }
+    }
+
+    private void addTensThousandWordMatches(
+            Matcher matcher,
+            String display,
+            List<Span> blocked,
+            List<AmountCandidate> candidates,
+            MutableFlag zero) {
+        while (matcher.find()) {
+            if (shouldSkip(matcher.toMatchResult(), blocked, candidates)) {
+                continue;
+            }
+            addCandidate(new BigDecimal(wordNumber(matcher.group(1)) * 10000L), matcher.start(), matcher.end(), display, candidates, zero, false, false);
+        }
+    }
+
+    private int wordNumber(String value) {
+        return switch (value) {
+            case "mot" -> 1;
+            case "hai" -> 2;
+            case "ba" -> 3;
+            case "bon", "tu" -> 4;
+            case "nam" -> 5;
+            case "sau" -> 6;
+            case "bay" -> 7;
+            case "tam" -> 8;
+            case "chin" -> 9;
+            default -> 0;
+        };
     }
 
     private void addPlainMatches(

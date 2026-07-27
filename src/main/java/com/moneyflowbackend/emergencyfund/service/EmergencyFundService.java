@@ -62,9 +62,9 @@ public class EmergencyFundService {
     @Transactional(readOnly = true)
     public EmergencyFundPlanResponse get(UUID workspaceId, UUID userId) {
         requireActiveMember(workspaceId, userId);
-        EmergencyFundPlan plan = planRepository.findByWorkspaceId(workspaceId)
-                .orElseThrow(() -> notFound());
-        return map(plan, reservedAmount(workspaceId, plan));
+        return planRepository.findByWorkspaceId(workspaceId)
+                .map(plan -> map(plan, reservedAmount(workspaceId, plan)))
+                .orElse(null);
     }
 
     @Transactional

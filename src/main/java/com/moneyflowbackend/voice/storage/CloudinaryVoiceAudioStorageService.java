@@ -51,6 +51,11 @@ public class CloudinaryVoiceAudioStorageService implements VoiceAudioStorageServ
     }
 
     @Override
+    public String provider() {
+        return PROVIDER;
+    }
+
+    @Override
     public StoredVoiceAudio upload(String objectKey, MultipartFile file) {
         try {
             String publicId = folder + "/" + trimSlashes(objectKey);
@@ -87,6 +92,23 @@ public class CloudinaryVoiceAudioStorageService implements VoiceAudioStorageServ
                 "expires_at", String.valueOf(expiresAt.getEpochSecond())));
         String url = "https://api.cloudinary.com/v1_1/%s/video/download?%s".formatted(cloudName, query(params));
         return new VoiceAudioPlayback(url, expiresAt, mimeType);
+    }
+
+    @Override
+    public StoredVoiceAudioStream open(String storagePublicId, String mimeType) {
+        try {
+            VoiceAudioPlayback playback = playbackUrl(storagePublicId, mimeType);
+            HttpRequest request = HttpRequest.newBuilder(URI.create(playback.playbackUrl())).GET().build();
+            HttpResponse<byte[]> response = httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                throw storageFailed("Cloudinary playback failed");
+            }
+            return new StoredVoiceAudioStream(response.body(), mimeType, response.body().length);
+        } catch (BusinessException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            throw storageFailed("Cloudinary playback failed");
+        }
     }
 
     @Override

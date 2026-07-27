@@ -59,6 +59,15 @@ JWT_REFRESH_TOKEN_TTL_DAYS
 MONEYFLOW_AVATAR_MAX_BYTES
 ```
 
+For free Neon or low-traffic development services where compute sleep matters, use:
+
+```text
+DB_MIN_IDLE=0
+DB_MAX_POOL_SIZE=2
+```
+
+Production can use larger values when traffic needs them. Keep pool sizing in environment variables instead of hardcoding deployment-specific values.
+
 Production CORS must include the Vercel frontend origin in `CORS_ALLOWED_ORIGINS`, for example:
 
 ```text
@@ -103,6 +112,8 @@ Timeout: 10 seconds if available
 Expected result: HTTP `200`.
 
 Do not ping `/api/public/health/ready` for keep-alive because it touches the database. Use `/ready` only for readiness checks when DB connectivity matters.
+
+If saving Neon CU-hours matters more than avoiding cold starts, disable UptimeRobot or any other external keep-alive temporarily. Rotate any Neon credential that has been exposed in chat, logs, screenshots, or committed files.
 
 ## InternFlow comparison
 

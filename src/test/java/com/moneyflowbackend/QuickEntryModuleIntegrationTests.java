@@ -14,9 +14,11 @@ import com.moneyflowbackend.category.repository.CategoryKeywordRepository;
 import com.moneyflowbackend.category.repository.CategoryRepository;
 import com.moneyflowbackend.common.exception.BusinessException;
 import com.moneyflowbackend.common.model.SpendingScope;
+import com.moneyflowbackend.quickentry.dto.QuickEntryBatchConfirmRequest;
 import com.moneyflowbackend.quickentry.dto.QuickEntryButtonRequest;
 import com.moneyflowbackend.quickentry.dto.QuickEntryConfirmRequest;
 import com.moneyflowbackend.quickentry.dto.QuickEntryPreviewResponse;
+import com.moneyflowbackend.quickentry.dto.VoiceIntentType;
 import com.moneyflowbackend.quickentry.service.QuickEntryService;
 import com.moneyflowbackend.transaction.model.Transaction;
 import com.moneyflowbackend.transaction.audit.TransactionAuditLogRepository;
@@ -39,6 +41,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.transaction.TestTransaction;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -214,6 +217,159 @@ class QuickEntryModuleIntegrationTests {
     }
 
     @Test
+    void voiceConfirmIsIdempotentPerWorkspaceUserAndKey() {
+        TestContext ctx = createContext("qe_voice_idem", WorkspaceRole.OWNER);
+        Wallet cash = wallet(ctx, "Tien mat", WalletType.CASH, true, "0");
+        Category food = category(ctx, "Food", CategoryType.EXPENSE, true, false, false);
+        keyword(ctx, food, "an sang", 10);
+
+        QuickEntryPreviewResponse preview = quickEntryService.parse(ctx.workspace().getId(), "an sang 35k tien mat", ctx.user().getId());
+        QuickEntryConfirmRequest firstReq = confirm(preview);
+        firstReq.setIdempotencyKey("voice-confirm-key");
+        long txBefore = transactionRepository.count();
+        long voiceBefore = voiceRecordRepository.count();
+
+        var first = quickEntryService.confirmVoice(ctx.workspace().getId(), firstReq, ctx.user().getId());
+        var retry = quickEntryService.confirmVoice(ctx.workspace().getId(), firstReq, ctx.user().getId());
+
+        assertThat(retry.getId()).isEqualTo(first.getId());
+        assertThat(retry.getVoiceRecordId()).isEqualTo(first.getVoiceRecordId());
+        assertThat(transactionRepository.count()).isEqualTo(txBefore + 1);
+        assertThat(voiceRecordRepository.count()).isEqualTo(voiceBefore + 1);
+
+        QuickEntryConfirmRequest nextReq = confirm(preview);
+        nextReq.setIdempotencyKey("voice-confirm-key-2");
+        var next = quickEntryService.confirmVoice(ctx.workspace().getId(), nextReq, ctx.user().getId());
+        assertThat(next.getId()).isNotEqualTo(first.getId());
+
+        TestContext other = createContext("qe_voice_idem_other", WorkspaceRole.OWNER);
+        wallet(other, "Tien mat", WalletType.CASH, true, "0");
+        Category otherFood = category(other, "Food", CategoryType.EXPENSE, true, false, false);
+        keyword(other, otherFood, "an sang", 10);
+        QuickEntryConfirmRequest otherReq = confirm(quickEntryService.parse(other.workspace().getId(), "an sang 35k tien mat", other.user().getId()));
+        otherReq.setIdempotencyKey("voice-confirm-key");
+        var otherTx = quickEntryService.confirmVoice(other.workspace().getId(), otherReq, other.user().getId());
+        assertThat(otherTx.getId()).isNotEqualTo(first.getId());
+    }
+
+    @Test
+    void voiceConfirmValidationFailureDoesNotStoreIdempotentSuccess() {
+        TestContext ctx = createContext("qe_voice_idem_validation", WorkspaceRole.OWNER);
+        wallet(ctx, "Tien mat", WalletType.CASH, true, "0");
+        Category food = category(ctx, "Food", CategoryType.EXPENSE, true, false, false);
+        keyword(ctx, food, "an sang", 10);
+        TestTransaction.flagForCommit();
+        TestTransaction.end();
+        TestTransaction.start();
+
+        QuickEntryPreviewResponse preview = quickEntryService.parse(ctx.workspace().getId(), "an sang 35k tien mat", ctx.user().getId());
+        QuickEntryConfirmRequest missingWallet = confirm(preview);
+        missingWallet.setWalletId(null);
+        missingWallet.setIdempotencyKey("voice-validation-key");
+
+        assertBusinessCode(() -> quickEntryService.confirmVoice(ctx.workspace().getId(), missingWallet, ctx.user().getId()), "WALLET_NOT_FOUND");
+        TestTransaction.flagForRollback();
+        TestTransaction.end();
+        TestTransaction.start();
+        assertThat(voiceRecordRepository.findVoiceIdempotencyMatch(ctx.workspace().getId(), ctx.user().getId(), "voice-validation-key")).isEmpty();
+
+        TestTransaction.flagForCommit();
+        TestTransaction.end();
+        TestTransaction.start();
+        QuickEntryConfirmRequest valid = confirm(preview);
+        valid.setIdempotencyKey("voice-validation-key");
+        assertThat(quickEntryService.confirmVoice(ctx.workspace().getId(), valid, ctx.user().getId()).getVoiceRecordId()).isNotNull();
+    }
+
+    @Test
+    void voiceBatchConfirmCommitsSelectedEditedCandidatesAndReplaysIdempotency() {
+        TestContext ctx = createContext("qe_voice_batch", WorkspaceRole.OWNER);
+        Wallet cash = wallet(ctx, "Tien mat", WalletType.CASH, true, "0");
+        Category food = category(ctx, "Food", CategoryType.EXPENSE, true, false, false);
+        Category drink = category(ctx, "Drink", CategoryType.EXPENSE, true, false, false);
+        keyword(ctx, food, "an sang", 10);
+        keyword(ctx, drink, "cafe", 10);
+        QuickEntryPreviewResponse preview = quickEntryService.parse(ctx.workspace().getId(), "an sang 35k cafe 20k", ctx.user().getId());
+
+        QuickEntryBatchConfirmRequest req = batch("voice-batch-1", preview);
+        req.getCandidates().get(0).setAmount(new BigDecimal("36000"));
+        req.getCandidates().get(0).setDescription("Edited breakfast");
+        req.getCandidates().get(1).setSelected(false);
+
+        var saved = quickEntryService.confirmVoiceBatch(ctx.workspace().getId(), req, ctx.user().getId());
+        var replay = quickEntryService.confirmVoiceBatch(ctx.workspace().getId(), req, ctx.user().getId());
+
+        assertThat(saved.isIdempotentReplay()).isFalse();
+        assertThat(saved.getCommittedCount()).isEqualTo(1);
+        assertThat(replay.isIdempotentReplay()).isTrue();
+        assertThat(replay.getCommittedCount()).isEqualTo(1);
+        assertThat(transactionRepository.findAll()).filteredOn(tx -> tx.getWorkspace().getId().equals(ctx.workspace().getId())).hasSize(1);
+        Transaction tx = transactionRepository.findById(saved.getItems().get(0).getTransaction().getId()).orElseThrow();
+        assertThat(tx.getAmount()).isEqualByComparingTo("36000");
+        assertThat(tx.getDescription()).isEqualTo("Edited breakfast");
+        assertThat(tx.getCategory().getId()).isEqualTo(food.getId());
+        assertThat(tx.getWallet().getId()).isEqualTo(cash.getId());
+        assertThat(tx.getVoiceRecordId()).isEqualTo(saved.getVoiceRecordId());
+        assertThat(walletService.calculateCurrentBalance(cash.getId())).isEqualByComparingTo("-36000");
+    }
+
+    @Test
+    void voiceBatchConfirmIsAtomicAndRejectsUnsupportedTypes() {
+        TestContext ctx = createContext("qe_voice_atomic", WorkspaceRole.OWNER);
+        wallet(ctx, "Tien mat", WalletType.CASH, true, "0");
+        Category food = category(ctx, "Food", CategoryType.EXPENSE, true, false, false);
+        keyword(ctx, food, "an sang", 10);
+        QuickEntryPreviewResponse preview = quickEntryService.parse(ctx.workspace().getId(), "an sang 35k cafe 20k", ctx.user().getId());
+        QuickEntryBatchConfirmRequest req = batch("voice-batch-atomic", preview);
+        req.getCandidates().get(1).setType(TransactionType.ADJUSTMENT);
+
+        assertBusinessCode(() -> quickEntryService.confirmVoiceBatch(ctx.workspace().getId(), req, ctx.user().getId()), "INVALID_TRANSACTION_TYPE");
+        TestTransaction.flagForRollback();
+        TestTransaction.end();
+        TestTransaction.start();
+        assertThat(transactionRepository.findAll()).filteredOn(tx -> tx.getWorkspace().getId().equals(ctx.workspace().getId())).isEmpty();
+        assertThat(voiceRecordRepository.findAll()).filteredOn(vr -> vr.getWorkspace().getId().equals(ctx.workspace().getId())).isEmpty();
+    }
+
+    @Test
+    void voiceBatchConfirmRejectsSelectedUnsupportedIntentBeforeSavingVoiceRecord() {
+        TestContext ctx = createContext("qe_voice_unsupported", WorkspaceRole.OWNER);
+        wallet(ctx, "Tien mat", WalletType.CASH, true, "0");
+        Category food = category(ctx, "Food", CategoryType.EXPENSE, true, false, false);
+        keyword(ctx, food, "an sang", 10);
+        QuickEntryPreviewResponse preview = quickEntryService.parse(ctx.workspace().getId(), "an sang 35k cafe 20k", ctx.user().getId());
+        QuickEntryBatchConfirmRequest req = batch("voice-batch-unsupported-intent", preview);
+        req.getCandidates().get(1).setIntentType(VoiceIntentType.DEBT_CREATE);
+        req.getCandidates().get(1).setType(TransactionType.EXPENSE);
+
+        assertBusinessCode(() -> quickEntryService.confirmVoiceBatch(ctx.workspace().getId(), req, ctx.user().getId()), "VOICE_INTENT_NOT_COMMITTABLE");
+        TestTransaction.flagForRollback();
+        TestTransaction.end();
+        TestTransaction.start();
+        assertThat(transactionRepository.findAll()).filteredOn(tx -> tx.getWorkspace().getId().equals(ctx.workspace().getId())).isEmpty();
+        assertThat(voiceRecordRepository.findAll()).filteredOn(vr -> vr.getWorkspace().getId().equals(ctx.workspace().getId())).isEmpty();
+    }
+
+    @Test
+    void voiceBatchConfirmKeepsHistoricalDateStatusAndRequiresWritableWorkspace() {
+        TestContext owner = createContext("qe_voice_hist", WorkspaceRole.OWNER);
+        TestContext viewer = createContext("qe_voice_viewer", WorkspaceRole.VIEWER);
+        workspaceMemberRepository.save(WorkspaceMember.builder().workspace(owner.workspace()).user(viewer.user()).role(WorkspaceRole.VIEWER).build());
+        wallet(owner, "Tien mat", WalletType.CASH, true, "0");
+        Category food = category(owner, "Food", CategoryType.EXPENSE, true, false, false);
+        keyword(owner, food, "an sang", 10);
+        QuickEntryPreviewResponse preview = quickEntryService.parse(owner.workspace().getId(), "ngay 01/06/2026 an sang 35k", owner.user().getId());
+        QuickEntryBatchConfirmRequest req = batch("voice-batch-historical", preview);
+
+        assertBusinessCode(() -> quickEntryService.confirmVoiceBatch(owner.workspace().getId(), req, viewer.user().getId()), "FORBIDDEN");
+        var saved = quickEntryService.confirmVoiceBatch(owner.workspace().getId(), req, owner.user().getId());
+
+        Transaction tx = transactionRepository.findById(saved.getItems().get(0).getTransaction().getId()).orElseThrow();
+        assertThat(tx.getTransactionDate()).isEqualTo(LocalDate.of(2026, 6, 1));
+        assertThat(tx.getTransactionStatus()).isEqualTo(TransactionStatus.POSTED);
+    }
+
+    @Test
     void parseSuggestsRecentActiveWalletBeforeDefaultAndIgnoresInactiveWallet() {
         TestContext ctx = createContext("qe_wallet_suggest", WorkspaceRole.OWNER);
         Wallet cash = wallet(ctx, "Tien mat", WalletType.CASH, true, "0");
@@ -298,6 +454,43 @@ class QuickEntryModuleIntegrationTests {
         req.setTransactionTime(preview.getTransactionTime());
         req.setDescription(preview.getDescription());
         req.setNote(preview.getNote());
+        req.setIdempotencyKey("test-" + UUID.randomUUID());
+        return req;
+    }
+
+    private QuickEntryBatchConfirmRequest batch(String idempotencyKey, QuickEntryPreviewResponse preview) {
+        QuickEntryBatchConfirmRequest req = new QuickEntryBatchConfirmRequest();
+        req.setIdempotencyKey(idempotencyKey);
+        req.setRawInput(preview.getRawInput());
+        if (preview.getCandidates().isEmpty()) {
+            req.getCandidates().add(candidate("main", preview.getType(), preview.getStatus(), preview.getAmount(), preview.getWalletId(), preview.getCategoryId(), preview.getTransactionDate(), preview.getDescription()));
+        } else {
+            for (QuickEntryPreviewResponse.Candidate parsed : preview.getCandidates()) {
+                req.getCandidates().add(candidate(parsed.getCandidateId(), parsed.getType(), parsed.getStatus(), parsed.getAmount(), parsed.getWalletId(), parsed.getCategoryId(), parsed.getTransactionDate(), parsed.getDescription()));
+            }
+        }
+        return req;
+    }
+
+    private QuickEntryBatchConfirmRequest.CandidateConfirmRequest candidate(
+            String candidateId,
+            TransactionType type,
+            TransactionStatus status,
+            BigDecimal amount,
+            UUID walletId,
+            UUID categoryId,
+            LocalDate transactionDate,
+            String description) {
+        QuickEntryBatchConfirmRequest.CandidateConfirmRequest req = new QuickEntryBatchConfirmRequest.CandidateConfirmRequest();
+        req.setCandidateId(candidateId);
+        req.setSelected(true);
+        req.setType(type);
+        req.setStatus(status);
+        req.setAmount(amount);
+        req.setWalletId(walletId);
+        req.setCategoryId(categoryId);
+        req.setTransactionDate(transactionDate);
+        req.setDescription(description);
         return req;
     }
 

@@ -498,11 +498,16 @@ public class TransactionService {
 
     @Transactional
     public TransactionResponse createWithSource(UUID workspaceId, TransactionRequest req, UUID userId, TransactionSourceType sourceType, String rawInput) {
-        return createWithSource(workspaceId, req, userId, sourceType, rawInput, null);
+        return createWithSource(workspaceId, req, userId, sourceType, rawInput, null, null);
     }
 
     @Transactional
     public TransactionResponse createWithSource(UUID workspaceId, TransactionRequest req, UUID userId, TransactionSourceType sourceType, String rawInput, UUID voiceRecordId) {
+        return createWithSource(workspaceId, req, userId, sourceType, rawInput, voiceRecordId, null);
+    }
+
+    @Transactional
+    public TransactionResponse createWithSource(UUID workspaceId, TransactionRequest req, UUID userId, TransactionSourceType sourceType, String rawInput, UUID voiceRecordId, String sourceReference) {
         requireWritableMember(workspaceId, userId);
         Workspace workspace = findWorkspace(workspaceId);
         User user = userRepository.findById(userId)
@@ -530,6 +535,7 @@ public class TransactionService {
                 .note(normalizeText(req.getNote()))
                 .sourceType(normalizedSourceType)
                 .rawInput(normalizeText(rawInput))
+                .sourceReference(normalizeText(sourceReference))
                 .walletUnknown(false)
                 .historical(false)
                 .affectsWalletBalance(true)
@@ -569,6 +575,11 @@ public class TransactionService {
         tx.setCategory(category);
         tx = transactionRepository.save(tx);
         transactionAuditService.record(tx, userId, TransactionAuditAction.CREATE, null, transactionAuditService.snapshot(tx));
+        return mapToResponse(tx);
+    }
+
+    @Transactional(readOnly = true)
+    public TransactionResponse mapExistingToResponse(Transaction tx) {
         return mapToResponse(tx);
     }
 
@@ -1068,7 +1079,7 @@ public class TransactionService {
                 .toList();
     }
 
-    private TransactionResponse mapToResponse(Transaction tx) {
+    public TransactionResponse mapToResponse(Transaction tx) {
         Map<UUID, TransferDetail> transferDetails = tx.getTransactionType() == TransactionType.TRANSFER
                 ? transferDetailRepository.findById(tx.getId()).map(td -> Map.of(tx.getId(), td)).orElseGet(Map::of)
                 : Map.of();
@@ -1095,7 +1106,10 @@ public class TransactionService {
                 .rawInput(tx.getRawInput())
                 .sourceType(tx.getSourceType().name())
                 .voiceRecordId(tx.getVoiceRecordId())
+                .hasVoiceAudio(false)
                 .voiceAudioAvailable(false)
+                .playbackAvailable(false)
+                .audioUploadedAt(null)
                 .voiceAudioStatus(null)
                 .historical(tx.isHistorical())
                 .affectsWalletBalance(tx.isAffectsWalletBalance())
@@ -1110,7 +1124,15 @@ public class TransactionService {
         if (tx.getVoiceRecordId() != null) {
             VoiceRecord voiceRecord = voiceRecords.get(tx.getVoiceRecordId());
             if (voiceRecord != null) {
-                builder.voiceAudioAvailable(voiceRecord.getStoragePublicId() != null);
+                boolean hasAudio = voiceRecord.getAudioStorageKey() != null
+                        || voiceRecord.getStorageKey() != null
+                        || voiceRecord.getStoragePublicId() != null;
+                builder.hasVoiceAudio(hasAudio);
+                builder.voiceAudioAvailable(hasAudio);
+                builder.playbackAvailable(hasAudio);
+                builder.audioMimeType(voiceRecord.getMimeType());
+                builder.audioSizeBytes(voiceRecord.getFileSizeBytes());
+                builder.audioUploadedAt(voiceRecord.getAudioUploadedAt());
                 builder.voiceAudioStatus(voiceRecord.getVoiceStatus().name());
             }
         }

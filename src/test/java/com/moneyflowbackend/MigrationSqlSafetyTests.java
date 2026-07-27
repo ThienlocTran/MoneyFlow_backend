@@ -85,7 +85,10 @@ class MigrationSqlSafetyTests {
                 "V17__savings_goal_ledger.sql",
                 "V18__emergency_fund_plan.sql",
                 "V19__emergency_fund_ledger.sql",
-                "V20__planning_preferences.sql");
+                "V20__planning_preferences.sql",
+                "V21__voice_confirm_idempotency.sql",
+                "V22__voice_audio_storage_metadata.sql",
+                "V23__voice_audio_audio_alias_columns.sql");
 
         for (String migrationName : migrationNames) {
             String sql = Files.readString(Path.of("src/main/resources/db/migration", migrationName));

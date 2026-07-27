@@ -11,7 +11,17 @@ public class DisabledVoiceAudioStorageService implements VoiceAudioStorageServic
     }
 
     @Override
+    public String provider() {
+        return "disabled";
+    }
+
+    @Override
     public StoredVoiceAudio upload(String objectKey, MultipartFile file) {
+        throw notConfigured();
+    }
+
+    @Override
+    public StoredVoiceAudioStream open(String storageKey, String mimeType) {
         throw notConfigured();
     }
 
