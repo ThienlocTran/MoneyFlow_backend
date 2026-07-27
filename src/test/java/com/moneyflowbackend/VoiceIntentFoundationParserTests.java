@@ -90,7 +90,7 @@ class VoiceIntentFoundationParserTests {
 
         var preview = parser.parse("xem bao cao thang nay", f.workspace(), f.keywords(), f.categories(), f.wallets());
 
-        assertThat(preview.getIntentType()).isEqualTo(VoiceIntentType.UNKNOWN_UNSUPPORTED);
+        assertThat(preview.getIntentType()).isEqualTo(VoiceIntentType.ANALYTICS_QUERY);
         assertThat(preview.getCandidateStatus()).isEqualTo(VoiceCandidateStatus.UNSUPPORTED);
         assertThat(preview.isReadyToConfirm()).isFalse();
         assertThat(preview.getWarnings()).contains("UNSUPPORTED_INTENT");
