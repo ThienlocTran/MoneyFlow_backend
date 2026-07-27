@@ -72,6 +72,14 @@ Windows PowerShell:
 
 The DB script starts `postgres:16` with local-only placeholder credentials on `127.0.0.1:55432`. The backend script sets `MONEYFLOW_DB_URL` to `jdbc:postgresql://localhost:55432/moneyflow_voice_uat`, removes generic fallback DB variables for that process, prints only the host/database, and starts the backend with the `local` profile.
 
+To clone rich data for local-only UAT, load source DB env vars in the shell and run:
+
+```powershell
+.\scripts\clone-voice-uat-db.ps1
+```
+
+The clone script prints masked source metadata only, writes dumps under `D:\MindMirror\MoneyFlow\_local_db_backups`, and restores into `localhost:55432/moneyflow_voice_uat`.
+
 If the current shell resolves to `neondb`, do not run browser UAT or disposable write checks from that shell. Start a fresh shell with the command above.
 
 ## Neon cost controls
