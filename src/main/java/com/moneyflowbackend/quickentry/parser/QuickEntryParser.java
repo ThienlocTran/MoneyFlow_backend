@@ -35,7 +35,7 @@ import java.util.regex.Pattern;
 public class QuickEntryParser {
     private static final Set<String> INCOME_WORDS = Set.of(
             "thu", "nhan", "luong", "thuong", "me cho", "ba cho", "duoc cho", "duoc tang",
-            "hoan tien", "gia dinh gui", "kiem duoc", "kiem tien");
+            "hoan tien", "gia dinh gui", "kiem duoc", "kiem tien", "nhan luong", "duoc tra", "duoc chuyen");
     private static final Set<String> EXPENSE_WORDS = Set.of(
             "chi", "mua", "tra", "dong", "dong tien", "thanh toan", "an", "uong", "cafe",
             "ca phe", "xang", "gui xe");
@@ -136,6 +136,9 @@ public class QuickEntryParser {
         }
 
         VoiceIntentType explicitIntent = detectNonTransactionIntent(normalized);
+        if (amountCandidates.size() > 1) {
+            explicitIntent = null;
+        }
         if (explicitIntent != null) {
             return unsupportedDraft(rawInput, display, explicitIntent, amount, transactionDate, dateResult.time(),
                     confidence(false, missing, warnings), missing, warnings);
@@ -273,6 +276,8 @@ public class QuickEntryParser {
             LinkedHashSet<String> warnings) {
         if (amount == null && amountIntent(intentType)) {
             missing.add("AMOUNT");
+        } else if (!amountIntent(intentType)) {
+            missing.remove("AMOUNT");
         }
         if (date == null) {
             missing.add("DATE");
@@ -324,27 +329,28 @@ public class QuickEntryParser {
         if (hasAny(normalized, "xem bao cao", "bao cao", "dashboard", "phan tich", "analytics")) {
             return VoiceIntentType.ANALYTICS_QUERY;
         }
-        if ((hasAny(normalized, "bao nhieu", "may tien", "tong") && hasAny(normalized, "tieu", "chi", "thu", "kiem", "con lai"))
+        if ((hasAny(normalized, "bao nhieu", "may tien", "tong") && hasAny(normalized, "thang nay", "tuan nay", "tieu", "chi", "thu", "kiem", "con lai"))
                 || hasAny(normalized, "thong ke", "xem thong ke", "report")) {
             return VoiceIntentType.STAT_QUERY;
         }
-        if ((hasAny(normalized, "vi", "wallet") && hasAny(normalized, "con", "con lai"))
+        if ((hasAny(normalized, "vi", "wallet") && hasAny(normalized, "con", "con lai", "dang co"))
                 || hasAny(normalized, "so du", "cap nhat so du", "chot so du", "balance snapshot")) {
             return VoiceIntentType.WALLET_BALANCE_SNAPSHOT;
         }
-        if (hasAny(normalized, "tra no", "thanh toan no", "dong no", "tra toi", "tra minh", "tra cho", "tra chi", "tra anh", "tra em")) {
+        if (hasAny(normalized, "tra no", "thanh toan no", "dong no", "thu no", "tra tien lai", "tra lai",
+                "tra toi", "tra minh", "tra cho", "tra chi", "tra anh", "tra em")) {
             return VoiceIntentType.DEBT_PAYMENT;
         }
-        if (hasAny(normalized, "tao no", "them no", "cho vay", "di vay", "muon no", "muon", "no toi", "no minh")) {
+        if (hasAny(normalized, "tao no", "them no", "cho vay", "cho muon", "di vay", "muon no", "muon", "no toi", "no minh")) {
             return VoiceIntentType.DEBT_CREATE;
         }
-        if (hasAny(normalized, "muc tieu tiet kiem", "tiet kiem cho", "gop tiet kiem", "vao muc tieu")) {
+        if (hasAny(normalized, "gui tiet kiem", "muc tieu tiet kiem", "tiet kiem cho", "gop tiet kiem", "vao muc tieu")) {
             return VoiceIntentType.SAVINGS_GOAL_CONTRIBUTION;
         }
         if (hasAny(normalized, "quy khan cap", "emergency fund", "khan cap")) {
             return VoiceIntentType.EMERGENCY_FUND_CONTRIBUTION;
         }
-        if (hasAny(normalized, "quy chim", "sinking fund", "gop quy", "vao quy")) {
+        if (hasAny(normalized, "quy chim", "quy chi truoc", "sinking fund", "gop quy", "bo vao quy", "vao quy")) {
             return VoiceIntentType.SINKING_FUND_CONTRIBUTION;
         }
         if (hasAny(normalized, "hoa don dinh ky", "nghia vu dinh ky", "dong tien nha", "tra tien nha", "tien dien", "tien wifi")) {
@@ -388,7 +394,9 @@ public class QuickEntryParser {
     }
 
     private boolean amountIntent(VoiceIntentType intentType) {
-        return intentType != VoiceIntentType.UNKNOWN_UNSUPPORTED;
+        return intentType != VoiceIntentType.UNKNOWN_UNSUPPORTED
+                && intentType != VoiceIntentType.STAT_QUERY
+                && intentType != VoiceIntentType.ANALYTICS_QUERY;
     }
 
     private List<String> requiredReferenceFields(VoiceIntentType intentType) {
@@ -591,10 +599,37 @@ public class QuickEntryParser {
             QuickAmountParser.AmountCandidate amountCandidate = amountCandidates.get(i);
             String segment = amountSegment(display, amountCandidates, i);
             String normalizedSegment = VietnameseTextNormalizer.comparable(segment);
+            VoiceIntentType segmentIntent = detectNonTransactionIntent(normalizedSegment);
+            if (segmentIntent != null) {
+                List<String> missingFields = new ArrayList<>(requiredReferenceFields(segmentIntent));
+                List<String> warnings = new ArrayList<>(List.of("VOICE_INTENT_NOT_COMMITTABLE"));
+                candidates.add(QuickEntryPreviewResponse.Candidate.builder()
+                        .candidateId(candidateId(display, i, segment, amountCandidate.amount()))
+                        .clientCandidateId(candidateId(display, i, segment, amountCandidate.amount()))
+                        .intentType(segmentIntent)
+                        .candidateStatus(VoiceCandidateStatus.UNSUPPORTED)
+                        .originalText(segment)
+                        .description(candidateDescription(segment, amountCandidate))
+                        .amount(amountCandidate.amount())
+                        .transactionDate(transactionDate)
+                        .transactionTime(transactionTime)
+                        .confidence(0.65)
+                        .readyToConfirm(false)
+                        .validationStatus("UNSUPPORTED")
+                        .missingFields(missingFields)
+                        .warnings(warnings)
+                        .unsupportedReason("VOICE_COMMIT_NOT_SUPPORTED")
+                        .suggestedManualRoute(suggestedManualRoute(segmentIntent))
+                        .suggestedManualActionLabel(suggestedManualActionLabel(segmentIntent))
+                        .build());
+                continue;
+            }
             CategoryMatch segmentCategory = matchCategory(normalizedSegment, segment, keywords, categories).orElse(null);
             TransactionType segmentType = inferType(normalizedSegment, false, segmentCategory);
             if (segmentType == null) {
-                segmentType = fallbackType == TransactionType.INCOME ? TransactionType.INCOME : TransactionType.EXPENSE;
+                segmentType = fallbackType == TransactionType.INCOME || fallbackType == TransactionType.EXPENSE
+                        ? fallbackType
+                        : TransactionType.EXPENSE;
             }
             Category category = segmentCategory == null || segmentCategory.ambiguous() || !categoryMatchesType(segmentCategory.category(), segmentType)
                     ? null
@@ -847,7 +882,7 @@ public class QuickEntryParser {
             QuickAmountParser.AmountCandidate amountCandidate,
             String matchedWalletText) {
         if (type == TransactionType.TRANSFER) {
-            return destinationWallet == null ? "Chuyen tien" : "Chuyen sang " + destinationWallet.getName();
+            return destinationWallet == null ? "Chuyển tiền" : "Chuyển sang " + destinationWallet.getName();
         }
         String cleaned = removeSpans(display, removableSpans);
         if (amountCandidate != null && !amountCandidate.text().isBlank()) {
