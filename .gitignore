@@ -1,6 +1,7 @@
 HELP.md
 target/
 *.log
+__pycache__/
 .DS_Store
 .mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
