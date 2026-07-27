@@ -14,6 +14,7 @@ import java.util.UUID;
 @Data
 public class QuickEntryConfirmRequest {
     private String rawInput;
+    private String idempotencyKey;
     private TransactionType type;
     private TransactionStatus status;
     private BigDecimal amount;
