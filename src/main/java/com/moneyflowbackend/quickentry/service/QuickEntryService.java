@@ -131,7 +131,8 @@ public class QuickEntryService {
 
     @Transactional(readOnly = true)
     public QuickEntryPreviewResponse parse(UUID workspaceId, String text, UUID userId) {
-        Workspace workspace = requireActiveMember(workspaceId, userId).getWorkspace();
+        WorkspaceMember member = requireActiveMember(workspaceId, userId);
+        Workspace workspace = member.getWorkspace();
         String raw = text == null ? "" : text;
         if (raw.trim().isEmpty()) {
             throw new BusinessException("QUICK_ENTRY_TEXT_REQUIRED", "Quick entry text is required");
@@ -144,7 +145,7 @@ public class QuickEntryService {
         if (suggestedWalletId != null && preview.getMatchedWalletText() == null && !suggestedWalletId.equals(preview.getWalletId())) {
             preview = parser.parse(raw, workspace, keywords, categories, wallets, suggestedWalletId);
         }
-        return applyIncomeSourceDefaults(workspaceId, userId, preview);
+        return applyIncomeSourceDefaults(workspaceId, userId, member, preview);
     }
 
     @Transactional
@@ -421,31 +422,36 @@ public class QuickEntryService {
                 .build();
     }
 
-    private QuickEntryPreviewResponse applyIncomeSourceDefaults(UUID workspaceId, UUID userId, QuickEntryPreviewResponse preview) {
+    private QuickEntryPreviewResponse applyIncomeSourceDefaults(UUID workspaceId, UUID userId, WorkspaceMember member, QuickEntryPreviewResponse preview) {
         if (preview == null) {
             return null;
         }
         List<IncomeSource> sources = incomeSourceRepository.findAllByWorkspaceIdAndStatusOrderByNameAsc(workspaceId, IncomeSourceStatus.ACTIVE);
-        applyIncomeSourceDefault(workspaceId, userId, preview.getNormalizedInput(), preview, sources);
+        List<WorkspacePerson> people = workspacePersonRepository.findAllByWorkspaceId(workspaceId).stream()
+                .filter(WorkspacePerson::isActive)
+                .toList();
+        applyIncomeSourceDefault(userId, member, preview.getNormalizedInput(), preview, sources, people);
         for (QuickEntryPreviewResponse.Candidate candidate : preview.getCandidates()) {
-            applyIncomeSourceDefault(workspaceId, userId,
+            applyIncomeSourceDefault(userId, member,
                     candidate.getOriginalText() == null ? preview.getNormalizedInput() : candidate.getOriginalText(),
                     candidate,
-                    sources);
+                    sources,
+                    people);
         }
         return preview;
     }
 
     private void applyIncomeSourceDefault(
-            UUID workspaceId,
             UUID userId,
+            WorkspaceMember member,
             String text,
             QuickEntryPreviewResponse preview,
-            List<IncomeSource> sources) {
+            List<IncomeSource> sources,
+            List<WorkspacePerson> people) {
         if (preview.getType() != TransactionType.INCOME) {
             return;
         }
-        IncomeSource source = defaultIncomeSource(workspaceId, userId, text, sources);
+        IncomeSource source = defaultIncomeSource(userId, member, text, sources, people);
         if (source == null) {
             addMissing(preview.getMissingFields(), "incomeSource");
             preview.setCandidateStatus(VoiceCandidateStatus.NEEDS_REVIEW);
@@ -467,15 +473,16 @@ public class QuickEntryService {
     }
 
     private void applyIncomeSourceDefault(
-            UUID workspaceId,
             UUID userId,
+            WorkspaceMember member,
             String text,
             QuickEntryPreviewResponse.Candidate candidate,
-            List<IncomeSource> sources) {
+            List<IncomeSource> sources,
+            List<WorkspacePerson> people) {
         if (candidate.getType() != TransactionType.INCOME) {
             return;
         }
-        IncomeSource source = defaultIncomeSource(workspaceId, userId, text, sources);
+        IncomeSource source = defaultIncomeSource(userId, member, text, sources, people);
         if (source == null) {
             addMissing(candidate.getMissingFields(), "incomeSource");
             candidate.setCandidateStatus(VoiceCandidateStatus.NEEDS_REVIEW);
@@ -498,27 +505,104 @@ public class QuickEntryService {
         candidate.setConfidence(ready ? 0.95 : candidate.getConfidence());
     }
 
-    private IncomeSource defaultIncomeSource(UUID workspaceId, UUID userId, String text, List<IncomeSource> sources) {
-        String owner = partnerSpeaker(workspaceId, userId, text) ? "Thu nhập của em" : "Thu nhập của anh";
-        String normalizedOwner = VietnameseTextNormalizer.comparable(owner);
+    private IncomeSource defaultIncomeSource(
+            UUID userId,
+            WorkspaceMember member,
+            String text,
+            List<IncomeSource> sources,
+            List<WorkspacePerson> people) {
+        IncomeSpeaker speaker = explicitSpeaker(text, people);
+        if (speaker == null) {
+            speaker = authenticatedSpeaker(userId, member, people);
+        }
+        if (speaker == null) {
+            return null;
+        }
+        String normalizedOwner = VietnameseTextNormalizer.comparable(speaker == IncomeSpeaker.EM
+                ? "Thu nhập của em"
+                : "Thu nhập của anh");
         return sources.stream()
                 .filter(source -> VietnameseTextNormalizer.comparable(source.getName()).equals(normalizedOwner))
                 .findFirst()
                 .orElse(null);
     }
 
-    private boolean partnerSpeaker(UUID workspaceId, UUID userId, String text) {
+    private IncomeSpeaker explicitSpeaker(String text, List<WorkspacePerson> people) {
         String normalized = VietnameseTextNormalizer.comparable(text);
-        if (normalized.matches(".*(?<!\\S)(em|tam)(?!\\S).*")) {
-            return true;
+        if (containsToken(normalized, "em") || containsToken(normalized, "tam")) {
+            return IncomeSpeaker.EM;
         }
-        return workspacePersonRepository.findAllByWorkspaceId(workspaceId).stream()
-                .filter(WorkspacePerson::isActive)
-                .filter(person -> person.getLinkedUser() == null || !person.getLinkedUser().getId().equals(userId))
-                .map(WorkspacePerson::getDisplayName)
-                .map(VietnameseTextNormalizer::comparable)
-                .filter(name -> !name.isBlank())
-                .anyMatch(name -> normalized.matches(".*(?<!\\S)" + java.util.regex.Pattern.quote(name) + "(?!\\S).*"));
+        if (containsToken(normalized, "anh") || containsToken(normalized, "thien") || containsPhrase(normalized, "thien loc")) {
+            return IncomeSpeaker.ANH;
+        }
+        for (WorkspacePerson person : people) {
+            IncomeSpeaker speaker = speakerFromIdentity(person.getDisplayName());
+            String name = VietnameseTextNormalizer.comparable(person.getDisplayName());
+            if (speaker != null && !name.isBlank() && containsPhrase(normalized, name)) {
+                return speaker;
+            }
+        }
+        return null;
+    }
+
+    private IncomeSpeaker authenticatedSpeaker(UUID userId, WorkspaceMember member, List<WorkspacePerson> people) {
+        if (member != null) {
+            IncomeSpeaker byPerson = speakerFromPerson(member.getPerson());
+            if (byPerson != null) {
+                return byPerson;
+            }
+            IncomeSpeaker byUser = speakerFromUser(member.getUser());
+            if (byUser != null) {
+                return byUser;
+            }
+        }
+        return people.stream()
+                .filter(person -> person.getLinkedUser() != null && person.getLinkedUser().getId().equals(userId))
+                .map(this::speakerFromPerson)
+                .filter(speaker -> speaker != null)
+                .findFirst()
+                .orElse(null);
+    }
+
+    private IncomeSpeaker speakerFromPerson(WorkspacePerson person) {
+        return person == null ? null : speakerFromIdentity(person.getDisplayName());
+    }
+
+    private IncomeSpeaker speakerFromUser(com.moneyflowbackend.auth.model.User user) {
+        if (user == null) {
+            return null;
+        }
+        IncomeSpeaker speaker = speakerFromIdentity(user.getFullName());
+        if (speaker != null) {
+            return speaker;
+        }
+        speaker = speakerFromIdentity(user.getUsername());
+        if (speaker != null) {
+            return speaker;
+        }
+        String email = normalize(user.getEmail());
+        int at = email == null ? -1 : email.indexOf('@');
+        return speakerFromIdentity(at < 0 ? email : email.substring(0, at));
+    }
+
+    private IncomeSpeaker speakerFromIdentity(String value) {
+        String normalized = VietnameseTextNormalizer.comparable(value);
+        if (containsToken(normalized, "em") || containsToken(normalized, "tam")) {
+            return IncomeSpeaker.EM;
+        }
+        if (containsToken(normalized, "anh") || containsToken(normalized, "thien") || containsPhrase(normalized, "thien loc")) {
+            return IncomeSpeaker.ANH;
+        }
+        return null;
+    }
+
+    private boolean containsToken(String normalized, String token) {
+        return normalized != null && normalized.matches(".*(?<!\\S)" + java.util.regex.Pattern.quote(token) + "(?!\\S).*");
+    }
+
+    private boolean containsPhrase(String normalized, String phrase) {
+        return normalized != null && phrase != null && !phrase.isBlank()
+                && normalized.matches(".*(?<!\\S)" + java.util.regex.Pattern.quote(phrase) + "(?!\\S).*");
     }
 
     private void markIncomeReady(List<String> missingFields, List<String> warnings) {
@@ -532,6 +616,11 @@ public class QuickEntryService {
         if (!missingFields.contains(field)) {
             missingFields.add(field);
         }
+    }
+
+    private enum IncomeSpeaker {
+        ANH,
+        EM
     }
 
     private void learnKeywordIfRequested(Workspace workspace, QuickEntryConfirmRequest req) {

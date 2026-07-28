@@ -112,6 +112,7 @@ class QuickEntryModuleIntegrationTests {
     @Test
     void incomePlannedTransferAndQuickButtonUseTransactionServiceValidation() {
         TestContext ctx = createContext("qe_flow", WorkspaceRole.OWNER);
+        setUserIdentity(ctx, "Thiên Lộc", "thien.loc@example.com");
         Wallet cash = wallet(ctx, "Tien mat", WalletType.CASH, true, "0");
         Wallet bank = wallet(ctx, "MB Bank", WalletType.BANK, false, "0");
         Category salary = category(ctx, "Salary", CategoryType.INCOME, true, false, false);
@@ -152,6 +153,7 @@ class QuickEntryModuleIntegrationTests {
     @Test
     void spendingScopeIsManualOnlyAndConfirmDelegatesToTransactionService() throws Exception {
         TestContext ctx = createContext("qe_scope", WorkspaceRole.OWNER);
+        setUserIdentity(ctx, "Thiên Lộc", "thien.loc@example.com");
         Wallet cash = wallet(ctx, "Tien mat", WalletType.CASH, true, "0");
         Category food = category(ctx, "Food", CategoryType.EXPENSE, true, false, false);
         food.setDefaultSpendingScope(SpendingScope.PERSONAL);
@@ -233,26 +235,41 @@ class QuickEntryModuleIntegrationTests {
 
     @Test
     void incomeVoiceDefaultsSourceBySpeakerContext() {
-        TestContext ctx = createContext("qe_income_source", WorkspaceRole.OWNER);
-        Wallet cash = wallet(ctx, "Tien mat", WalletType.CASH, true, "0");
-        IncomeSource anh = incomeSource(ctx, "Thu nhập của anh");
-        IncomeSource em = incomeSource(ctx, "Thu nhập của em");
+        TestContext anhCtx = createContext("qe_income_anh", WorkspaceRole.OWNER);
+        setUserIdentity(anhCtx, "Thiên Lộc", "thien.loc@example.com");
+        Wallet anhCash = wallet(anhCtx, "Tien mat", WalletType.CASH, true, "0");
+        IncomeSource anh = incomeSource(anhCtx, "Thu nhập của anh");
+        IncomeSource anhWorkspaceEm = incomeSource(anhCtx, "Thu nhập của em");
 
-        QuickEntryPreviewResponse ownerIncome = quickEntryService.parse(ctx.workspace().getId(), "Hôm nay tôi kiếm được 800", ctx.user().getId());
-        assertThat(ownerIncome.getType()).isEqualTo(TransactionType.INCOME);
-        assertThat(ownerIncome.getAmount()).isEqualByComparingTo("800000");
-        assertThat(ownerIncome.getWalletId()).isEqualTo(cash.getId());
-        assertThat(ownerIncome.getCategoryId()).isNull();
-        assertThat(ownerIncome.getIncomeSourceId()).isEqualTo(anh.getId());
-        assertThat(ownerIncome.getIncomeSourceName()).isEqualTo("Thu nhập của anh");
-        assertThat(ownerIncome.isReadyToConfirm()).isTrue();
+        QuickEntryPreviewResponse anhOwnIncome = quickEntryService.parse(anhCtx.workspace().getId(), "Hôm nay tôi kiếm được 800", anhCtx.user().getId());
+        assertThat(anhOwnIncome.getType()).isEqualTo(TransactionType.INCOME);
+        assertThat(anhOwnIncome.getAmount()).isEqualByComparingTo("800000");
+        assertThat(anhOwnIncome.getWalletId()).isEqualTo(anhCash.getId());
+        assertThat(anhOwnIncome.getCategoryId()).isNull();
+        assertThat(anhOwnIncome.getIncomeSourceId()).isEqualTo(anh.getId());
+        assertThat(anhOwnIncome.getIncomeSourceName()).isEqualTo("Thu nhập của anh");
+        assertThat(anhOwnIncome.isReadyToConfirm()).isTrue();
 
-        QuickEntryPreviewResponse partnerIncome = quickEntryService.parse(ctx.workspace().getId(), "Hôm nay em nhận lương 12 triệu", ctx.user().getId());
-        assertThat(partnerIncome.getType()).isEqualTo(TransactionType.INCOME);
-        assertThat(partnerIncome.getAmount()).isEqualByComparingTo("12000000");
-        assertThat(partnerIncome.getIncomeSourceId()).isEqualTo(em.getId());
-        assertThat(partnerIncome.getIncomeSourceName()).isEqualTo("Thu nhập của em");
-        assertThat(partnerIncome.isReadyToConfirm()).isTrue();
+        QuickEntryPreviewResponse anhSaidEm = quickEntryService.parse(anhCtx.workspace().getId(), "Em nhận lương 12 triệu", anhCtx.user().getId());
+        assertThat(anhSaidEm.getAmount()).isEqualByComparingTo("12000000");
+        assertThat(anhSaidEm.getIncomeSourceId()).isEqualTo(anhWorkspaceEm.getId());
+        assertThat(anhSaidEm.getIncomeSourceName()).isEqualTo("Thu nhập của em");
+
+        TestContext emCtx = createContext("qe_income_em", WorkspaceRole.OWNER);
+        setUserIdentity(emCtx, "Tâm", "tam@example.com");
+        wallet(emCtx, "Tien mat", WalletType.CASH, true, "0");
+        IncomeSource emWorkspaceAnh = incomeSource(emCtx, "Thu nhập của anh");
+        IncomeSource em = incomeSource(emCtx, "Thu nhập của em");
+
+        QuickEntryPreviewResponse emOwnIncome = quickEntryService.parse(emCtx.workspace().getId(), "Hôm nay tôi kiếm được 800", emCtx.user().getId());
+        assertThat(emOwnIncome.getAmount()).isEqualByComparingTo("800000");
+        assertThat(emOwnIncome.getIncomeSourceId()).isEqualTo(em.getId());
+        assertThat(emOwnIncome.getIncomeSourceName()).isEqualTo("Thu nhập của em");
+
+        QuickEntryPreviewResponse emSaidAnh = quickEntryService.parse(emCtx.workspace().getId(), "Anh kiếm được 800", emCtx.user().getId());
+        assertThat(emSaidAnh.getAmount()).isEqualByComparingTo("800000");
+        assertThat(emSaidAnh.getIncomeSourceId()).isEqualTo(emWorkspaceAnh.getId());
+        assertThat(emSaidAnh.getIncomeSourceName()).isEqualTo("Thu nhập của anh");
     }
 
     @Test
@@ -272,6 +289,7 @@ class QuickEntryModuleIntegrationTests {
     @Test
     void interestPhrasesAreClassifiedSafely() {
         TestContext ctx = createContext("qe_interest_voice", WorkspaceRole.OWNER);
+        setUserIdentity(ctx, "Thiên Lộc", "thien.loc@example.com");
         wallet(ctx, "Tien mat", WalletType.CASH, true, "0");
         IncomeSource anh = incomeSource(ctx, "Thu nhập của anh");
 
@@ -739,6 +757,12 @@ class QuickEntryModuleIntegrationTests {
                 .keyword(value)
                 .priority(priority)
                 .build());
+    }
+
+    private void setUserIdentity(TestContext ctx, String fullName, String email) {
+        ctx.user().setFullName(fullName);
+        ctx.user().setEmail(email);
+        userRepository.saveAndFlush(ctx.user());
     }
 
     private IncomeSource incomeSource(TestContext ctx, String name) {
