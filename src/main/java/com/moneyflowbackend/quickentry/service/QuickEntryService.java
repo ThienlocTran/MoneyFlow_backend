@@ -191,8 +191,7 @@ public class QuickEntryService {
             throw new BusinessException("VOICE_BATCH_EMPTY", "At least one selected candidate is required");
         }
         for (QuickEntryBatchConfirmRequest.CandidateConfirmRequest candidate : selected) {
-            requireReadyVoiceCandidate(candidate.getCandidateStatus());
-            rejectUnsupportedVoiceIntent(candidate.getIntentType(), candidate.getType());
+            requireCommittableVoiceCandidate(candidate);
         }
         VoiceRecord voiceRecord = voiceRecordRepository.saveAndFlush(VoiceRecord.builder()
                 .workspace(workspace)
@@ -662,13 +661,21 @@ public class QuickEntryService {
         rejectUnsupportedVoiceIntent(req == null ? null : req.getIntentType(), req == null ? null : req.getType());
     }
 
-    private void requireReadyVoiceCandidate(VoiceCandidateStatus candidateStatus) {
-        if (candidateStatus != VoiceCandidateStatus.READY) {
-            throw new BusinessException("VOICE_CANDIDATE_NOT_READY", "Voice candidate must be READY before commit");
+    private void requireCommittableVoiceCandidate(QuickEntryBatchConfirmRequest.CandidateConfirmRequest candidate) {
+        String id = candidateId(candidate);
+        if (candidate.getCandidateStatus() != VoiceCandidateStatus.READY) {
+            throw new BusinessException(
+                    "VOICE_CANDIDATE_NOT_READY",
+                    "Candidate " + id + " is " + candidate.getCandidateStatus() + "; only READY transaction candidates can be committed");
         }
+        rejectUnsupportedVoiceIntent(candidate.getIntentType(), candidate.getType(), id);
     }
 
     private void rejectUnsupportedVoiceIntent(VoiceIntentType intentType, TransactionType type) {
+        rejectUnsupportedVoiceIntent(intentType, type, null);
+    }
+
+    private void rejectUnsupportedVoiceIntent(VoiceIntentType intentType, TransactionType type, String candidateId) {
         if (intentType == null) {
             return;
         }
@@ -681,7 +688,8 @@ public class QuickEntryService {
         if (intentType == VoiceIntentType.TRANSACTION_TRANSFER && type == TransactionType.TRANSFER) {
             return;
         }
-        throw new BusinessException("VOICE_INTENT_NOT_COMMITTABLE", "Voice intent is not supported for commit");
+        String prefix = candidateId == null ? "Voice intent" : "Candidate " + candidateId + " intent " + intentType;
+        throw new BusinessException("VOICE_INTENT_NOT_COMMITTABLE", prefix + " is not supported for commit as " + type);
     }
 
     private String voiceSourceReference(QuickEntryConfirmRequest req) {

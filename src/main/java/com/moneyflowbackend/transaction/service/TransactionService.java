@@ -569,7 +569,7 @@ public class TransactionService {
         }
 
         Wallet wallet = resolveWallet(workspaceId, req.getWalletId(), true, true, "WALLET_NOT_FOUND");
-        Category category = resolveCategory(workspaceId, req.getCategoryId(), type, type == TransactionType.EXPENSE, true);
+        Category category = resolveCategory(workspaceId, req.getCategoryId(), type, false, true);
         tx.setSpendingScope(resolveSpendingScopeForCreate(type, normalizedSourceType, req, category));
         tx.setWallet(wallet);
         tx.setCategory(category);

@@ -411,7 +411,7 @@ class QuickEntryModuleIntegrationTests {
         req.getCandidates().get(1).setCandidateStatus(VoiceCandidateStatus.READY);
         req.getCandidates().get(1).setType(TransactionType.ADJUSTMENT);
 
-        assertBusinessCode(() -> quickEntryService.confirmVoiceBatch(ctx.workspace().getId(), req, ctx.user().getId()), "INVALID_TRANSACTION_TYPE");
+        assertBusinessCode(() -> quickEntryService.confirmVoiceBatch(ctx.workspace().getId(), req, ctx.user().getId()), "VOICE_INTENT_NOT_COMMITTABLE");
         TestTransaction.flagForRollback();
         TestTransaction.end();
         TestTransaction.start();
@@ -456,7 +456,13 @@ class QuickEntryModuleIntegrationTests {
         req.getCandidates().get(1).setIntentType(VoiceIntentType.DEBT_CREATE);
         req.getCandidates().get(1).setType(TransactionType.EXPENSE);
 
-        assertBusinessCode(() -> quickEntryService.confirmVoiceBatch(ctx.workspace().getId(), req, ctx.user().getId()), "VOICE_INTENT_NOT_COMMITTABLE");
+        assertThatThrownBy(() -> quickEntryService.confirmVoiceBatch(ctx.workspace().getId(), req, ctx.user().getId()))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(ex -> {
+                    BusinessException be = (BusinessException) ex;
+                    assertThat(be.getCode()).isEqualTo("VOICE_INTENT_NOT_COMMITTABLE");
+                    assertThat(be.getMessage()).contains(req.getCandidates().get(1).getCandidateId(), "DEBT_CREATE");
+                });
         TestTransaction.flagForRollback();
         TestTransaction.end();
         TestTransaction.start();
@@ -474,11 +480,53 @@ class QuickEntryModuleIntegrationTests {
 
         QuickEntryBatchConfirmRequest needsReview = batch("voice-batch-needs-review", preview);
         needsReview.getCandidates().get(0).setCandidateStatus(VoiceCandidateStatus.NEEDS_REVIEW);
-        assertBusinessCode(() -> quickEntryService.confirmVoiceBatch(ctx.workspace().getId(), needsReview, ctx.user().getId()), "VOICE_CANDIDATE_NOT_READY");
+        assertThatThrownBy(() -> quickEntryService.confirmVoiceBatch(ctx.workspace().getId(), needsReview, ctx.user().getId()))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(ex -> {
+                    BusinessException be = (BusinessException) ex;
+                    assertThat(be.getCode()).isEqualTo("VOICE_CANDIDATE_NOT_READY");
+                    assertThat(be.getMessage()).contains(needsReview.getCandidates().get(0).getCandidateId(), "NEEDS_REVIEW");
+                });
 
         QuickEntryBatchConfirmRequest unsupported = batch("voice-batch-unsupported-status", preview);
         unsupported.getCandidates().get(0).setCandidateStatus(VoiceCandidateStatus.UNSUPPORTED);
-        assertBusinessCode(() -> quickEntryService.confirmVoiceBatch(ctx.workspace().getId(), unsupported, ctx.user().getId()), "VOICE_CANDIDATE_NOT_READY");
+        assertThatThrownBy(() -> quickEntryService.confirmVoiceBatch(ctx.workspace().getId(), unsupported, ctx.user().getId()))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(ex -> {
+                    BusinessException be = (BusinessException) ex;
+                    assertThat(be.getCode()).isEqualTo("VOICE_CANDIDATE_NOT_READY");
+                    assertThat(be.getMessage()).contains(unsupported.getCandidates().get(0).getCandidateId(), "UNSUPPORTED");
+                });
+    }
+
+    @Test
+    void voiceBatchConfirmRejectsReadOnlyStatQueryCandidate() {
+        TestContext ctx = createContext("qe_voice_stat_reject", WorkspaceRole.OWNER);
+        Wallet cash = wallet(ctx, "Tien mat", WalletType.CASH, true, "0");
+        Category food = category(ctx, "Food", CategoryType.EXPENSE, true, false, false);
+        QuickEntryBatchConfirmRequest req = new QuickEntryBatchConfirmRequest();
+        req.setIdempotencyKey("voice-batch-stat-query");
+        req.setRawInput("tháng này tôi tiêu bao nhiêu");
+        req.getCandidates().add(candidate(
+                "stat-1",
+                VoiceIntentType.STAT_QUERY,
+                VoiceCandidateStatus.READY,
+                TransactionType.EXPENSE,
+                TransactionStatus.POSTED,
+                BigDecimal.ONE,
+                cash.getId(),
+                food.getId(),
+                null,
+                LocalDate.now(),
+                "Stat query"));
+
+        assertThatThrownBy(() -> quickEntryService.confirmVoiceBatch(ctx.workspace().getId(), req, ctx.user().getId()))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(ex -> {
+                    BusinessException be = (BusinessException) ex;
+                    assertThat(be.getCode()).isEqualTo("VOICE_INTENT_NOT_COMMITTABLE");
+                    assertThat(be.getMessage()).contains("stat-1", "STAT_QUERY");
+                });
     }
 
     @Test
