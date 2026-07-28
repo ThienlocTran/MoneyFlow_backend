@@ -2,10 +2,13 @@ package com.moneyflowbackend.closing.controller;
 
 import com.moneyflowbackend.closing.dto.CompleteDailyClosingRequest;
 import com.moneyflowbackend.closing.dto.DailyClosingResponse;
+import com.moneyflowbackend.closing.dto.DailyClosingVoicePreviewRequest;
+import com.moneyflowbackend.closing.dto.DailyClosingVoicePreviewResponse;
 import com.moneyflowbackend.closing.dto.ReconciliationAdjustmentRequest;
 import com.moneyflowbackend.closing.dto.WalletSnapshotPageResponse;
 import com.moneyflowbackend.closing.dto.WalletSnapshotRequest;
 import com.moneyflowbackend.closing.service.DailyClosingService;
+import com.moneyflowbackend.closing.service.DailyClosingVoicePreviewService;
 import com.moneyflowbackend.dto.ApiResponse;
 import jakarta.validation.Valid;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -28,9 +31,11 @@ import java.util.UUID;
 @RequestMapping("/api/workspaces/{workspaceId}")
 public class DailyClosingController {
     private final DailyClosingService dailyClosingService;
+    private final DailyClosingVoicePreviewService dailyClosingVoicePreviewService;
 
-    public DailyClosingController(DailyClosingService dailyClosingService) {
+    public DailyClosingController(DailyClosingService dailyClosingService, DailyClosingVoicePreviewService dailyClosingVoicePreviewService) {
         this.dailyClosingService = dailyClosingService;
+        this.dailyClosingVoicePreviewService = dailyClosingVoicePreviewService;
     }
 
     @GetMapping("/daily-closings/{closingDate}")
@@ -58,6 +63,14 @@ public class DailyClosingController {
             @RequestBody(required = false) CompleteDailyClosingRequest request) {
         DailyClosingResponse response = dailyClosingService.completeDailyClosing(workspaceId, closingDate, request, currentUserId());
         return ResponseEntity.ok(ApiResponse.ok("Daily closing completed", response));
+    }
+
+    @PostMapping("/daily-closing/voice-preview")
+    public ResponseEntity<ApiResponse<DailyClosingVoicePreviewResponse>> previewDailyClosingVoice(
+            @PathVariable UUID workspaceId,
+            @RequestBody(required = false) DailyClosingVoicePreviewRequest request) {
+        DailyClosingVoicePreviewResponse response = dailyClosingVoicePreviewService.preview(workspaceId, request, currentUserId());
+        return ResponseEntity.ok(ApiResponse.ok("Daily closing voice preview loaded", response));
     }
 
     @PostMapping("/wallet-snapshots/{snapshotId}/adjustment")
