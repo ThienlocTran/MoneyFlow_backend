@@ -66,7 +66,6 @@ public class CloudinaryVoiceAudioStorageService implements VoiceAudioStorageServ
             Map<String, String> params = signedParams(Map.of(
                     "public_id", publicId,
                     "asset_folder", assetFolder,
-                    "resource_type", "video",
                     "timestamp", String.valueOf(timestamp),
                     "type", "authenticated",
                     "overwrite", "true"));

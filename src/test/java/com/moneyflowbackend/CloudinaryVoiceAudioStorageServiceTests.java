@@ -57,8 +57,7 @@ class CloudinaryVoiceAudioStorageServiceTests {
         assertThat(client.body).contains("name=\"asset_folder\"");
         assertThat(client.body).contains("dev/voice/07-2026/28-07-2026");
         assertThat(client.body).doesNotContain("name=\"use_asset_folder_as_public_id_prefix\"");
-        assertThat(client.body).contains("name=\"resource_type\"");
-        assertThat(client.body).contains("video");
+        assertThat(client.body).doesNotContain("name=\"resource_type\"");
         assertThat(client.body).contains("name=\"type\"");
         assertThat(client.body).contains("authenticated");
         assertThat(client.body).doesNotContain("api-secret");
