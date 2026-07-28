@@ -46,7 +46,7 @@ For isolated voice command UAT, use a separate local database:
 .\scripts\run-local-voice-uat.ps1
 ```
 
-It targets `localhost` database `moneyflow_voice_uat` and clears generic DB fallback variables for that backend process.
+It targets `localhost:15432` database `moneyflow_voice_uat` by default and clears generic DB fallback variables for that backend process.
 
 ### Option 2: Neon PostgreSQL (Cloud)
 

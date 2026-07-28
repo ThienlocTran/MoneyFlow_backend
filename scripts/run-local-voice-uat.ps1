@@ -3,7 +3,7 @@ param(
     [string]$Username = "moneyflow_local",
     [string]$Password = "moneyflow_local_password",
     [string]$HostName = "localhost",
-    [int]$Port = 55432
+    [int]$Port = $(if ($env:MONEYFLOW_VOICE_UAT_DB_PORT) { [int]$env:MONEYFLOW_VOICE_UAT_DB_PORT } else { 15432 })
 )
 
 $ErrorActionPreference = "Stop"
@@ -17,6 +17,7 @@ if ($Database -ne "moneyflow_voice_uat") {
 }
 
 $env:SPRING_PROFILES_ACTIVE = "local"
+$env:MONEYFLOW_VOICE_UAT_DB_PORT = "$Port"
 $env:MONEYFLOW_DB_URL = "jdbc:postgresql://${HostName}:${Port}/${Database}"
 $env:MONEYFLOW_DB_USERNAME = $Username
 $env:MONEYFLOW_DB_PASSWORD = $Password

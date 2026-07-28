@@ -1,4 +1,5 @@
 $ErrorActionPreference = "Stop"
+$TargetPort = if ($env:MONEYFLOW_VOICE_UAT_DB_PORT) { [int]$env:MONEYFLOW_VOICE_UAT_DB_PORT } else { 15432 }
 
 $SourceUrl = $env:MONEYFLOW_DB_URL
 $SourceUser = $env:MONEYFLOW_DB_USERNAME
@@ -28,7 +29,7 @@ $dumpPath = Join-Path $backupDir ("moneyflow_voice_uat_{0:yyyyMMdd_HHmmss}.sql" 
 
 $maskedHost = if ($sourceHost.Length -gt 10) { $sourceHost.Substring(0, 6) + "***" + $sourceHost.Substring($sourceHost.LastIndexOf(".")) } else { "***" }
 Write-Host "Source DB: host=$maskedHost database=$sourceDb"
-Write-Host "Target DB: host=localhost port=55432 database=moneyflow_voice_uat"
+Write-Host "Target DB: host=localhost port=$TargetPort database=moneyflow_voice_uat"
 
 docker run --rm `
     -e PGPASSWORD=$SourcePassword `
@@ -42,4 +43,4 @@ $restoreInput = (Get-Content $dumpPath) | Where-Object { $_ -notmatch '^SET tran
 $restoreInput | docker run --rm -i `
     -e PGPASSWORD=moneyflow_local_password `
     postgres:18 `
-    psql -h host.docker.internal -p 55432 -U moneyflow_local -d moneyflow_voice_uat -v ON_ERROR_STOP=1
+    psql -h host.docker.internal -p $TargetPort -U moneyflow_local -d moneyflow_voice_uat -v ON_ERROR_STOP=1
