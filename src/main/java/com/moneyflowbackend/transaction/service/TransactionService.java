@@ -1115,6 +1115,7 @@ public class TransactionService {
                 .voiceAudioAvailable(false)
                 .playbackAvailable(false)
                 .audioUploadedAt(null)
+                .audioStatus(null)
                 .voiceAudioStatus(null)
                 .historical(tx.isHistorical())
                 .affectsWalletBalance(tx.isAffectsWalletBalance())
@@ -1140,6 +1141,7 @@ public class TransactionService {
                 builder.audioMimeType(voiceRecord.getMimeType());
                 builder.audioSizeBytes(voiceRecord.getFileSizeBytes());
                 builder.audioUploadedAt(voiceRecord.getAudioUploadedAt());
+                builder.audioStatus(voiceRecord.getVoiceStatus().name());
                 builder.voiceAudioStatus(voiceRecord.getVoiceStatus().name());
                 builder.voiceTranscript(voiceRecord.getEditedTranscript() != null
                         ? voiceRecord.getEditedTranscript()

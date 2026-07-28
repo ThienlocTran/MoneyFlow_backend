@@ -63,6 +63,7 @@ public class TransactionResponse {
     private String audioMimeType;
     private Long audioSizeBytes;
     private Instant audioUploadedAt;
+    private String audioStatus;
     private String voiceAudioStatus;
     private boolean historical;
     private boolean affectsWalletBalance;
