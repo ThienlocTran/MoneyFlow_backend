@@ -1095,16 +1095,21 @@ public class TransactionService {
             Map<UUID, VoiceRecord> voiceRecords) {
         TransactionResponse.TransactionResponseBuilder builder = TransactionResponse.builder()
                 .id(tx.getId())
+                .workspaceId(tx.getWorkspace().getId())
                 .type(tx.getTransactionType().name())
+                .typeLabel(typeLabel(tx.getTransactionType().name()))
                 .status(tx.getTransactionStatus().name())
                 .amount(tx.getAmount())
                 .currency(tx.getCurrency())
+                .currencyCode(tx.getCurrency())
                 .transactionDate(tx.getTransactionDate())
                 .transactionTime(tx.getTransactionTime())
                 .description(tx.getDescription())
                 .note(tx.getNote())
                 .rawInput(tx.getRawInput())
                 .sourceType(tx.getSourceType().name())
+                .sourceLabel(sourceLabel(tx.getSourceType().name()))
+                .sourceReference(tx.getSourceReference())
                 .voiceRecordId(tx.getVoiceRecordId())
                 .hasVoiceAudio(false)
                 .voiceAudioAvailable(false)
@@ -1116,7 +1121,9 @@ public class TransactionService {
                 .walletUnknown(tx.isWalletUnknown())
                 .spendingScope(tx.getSpendingScope())
                 .incomeSourceId(tx.getIncomeSource() == null ? null : tx.getIncomeSource().getId())
+                .incomeSourceName(tx.getIncomeSource() == null ? null : tx.getIncomeSource().getName())
                 .relatedIncomeSourceId(tx.getRelatedIncomeSource() == null ? null : tx.getRelatedIncomeSource().getId())
+                .relatedIncomeSourceName(tx.getRelatedIncomeSource() == null ? null : tx.getRelatedIncomeSource().getName())
                 .createdAt(tx.getCreatedAt())
                 .updatedAt(tx.getUpdatedAt())
                 .deletedAt(tx.getDeletedAt());
@@ -1134,10 +1141,15 @@ public class TransactionService {
                 builder.audioSizeBytes(voiceRecord.getFileSizeBytes());
                 builder.audioUploadedAt(voiceRecord.getAudioUploadedAt());
                 builder.voiceAudioStatus(voiceRecord.getVoiceStatus().name());
+                builder.voiceTranscript(voiceRecord.getEditedTranscript() != null
+                        ? voiceRecord.getEditedTranscript()
+                        : voiceRecord.getOriginalTranscript());
             }
         }
 
         if (tx.getCreatedByUser() != null) {
+            builder.createdById(tx.getCreatedByUser().getId())
+                    .createdByName(tx.getCreatedByUser().getFullName());
             builder.createdBy(TransactionResponse.UserRef.builder()
                     .id(tx.getCreatedByUser().getId())
                     .username(tx.getCreatedByUser().getUsername())
@@ -1145,6 +1157,8 @@ public class TransactionService {
                     .build());
         }
         if (tx.getAttributedPerson() != null) {
+            builder.attributedPersonId(tx.getAttributedPerson().getId())
+                    .attributedPersonName(tx.getAttributedPerson().getDisplayName());
             builder.attributedPerson(TransactionResponse.PersonRef.builder()
                     .id(tx.getAttributedPerson().getId())
                     .displayName(tx.getAttributedPerson().getDisplayName())
@@ -1189,6 +1203,38 @@ public class TransactionService {
                     .build());
         }
         return builder.build();
+    }
+
+    static String typeLabel(String value) {
+        if (value == null) {
+            return "Không rõ";
+        }
+        return switch (value) {
+            case "EXPENSE" -> "Chi tiêu";
+            case "INCOME" -> "Thu nhập";
+            case "TRANSFER" -> "Chuyển ví";
+            case "ADJUSTMENT" -> "Điều chỉnh";
+            case "LOAN_DISBURSEMENT" -> "Giải ngân khoản vay";
+            case "LOAN_COLLECTION" -> "Thu nợ";
+            case "BORROWING_RECEIPT" -> "Nhận khoản vay";
+            case "BORROWING_REPAYMENT" -> "Trả nợ";
+            default -> value;
+        };
+    }
+
+    static String sourceLabel(String value) {
+        if (value == null) {
+            return "Không rõ";
+        }
+        return switch (value) {
+            case "VOICE" -> "Voice";
+            case "MANUAL" -> "Nhập thủ công";
+            case "EXCEL_MIGRATION" -> "Excel";
+            case "SYSTEM" -> "Hệ thống";
+            case "QUICK_BUTTON" -> "Nút nhanh";
+            case "QUICK_TEXT" -> "Nhập nhanh";
+            default -> value;
+        };
     }
 
     private record IncomeSourceLink(IncomeSource incomeSource, IncomeSource relatedIncomeSource) {

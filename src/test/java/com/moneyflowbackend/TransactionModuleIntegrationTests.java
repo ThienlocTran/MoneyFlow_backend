@@ -148,6 +148,12 @@ class TransactionModuleIntegrationTests {
         Category food = category(owner, "Food", CategoryType.EXPENSE, true, false);
 
         TransactionResponse created = transactionService.create(owner.workspace().getId(), expenseReq("100", cash, food, "Lunch", TransactionStatus.POSTED), owner.user().getId());
+        TransactionResponse detail = transactionService.getDetails(owner.workspace().getId(), created.getId(), false, owner.user().getId());
+        assertThat(detail.getWorkspaceId()).isEqualTo(owner.workspace().getId());
+        assertThat(detail.getTypeLabel()).isEqualTo("Chi tiêu");
+        assertThat(detail.getWalletName()).isEqualTo("Cash");
+        assertThat(detail.getCategoryName()).isEqualTo("Food");
+        assertThat(detail.getSourceLabel()).isEqualTo("Nhập thủ công");
         transactionService.update(owner.workspace().getId(), created.getId(), expenseReq("150", cash, food, "Lunch updated", TransactionStatus.POSTED), owner.user().getId());
         transactionService.delete(owner.workspace().getId(), created.getId(), owner.user().getId());
         transactionService.restore(owner.workspace().getId(), created.getId(), owner.user().getId());
@@ -166,10 +172,43 @@ class TransactionModuleIntegrationTests {
 
         assertThat(transactionAuditService.list(owner.workspace().getId(), created.getId(), owner.user().getId()))
                 .extracting("action")
-                .containsExactly("CREATE", "UPDATE", "SOFT_DELETE", "RESTORE");
+                .containsExactly("CREATE", "UPDATE", "DELETE", "RESTORE");
+        var humanAudit = transactionAuditService.list(owner.workspace().getId(), created.getId(), owner.user().getId());
+        assertThat(humanAudit.get(0).getActionLabel()).isEqualTo("Tạo giao dịch");
+        assertThat(humanAudit.get(0).getSourceLabel()).isEqualTo("Nhập thủ công");
+        assertThat(humanAudit.get(0).getTechnicalPayload()).containsKeys("before", "after");
+        assertThat(humanAudit.get(0).getChanges()).anySatisfy(change -> {
+            assertThat(change.getField()).isEqualTo("walletId");
+            assertThat(change.getFieldLabel()).isEqualTo("Ví");
+            assertThat(change.getAfterDisplay()).isEqualTo("Cash");
+            assertThat(change.isTechnical()).isTrue();
+        });
+        assertThat(humanAudit.get(0).getChanges()).anySatisfy(change -> {
+            assertThat(change.getField()).isEqualTo("categoryId");
+            assertThat(change.getFieldLabel()).isEqualTo("Danh mục");
+            assertThat(change.getAfterDisplay()).isEqualTo("Food");
+        });
+        assertThat(humanAudit.get(1).getChanges()).anySatisfy(change -> {
+            assertThat(change.getField()).isEqualTo("amount");
+            assertThat(change.getFieldLabel()).isEqualTo("Số tiền");
+            assertThat(change.isImportant()).isTrue();
+        });
         assertBusinessCode(() -> transactionAuditService.list(owner.workspace().getId(), created.getId(), editor.user().getId()), "FORBIDDEN");
         assertBusinessCode(() -> transactionAuditService.list(owner.workspace().getId(), created.getId(), viewer.user().getId()), "FORBIDDEN");
         assertBusinessCode(() -> transactionAuditService.list(owner.workspace().getId(), created.getId(), outsider.user().getId()), "WORKSPACE_ACCESS_DENIED");
+    }
+
+    @Test
+    void existingTransactionWithNoAuditReturnsEmptyHistory() {
+        TestContext owner = createContext("tx_empty_audit", WorkspaceRole.OWNER);
+        Wallet cash = wallet(owner, "Cash", WalletType.CASH, "0");
+        Category food = category(owner, "Food", CategoryType.EXPENSE, true, false);
+
+        TransactionResponse created = transactionService.create(owner.workspace().getId(), expenseReq("100", cash, food, "Lunch", TransactionStatus.POSTED), owner.user().getId());
+        transactionAuditLogRepository.deleteAll(transactionAuditLogRepository.findByWorkspaceIdAndTransactionIdOrderByCreatedAtAsc(owner.workspace().getId(), created.getId()));
+        transactionAuditLogRepository.flush();
+
+        assertThat(transactionAuditService.list(owner.workspace().getId(), created.getId(), owner.user().getId())).isEmpty();
     }
 
     @Test
