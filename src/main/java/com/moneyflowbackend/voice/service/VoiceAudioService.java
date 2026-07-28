@@ -112,7 +112,7 @@ public class VoiceAudioService {
             voiceRecord.setAudioStorageKey(null);
             voiceRecord.setVoiceStatus(VoiceRecordStatus.STORAGE_FAILED);
             voiceRecordRepository.save(voiceRecord);
-            throw new BusinessException("AUDIO_STORAGE_FAILED", "Voice audio storage failed", HttpStatus.BAD_GATEWAY);
+            throw new BusinessException("AUDIO_UPLOAD_FAILED", "Voice audio upload failed", HttpStatus.BAD_GATEWAY);
         }
     }
 
@@ -137,7 +137,7 @@ public class VoiceAudioService {
         try {
             return storageService.open(key, voiceRecord.getMimeType());
         } catch (BusinessException ex) {
-            if ("AUDIO_NOT_AVAILABLE".equals(ex.getCode())) {
+            if ("AUDIO_NOT_UPLOADED".equals(ex.getCode()) || "AUDIO_OBJECT_MISSING".equals(ex.getCode()) || "AUDIO_DELETED".equals(ex.getCode())) {
                 log.debug("Voice audio playback unavailable: voiceRecordId={}, provider={}, reason={}",
                         voiceRecord.getId(), storageService.provider(), ex.getCode());
             } else {
@@ -305,11 +305,14 @@ public class VoiceAudioService {
             throw new BusinessException("STORAGE_NOT_CONFIGURED", "Voice audio storage is not configured", HttpStatus.SERVICE_UNAVAILABLE);
         }
         if (voiceRecord.getVoiceStatus() == VoiceRecordStatus.STORAGE_FAILED) {
-            throw new BusinessException("AUDIO_STORAGE_FAILED", "Voice audio upload failed", HttpStatus.CONFLICT);
+            throw new BusinessException("AUDIO_UPLOAD_FAILED", "Voice audio upload failed", HttpStatus.CONFLICT);
+        }
+        if (voiceRecord.getVoiceStatus() == VoiceRecordStatus.AUDIO_DELETED) {
+            throw new BusinessException("AUDIO_DELETED", "Voice audio was deleted", HttpStatus.GONE);
         }
         String key = storageKey(voiceRecord);
         if (key == null || key.isBlank()) {
-            throw new BusinessException("AUDIO_NOT_AVAILABLE", "Voice audio is not available", HttpStatus.NOT_FOUND);
+            throw new BusinessException("AUDIO_NOT_UPLOADED", "Voice audio was not uploaded", HttpStatus.NOT_FOUND);
         }
         return key;
     }

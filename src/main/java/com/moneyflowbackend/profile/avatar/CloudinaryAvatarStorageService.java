@@ -39,7 +39,7 @@ public class CloudinaryAvatarStorageService implements AvatarStorageService {
         this.cloudName = cloudName;
         this.apiKey = apiKey;
         this.apiSecret = apiSecret;
-        this.baseFolder = trimSlashes(baseFolder == null || baseFolder.isBlank() ? "moneyflow/dev" : baseFolder);
+        this.baseFolder = trimSlashes(baseFolder == null || baseFolder.isBlank() ? "dev" : baseFolder);
     }
 
     @Override
@@ -67,6 +67,30 @@ public class CloudinaryAvatarStorageService implements AvatarStorageService {
             return jsonString(response.body(), "secure_url", cloudinaryUrl(publicId));
         } catch (BusinessException ex) {
             throw ex;
+        } catch (Exception ex) {
+            throw storageFailed();
+        }
+    }
+
+    @Override
+    public void delete(String avatarUrl) {
+        String publicId = publicIdFrom(avatarUrl);
+        if (publicId == null) {
+            return;
+        }
+        try {
+            Map<String, String> params = signedParams(Map.of(
+                    "public_id", publicId,
+                    "timestamp", String.valueOf(Instant.now(clock).getEpochSecond())));
+            String boundary = "MoneyFlowBoundary" + UUID.randomUUID();
+            HttpRequest request = HttpRequest.newBuilder(URI.create("https://api.cloudinary.com/v1_1/" + cloudName + "/image/destroy"))
+                    .header("Content-Type", "multipart/form-data; boundary=" + boundary)
+                    .POST(HttpRequest.BodyPublishers.ofByteArray(multipart(boundary, params, null)))
+                    .build();
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                throw storageFailed();
+            }
         } catch (Exception ex) {
             throw storageFailed();
         }
@@ -101,11 +125,14 @@ public class CloudinaryAvatarStorageService implements AvatarStorageService {
             write(out, "Content-Disposition: form-data; name=\"" + field.getKey() + "\"\r\n\r\n");
             write(out, field.getValue() + "\r\n");
         }
-        write(out, "--" + boundary + "\r\n");
-        write(out, "Content-Disposition: form-data; name=\"file\"; filename=\"avatar\"\r\n");
-        write(out, "Content-Type: " + file.getContentType() + "\r\n\r\n");
-        out.write(file.getBytes());
-        write(out, "\r\n--" + boundary + "--\r\n");
+        if (file != null) {
+            write(out, "--" + boundary + "\r\n");
+            write(out, "Content-Disposition: form-data; name=\"file\"; filename=\"avatar\"\r\n");
+            write(out, "Content-Type: " + file.getContentType() + "\r\n\r\n");
+            out.write(file.getBytes());
+            write(out, "\r\n");
+        }
+        write(out, "--" + boundary + "--\r\n");
         return out.toByteArray();
     }
 
@@ -138,6 +165,25 @@ public class CloudinaryAvatarStorageService implements AvatarStorageService {
 
     private String cloudinaryUrl(String publicId) {
         return "https://res.cloudinary.com/" + cloudName + "/image/upload/" + publicId;
+    }
+
+    private String publicIdFrom(String avatarUrl) {
+        if (avatarUrl == null || avatarUrl.isBlank()) {
+            return null;
+        }
+        int marker = avatarUrl.indexOf("/image/upload/");
+        if (marker < 0) {
+            return null;
+        }
+        String publicId = avatarUrl.substring(marker + "/image/upload/".length());
+        if (publicId.startsWith("v")) {
+            int slash = publicId.indexOf('/');
+            if (slash > 1 && publicId.substring(1, slash).chars().allMatch(Character::isDigit)) {
+                publicId = publicId.substring(slash + 1);
+            }
+        }
+        int dot = publicId.lastIndexOf('.');
+        return dot > publicId.lastIndexOf('/') ? publicId.substring(0, dot) : publicId;
     }
 
     private String trimSlashes(String value) {

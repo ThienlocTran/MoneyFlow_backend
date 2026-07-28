@@ -7,6 +7,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestPart;
@@ -28,6 +29,12 @@ public class ProfileAvatarController {
     public ResponseEntity<ApiResponse<UserResponse>> uploadAvatar(@RequestPart(value = "file", required = false) MultipartFile file) {
         UserResponse res = profileAvatarService.upload(currentUserId(), file);
         return ResponseEntity.ok(ApiResponse.ok("Cập nhật ảnh đại diện thành công", res));
+    }
+
+    @DeleteMapping("/avatar")
+    public ResponseEntity<ApiResponse<UserResponse>> deleteAvatar() {
+        UserResponse res = profileAvatarService.delete(currentUserId());
+        return ResponseEntity.ok(ApiResponse.ok("Avatar deleted", res));
     }
 
     private UUID currentUserId() {
