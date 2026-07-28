@@ -5,6 +5,7 @@ import com.moneyflowbackend.category.model.CategoryKeyword;
 import com.moneyflowbackend.category.model.CategoryType;
 import com.moneyflowbackend.quickentry.dto.VoiceCandidateStatus;
 import com.moneyflowbackend.quickentry.dto.VoiceIntentType;
+import com.moneyflowbackend.quickentry.dto.VoiceLedgerEffect;
 import com.moneyflowbackend.quickentry.dto.QuickEntryPreviewResponse;
 import com.moneyflowbackend.quickentry.parser.QuickAmountParser;
 import com.moneyflowbackend.quickentry.parser.QuickDateParser;
@@ -51,11 +52,11 @@ class VoiceIntentFoundationParserTests {
         var preview = parser.parse("tra no 500k hom qua", f.workspace(), f.keywords(), f.categories(), f.wallets());
 
         assertThat(preview.getIntentType()).isEqualTo(VoiceIntentType.DEBT_PAYMENT);
-        assertThat(preview.getCandidateStatus()).isEqualTo(VoiceCandidateStatus.UNSUPPORTED);
+        assertThat(preview.getCandidateStatus()).isEqualTo(VoiceCandidateStatus.MANUAL);
         assertThat(preview.getType()).isNull();
         assertThat(preview.getAmount()).isEqualByComparingTo("500000");
         assertThat(preview.getTransactionDate()).isEqualTo(LocalDate.of(2026, 6, 14));
-        assertThat(preview.getMissingFields()).contains("DEBT");
+        assertThat(preview.getMissingFields()).contains("debtId");
         assertThat(preview.getWarnings()).contains("VOICE_INTENT_NOT_COMMITTABLE");
     }
 
@@ -75,8 +76,8 @@ class VoiceIntentFoundationParserTests {
     void phaseTwoVietnameseDraftExamplesStayDraftOnly() {
         Fixture f = fixture();
 
-        assertDraft(parser.parse("cho Bảo mượn 750k", f.workspace(), f.keywords(), f.categories(), f.wallets()), VoiceIntentType.DEBT_CREATE);
-        assertDraft(parser.parse("Bảo trả tôi 180k", f.workspace(), f.keywords(), f.categories(), f.wallets()), VoiceIntentType.DEBT_PAYMENT);
+        assertDraft(parser.parse("cho Bảo mượn 750k", f.workspace(), f.keywords(), f.categories(), f.wallets()), VoiceIntentType.LOAN_DISBURSEMENT);
+        assertDraft(parser.parse("Bảo trả tôi 180k", f.workspace(), f.keywords(), f.categories(), f.wallets()), VoiceIntentType.LOAN_COLLECTION);
         assertDraft(parser.parse("trả nợ 1 triệu cho chị Nga", f.workspace(), f.keywords(), f.categories(), f.wallets()), VoiceIntentType.DEBT_PAYMENT);
         assertDraft(parser.parse("góp 300k vào mục tiêu du lịch", f.workspace(), f.keywords(), f.categories(), f.wallets()), VoiceIntentType.SAVINGS_GOAL_CONTRIBUTION);
         assertDraft(parser.parse("góp 500k vào quỹ sửa xe", f.workspace(), f.keywords(), f.categories(), f.wallets()), VoiceIntentType.SINKING_FUND_CONTRIBUTION);
@@ -91,7 +92,8 @@ class VoiceIntentFoundationParserTests {
         var preview = parser.parse("xem bao cao thang nay", f.workspace(), f.keywords(), f.categories(), f.wallets());
 
         assertThat(preview.getIntentType()).isEqualTo(VoiceIntentType.ANALYTICS_QUERY);
-        assertThat(preview.getCandidateStatus()).isEqualTo(VoiceCandidateStatus.UNSUPPORTED);
+        assertThat(preview.getCandidateStatus()).isEqualTo(VoiceCandidateStatus.READ_ONLY);
+        assertThat(preview.getLedgerEffect()).isEqualTo(VoiceLedgerEffect.READ_ONLY);
         assertThat(preview.isReadyToConfirm()).isFalse();
         assertThat(preview.getWarnings()).contains("UNSUPPORTED_INTENT");
     }
@@ -108,8 +110,8 @@ class VoiceIntentFoundationParserTests {
         assertCandidate(preview.getCandidates().get(1), VoiceIntentType.TRANSACTION_EXPENSE, "50000");
         assertCandidate(preview.getCandidates().get(2), VoiceIntentType.TRANSACTION_EXPENSE, "60000");
         assertCandidate(preview.getCandidates().get(3), VoiceIntentType.TRANSACTION_EXPENSE, "25000");
-        assertCandidate(preview.getCandidates().get(4), VoiceIntentType.DEBT_PAYMENT, "75000");
-        assertThat(preview.getCandidates().get(4).getCandidateStatus()).isEqualTo(VoiceCandidateStatus.UNSUPPORTED);
+        assertCandidate(preview.getCandidates().get(4), VoiceIntentType.INTEREST_EXPENSE, "75000");
+        assertThat(preview.getCandidates().get(4).getCandidateStatus()).isEqualTo(VoiceCandidateStatus.MANUAL);
     }
 
     @Test
@@ -135,7 +137,7 @@ class VoiceIntentFoundationParserTests {
         var wallet = parser.parse("ví tiền mặt của anh còn 2 triệu", f.workspace(), f.keywords(), f.categories(), f.wallets());
         var stat = parser.parse("tháng này tôi tiêu bao nhiêu", f.workspace(), f.keywords(), f.categories(), f.wallets());
 
-        assertThat(debt.getIntentType()).isEqualTo(VoiceIntentType.DEBT_CREATE);
+        assertThat(debt.getIntentType()).isEqualTo(VoiceIntentType.DEBT_CREATE_RECEIVABLE);
         assertThat(debt.getAmount()).isEqualByComparingTo("500000");
         assertThat(wallet.getIntentType()).isEqualTo(VoiceIntentType.WALLET_BALANCE_SNAPSHOT);
         assertThat(wallet.getAmount()).isEqualByComparingTo("2000000");
@@ -165,7 +167,8 @@ class VoiceIntentFoundationParserTests {
 
     private void assertDraft(QuickEntryPreviewResponse preview, VoiceIntentType intentType) {
         assertThat(preview.getIntentType()).isEqualTo(intentType);
-        assertThat(preview.getCandidateStatus()).isEqualTo(VoiceCandidateStatus.UNSUPPORTED);
+        assertThat(preview.getCandidateStatus()).isEqualTo(VoiceCandidateStatus.MANUAL);
+        assertThat(preview.getLedgerEffect()).isIn(VoiceLedgerEffect.MANUAL_UNSUPPORTED, VoiceLedgerEffect.DOES_NOT_AFFECT_WALLET);
         assertThat(preview.isReadyToConfirm()).isFalse();
         assertThat(preview.getType()).isNull();
         assertThat(preview.getSuggestedManualRoute()).isNotBlank();

@@ -453,10 +453,10 @@ public class QuickEntryService {
         }
         IncomeSource source = defaultIncomeSource(userId, member, text, sources, people);
         if (source == null) {
-            addMissing(preview.getMissingFields(), "incomeSource");
+            addMissing(preview.getMissingFields(), "incomeSourceId");
             preview.setCandidateStatus(VoiceCandidateStatus.NEEDS_REVIEW);
             preview.setReadyToConfirm(false);
-            preview.setCommitSupported(false);
+            preview.setCommitSupported(true);
             return;
         }
         preview.setIncomeSourceId(source.getId());
@@ -468,7 +468,7 @@ public class QuickEntryService {
                 && preview.getMissingFields().isEmpty();
         preview.setCandidateStatus(ready ? VoiceCandidateStatus.READY : VoiceCandidateStatus.NEEDS_REVIEW);
         preview.setReadyToConfirm(ready);
-        preview.setCommitSupported(ready);
+        preview.setCommitSupported(true);
         preview.setConfidence(ready ? 0.95 : preview.getConfidence());
     }
 
@@ -484,10 +484,10 @@ public class QuickEntryService {
         }
         IncomeSource source = defaultIncomeSource(userId, member, text, sources, people);
         if (source == null) {
-            addMissing(candidate.getMissingFields(), "incomeSource");
+            addMissing(candidate.getMissingFields(), "incomeSourceId");
             candidate.setCandidateStatus(VoiceCandidateStatus.NEEDS_REVIEW);
             candidate.setReadyToConfirm(false);
-            candidate.setCommitSupported(false);
+            candidate.setCommitSupported(true);
             candidate.setValidationStatus("NEEDS_REVIEW");
             return;
         }
@@ -500,7 +500,7 @@ public class QuickEntryService {
                 && candidate.getMissingFields().isEmpty();
         candidate.setCandidateStatus(ready ? VoiceCandidateStatus.READY : VoiceCandidateStatus.NEEDS_REVIEW);
         candidate.setReadyToConfirm(ready);
-        candidate.setCommitSupported(ready);
+        candidate.setCommitSupported(true);
         candidate.setValidationStatus(ready ? "READY" : "NEEDS_REVIEW");
         candidate.setConfidence(ready ? 0.95 : candidate.getConfidence());
     }
@@ -606,7 +606,7 @@ public class QuickEntryService {
     }
 
     private void markIncomeReady(List<String> missingFields, List<String> warnings) {
-        missingFields.removeIf(field -> field.equals("incomeSource") || field.equals("CATEGORY"));
+        missingFields.removeIf(field -> field.equals("incomeSource") || field.equals("incomeSourceId") || field.equals("CATEGORY") || field.equals("categoryId"));
         if (warnings != null) {
             warnings.removeIf(warning -> warning.equals("UNKNOWN_CATEGORY"));
         }
@@ -686,7 +686,7 @@ public class QuickEntryService {
     }
 
     private UUID suggestedWalletId(UUID workspaceId, UUID userId, QuickEntryPreviewResponse preview) {
-        if (preview.getType() != TransactionType.INCOME && preview.getType() != TransactionType.EXPENSE) {
+        if (preview.getType() != TransactionType.EXPENSE) {
             return null;
         }
         return transactionRepository.findRecentActiveWalletSuggestions(workspaceId, userId, preview.getType()).stream()
@@ -755,7 +755,9 @@ public class QuickEntryService {
         if (candidate.getCandidateStatus() != VoiceCandidateStatus.READY) {
             throw new BusinessException(
                     "VOICE_CANDIDATE_NOT_READY",
-                    "Candidate " + id + " is " + candidate.getCandidateStatus() + "; only READY transaction candidates can be committed");
+                    "Candidate " + id + " intent " + candidate.getIntentType() + " is " + candidate.getCandidateStatus()
+                            + "; missingFields=" + candidate.getMissingFields()
+                            + "; only READY transaction candidates can be committed");
         }
         rejectUnsupportedVoiceIntent(candidate.getIntentType(), candidate.getType(), id);
     }

@@ -24,6 +24,7 @@ public class QuickEntryPreviewResponse {
     private String clientCandidateId;
     private VoiceIntentType intentType;
     private VoiceCandidateStatus candidateStatus;
+    private VoiceLedgerEffect ledgerEffect;
     private String rawInput;
     private String normalizedInput;
     private TransactionType type;
@@ -49,6 +50,7 @@ public class QuickEntryPreviewResponse {
     private boolean commitSupported;
     private String unsupportedReason;
     private String suggestedManualRoute;
+    private String targetModule;
     private String suggestedManualActionLabel;
     @Builder.Default
     private List<String> missingFields = new ArrayList<>();
@@ -70,6 +72,7 @@ public class QuickEntryPreviewResponse {
         private String clientCandidateId;
         private VoiceIntentType intentType;
         private VoiceCandidateStatus candidateStatus;
+        private VoiceLedgerEffect ledgerEffect;
         private String description;
         private BigDecimal amount;
         private TransactionType type;
@@ -96,6 +99,7 @@ public class QuickEntryPreviewResponse {
         private List<String> missingFields = new ArrayList<>();
         private String unsupportedReason;
         private String suggestedManualRoute;
+        private String targetModule;
         private String suggestedManualActionLabel;
         private List<String> warnings;
     }

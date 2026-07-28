@@ -28,6 +28,7 @@ public class QuickEntryBatchConfirmRequest {
         private Boolean selected;
         private VoiceIntentType intentType;
         private VoiceCandidateStatus candidateStatus;
+        private List<String> missingFields = new ArrayList<>();
         private TransactionType type;
         private TransactionStatus status;
         private BigDecimal amount;
