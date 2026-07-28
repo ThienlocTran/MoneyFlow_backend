@@ -33,6 +33,8 @@ public class QuickEntryPreviewResponse {
     private String walletName;
     private UUID categoryId;
     private String categoryName;
+    private UUID incomeSourceId;
+    private String incomeSourceName;
     private UUID sourceWalletId;
     private String sourceWalletName;
     private UUID destinationWalletId;
@@ -44,6 +46,7 @@ public class QuickEntryPreviewResponse {
     private SpendingScope spendingScope;
     private double confidence;
     private boolean readyToConfirm;
+    private boolean commitSupported;
     private String unsupportedReason;
     private String suggestedManualRoute;
     private String suggestedManualActionLabel;
@@ -75,6 +78,8 @@ public class QuickEntryPreviewResponse {
         private String walletName;
         private UUID categoryId;
         private String categoryName;
+        private UUID incomeSourceId;
+        private String incomeSourceName;
         private UUID sourceWalletId;
         private String sourceWalletName;
         private UUID destinationWalletId;
@@ -85,6 +90,7 @@ public class QuickEntryPreviewResponse {
         private SpendingScope spendingScope;
         private double confidence;
         private boolean readyToConfirm;
+        private boolean commitSupported;
         private String validationStatus;
         @Builder.Default
         private List<String> missingFields = new ArrayList<>();

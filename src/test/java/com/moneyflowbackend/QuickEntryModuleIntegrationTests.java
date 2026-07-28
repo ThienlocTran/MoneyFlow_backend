@@ -14,6 +14,9 @@ import com.moneyflowbackend.category.repository.CategoryKeywordRepository;
 import com.moneyflowbackend.category.repository.CategoryRepository;
 import com.moneyflowbackend.common.exception.BusinessException;
 import com.moneyflowbackend.common.model.SpendingScope;
+import com.moneyflowbackend.income.model.IncomeSource;
+import com.moneyflowbackend.income.model.IncomeSourceStatus;
+import com.moneyflowbackend.income.repository.IncomeSourceRepository;
 import com.moneyflowbackend.quickentry.dto.QuickEntryBatchConfirmRequest;
 import com.moneyflowbackend.quickentry.dto.QuickEntryButtonRequest;
 import com.moneyflowbackend.quickentry.dto.QuickEntryConfirmRequest;
@@ -73,6 +76,7 @@ class QuickEntryModuleIntegrationTests {
     @Autowired WalletRepository walletRepository;
     @Autowired CategoryRepository categoryRepository;
     @Autowired CategoryKeywordRepository keywordRepository;
+    @Autowired IncomeSourceRepository incomeSourceRepository;
     @Autowired TransactionRepository transactionRepository;
     @Autowired TransactionAuditLogRepository transactionAuditLogRepository;
     @Autowired VoiceRecordRepository voiceRecordRepository;
@@ -111,11 +115,14 @@ class QuickEntryModuleIntegrationTests {
         Wallet cash = wallet(ctx, "Tien mat", WalletType.CASH, true, "0");
         Wallet bank = wallet(ctx, "MB Bank", WalletType.BANK, false, "0");
         Category salary = category(ctx, "Salary", CategoryType.INCOME, true, false, false);
+        IncomeSource anh = incomeSource(ctx, "Thu nhập của anh");
         Category rent = category(ctx, "Rent", CategoryType.EXPENSE, true, false, true);
         keyword(ctx, salary, "luong", 10);
         keyword(ctx, rent, "dong tien tro", 10);
 
         var incomePreview = quickEntryService.parse(ctx.workspace().getId(), "luong 5 trieu mb", ctx.user().getId());
+        assertThat(incomePreview.getCategoryId()).isNull();
+        assertThat(incomePreview.getIncomeSourceId()).isEqualTo(anh.getId());
         var income = quickEntryService.confirm(ctx.workspace().getId(), confirm(incomePreview), ctx.user().getId());
         assertThat(transactionRepository.findById(income.getId()).orElseThrow().getSourceType()).isEqualTo(TransactionSourceType.QUICK_TEXT);
         assertThat(walletService.calculateCurrentBalance(bank.getId())).isEqualByComparingTo("5000000");
@@ -150,6 +157,7 @@ class QuickEntryModuleIntegrationTests {
         food.setDefaultSpendingScope(SpendingScope.PERSONAL);
         categoryRepository.saveAndFlush(food);
         Category salary = category(ctx, "Salary", CategoryType.INCOME, true, false, false);
+        incomeSource(ctx, "Thu nhập của anh");
         keyword(ctx, food, "chi phi cong viec", 10);
         keyword(ctx, food, "an trua", 10);
         keyword(ctx, salary, "luong", 10);
@@ -221,6 +229,44 @@ class QuickEntryModuleIntegrationTests {
         assertThat(logs.get(0).getAfterData()).containsEntry("voiceRecordId", tx.getVoiceRecordId());
         assertThat(logs.get(0).getAfterData()).doesNotContainKeys("audioUrl", "storagePublicId");
         assertThat(walletService.calculateCurrentBalance(cash.getId())).isEqualByComparingTo("-35000");
+    }
+
+    @Test
+    void incomeVoiceDefaultsSourceBySpeakerContext() {
+        TestContext ctx = createContext("qe_income_source", WorkspaceRole.OWNER);
+        Wallet cash = wallet(ctx, "Tien mat", WalletType.CASH, true, "0");
+        IncomeSource anh = incomeSource(ctx, "Thu nhập của anh");
+        IncomeSource em = incomeSource(ctx, "Thu nhập của em");
+
+        QuickEntryPreviewResponse ownerIncome = quickEntryService.parse(ctx.workspace().getId(), "Hôm nay tôi kiếm được 800", ctx.user().getId());
+        assertThat(ownerIncome.getType()).isEqualTo(TransactionType.INCOME);
+        assertThat(ownerIncome.getAmount()).isEqualByComparingTo("800000");
+        assertThat(ownerIncome.getWalletId()).isEqualTo(cash.getId());
+        assertThat(ownerIncome.getCategoryId()).isNull();
+        assertThat(ownerIncome.getIncomeSourceId()).isEqualTo(anh.getId());
+        assertThat(ownerIncome.getIncomeSourceName()).isEqualTo("Thu nhập của anh");
+        assertThat(ownerIncome.isReadyToConfirm()).isTrue();
+
+        QuickEntryPreviewResponse partnerIncome = quickEntryService.parse(ctx.workspace().getId(), "Hôm nay em nhận lương 12 triệu", ctx.user().getId());
+        assertThat(partnerIncome.getType()).isEqualTo(TransactionType.INCOME);
+        assertThat(partnerIncome.getAmount()).isEqualByComparingTo("12000000");
+        assertThat(partnerIncome.getIncomeSourceId()).isEqualTo(em.getId());
+        assertThat(partnerIncome.getIncomeSourceName()).isEqualTo("Thu nhập của em");
+        assertThat(partnerIncome.isReadyToConfirm()).isTrue();
+    }
+
+    @Test
+    void incomeVoiceNeedsReviewWhenSourceMissing() {
+        TestContext ctx = createContext("qe_income_missing_source", WorkspaceRole.OWNER);
+        wallet(ctx, "Tien mat", WalletType.CASH, true, "0");
+
+        QuickEntryPreviewResponse preview = quickEntryService.parse(ctx.workspace().getId(), "Hôm nay tôi kiếm được 800", ctx.user().getId());
+
+        assertThat(preview.getType()).isEqualTo(TransactionType.INCOME);
+        assertThat(preview.getCategoryId()).isNull();
+        assertThat(preview.getIncomeSourceId()).isNull();
+        assertThat(preview.getCandidateStatus()).isEqualTo(VoiceCandidateStatus.NEEDS_REVIEW);
+        assertThat(preview.getMissingFields()).containsExactly("incomeSource");
     }
 
     @Test
@@ -501,6 +547,8 @@ class QuickEntryModuleIntegrationTests {
 
     private QuickEntryConfirmRequest confirm(QuickEntryPreviewResponse preview) {
         QuickEntryConfirmRequest req = new QuickEntryConfirmRequest();
+        req.setCandidateId(preview.getCandidateId());
+        req.setIntentType(preview.getIntentType());
         req.setRawInput(preview.getRawInput());
         req.setIdempotencyKey("confirm-" + UUID.randomUUID());
         req.setType(preview.getType());
@@ -508,12 +556,16 @@ class QuickEntryModuleIntegrationTests {
         req.setAmount(preview.getAmount());
         req.setWalletId(preview.getWalletId());
         req.setCategoryId(preview.getCategoryId());
+        req.setIncomeSourceId(preview.getIncomeSourceId());
         req.setSourceWalletId(preview.getSourceWalletId());
         req.setDestinationWalletId(preview.getDestinationWalletId());
         req.setTransactionDate(preview.getTransactionDate());
         req.setTransactionTime(preview.getTransactionTime());
         req.setDescription(preview.getDescription());
         req.setNote(preview.getNote());
+        if (preview.getSpendingScope() != null) {
+            req.setSpendingScope(preview.getSpendingScope());
+        }
         req.setIdempotencyKey("test-" + UUID.randomUUID());
         return req;
     }
@@ -525,10 +577,10 @@ class QuickEntryModuleIntegrationTests {
         req.setAudioMimeType("audio/webm");
         req.setDurationSeconds(7);
         if (preview.getCandidates().isEmpty()) {
-                req.getCandidates().add(candidate("main", preview.getCandidateStatus(), preview.getType(), preview.getStatus(), preview.getAmount(), preview.getWalletId(), preview.getCategoryId(), preview.getTransactionDate(), preview.getDescription()));
+                req.getCandidates().add(candidate("main", preview.getIntentType(), preview.getCandidateStatus(), preview.getType(), preview.getStatus(), preview.getAmount(), preview.getWalletId(), preview.getCategoryId(), preview.getIncomeSourceId(), preview.getTransactionDate(), preview.getDescription()));
         } else {
             for (QuickEntryPreviewResponse.Candidate parsed : preview.getCandidates()) {
-                req.getCandidates().add(candidate(parsed.getCandidateId(), parsed.getCandidateStatus(), parsed.getType(), parsed.getStatus(), parsed.getAmount(), parsed.getWalletId(), parsed.getCategoryId(), parsed.getTransactionDate(), parsed.getDescription()));
+                req.getCandidates().add(candidate(parsed.getCandidateId(), parsed.getIntentType(), parsed.getCandidateStatus(), parsed.getType(), parsed.getStatus(), parsed.getAmount(), parsed.getWalletId(), parsed.getCategoryId(), parsed.getIncomeSourceId(), parsed.getTransactionDate(), parsed.getDescription()));
             }
         }
         return req;
@@ -536,23 +588,27 @@ class QuickEntryModuleIntegrationTests {
 
     private QuickEntryBatchConfirmRequest.CandidateConfirmRequest candidate(
             String candidateId,
+            VoiceIntentType intentType,
             VoiceCandidateStatus candidateStatus,
             TransactionType type,
             TransactionStatus status,
             BigDecimal amount,
             UUID walletId,
             UUID categoryId,
+            UUID incomeSourceId,
             LocalDate transactionDate,
             String description) {
         QuickEntryBatchConfirmRequest.CandidateConfirmRequest req = new QuickEntryBatchConfirmRequest.CandidateConfirmRequest();
         req.setCandidateId(candidateId);
         req.setSelected(true);
+        req.setIntentType(intentType);
         req.setCandidateStatus(candidateStatus);
         req.setType(type);
         req.setStatus(status);
         req.setAmount(amount);
         req.setWalletId(walletId);
         req.setCategoryId(categoryId);
+        req.setIncomeSourceId(incomeSourceId);
         req.setTransactionDate(transactionDate);
         req.setDescription(description);
         return req;
@@ -608,6 +664,15 @@ class QuickEntryModuleIntegrationTests {
                 .category(category)
                 .keyword(value)
                 .priority(priority)
+                .build());
+    }
+
+    private IncomeSource incomeSource(TestContext ctx, String name) {
+        return incomeSourceRepository.saveAndFlush(IncomeSource.builder()
+                .workspace(ctx.workspace())
+                .name(name)
+                .status(IncomeSourceStatus.ACTIVE)
+                .createdByUser(ctx.user())
                 .build());
     }
 

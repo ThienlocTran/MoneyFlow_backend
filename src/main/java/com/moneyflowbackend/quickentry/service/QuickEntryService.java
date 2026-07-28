@@ -7,6 +7,9 @@ import com.moneyflowbackend.category.repository.CategoryKeywordRepository;
 import com.moneyflowbackend.category.repository.CategoryRepository;
 import com.moneyflowbackend.common.exception.BusinessException;
 import com.moneyflowbackend.auth.repository.UserRepository;
+import com.moneyflowbackend.income.model.IncomeSource;
+import com.moneyflowbackend.income.model.IncomeSourceStatus;
+import com.moneyflowbackend.income.repository.IncomeSourceRepository;
 import com.moneyflowbackend.quickentry.dto.QuickEntryBatchConfirmRequest;
 import com.moneyflowbackend.quickentry.dto.QuickEntryBatchConfirmResponse;
 import com.moneyflowbackend.quickentry.dto.QuickEntryButtonRequest;
@@ -31,8 +34,10 @@ import com.moneyflowbackend.wallet.model.Wallet;
 import com.moneyflowbackend.wallet.repository.WalletRepository;
 import com.moneyflowbackend.workspace.model.Workspace;
 import com.moneyflowbackend.workspace.model.WorkspaceMember;
+import com.moneyflowbackend.workspace.model.WorkspacePerson;
 import com.moneyflowbackend.workspace.model.WorkspaceRole;
 import com.moneyflowbackend.workspace.repository.WorkspaceMemberRepository;
+import com.moneyflowbackend.workspace.repository.WorkspacePersonRepository;
 import com.moneyflowbackend.workspace.repository.WorkspaceRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -58,6 +63,8 @@ public class QuickEntryService {
     private final WalletRepository walletRepository;
     private final CategoryRepository categoryRepository;
     private final CategoryKeywordRepository keywordRepository;
+    private final IncomeSourceRepository incomeSourceRepository;
+    private final WorkspacePersonRepository workspacePersonRepository;
     private final TransactionService transactionService;
     private final TransactionRepository transactionRepository;
     private final VoiceRecordRepository voiceRecordRepository;
@@ -71,6 +78,8 @@ public class QuickEntryService {
             WalletRepository walletRepository,
             CategoryRepository categoryRepository,
             CategoryKeywordRepository keywordRepository,
+            IncomeSourceRepository incomeSourceRepository,
+            WorkspacePersonRepository workspacePersonRepository,
             TransactionService transactionService,
             TransactionRepository transactionRepository,
             VoiceRecordRepository voiceRecordRepository,
@@ -82,6 +91,8 @@ public class QuickEntryService {
         this.walletRepository = walletRepository;
         this.categoryRepository = categoryRepository;
         this.keywordRepository = keywordRepository;
+        this.incomeSourceRepository = incomeSourceRepository;
+        this.workspacePersonRepository = workspacePersonRepository;
         this.transactionService = transactionService;
         this.transactionRepository = transactionRepository;
         this.voiceRecordRepository = voiceRecordRepository;
@@ -130,10 +141,10 @@ public class QuickEntryService {
         List<Wallet> wallets = activeWallets(workspaceId);
         QuickEntryPreviewResponse preview = parser.parse(raw, workspace, keywords, categories, wallets);
         UUID suggestedWalletId = suggestedWalletId(workspaceId, userId, preview);
-        if (suggestedWalletId == null || preview.getMatchedWalletText() != null || suggestedWalletId.equals(preview.getWalletId())) {
-            return preview;
+        if (suggestedWalletId != null && preview.getMatchedWalletText() == null && !suggestedWalletId.equals(preview.getWalletId())) {
+            preview = parser.parse(raw, workspace, keywords, categories, wallets, suggestedWalletId);
         }
-        return parser.parse(raw, workspace, keywords, categories, wallets, suggestedWalletId);
+        return applyIncomeSourceDefaults(workspaceId, userId, preview);
     }
 
     @Transactional
@@ -330,11 +341,19 @@ public class QuickEntryService {
             if (req.getWalletId() == null && sourceType != TransactionSourceType.VOICE) {
                 throw new BusinessException("QUICK_ENTRY_WALLET_NOT_FOUND", "Wallet is required");
             }
-            if (req.getCategoryId() == null) {
+            if (req.getType() == TransactionType.EXPENSE && req.getCategoryId() == null) {
                 throw new BusinessException("QUICK_ENTRY_CATEGORY_NOT_FOUND", "Category is required");
             }
             txReq.setWalletId(req.getWalletId());
-            txReq.setCategoryId(req.getCategoryId());
+            if (req.getType() == TransactionType.INCOME) {
+                if (req.getIncomeSourceId() == null) {
+                    throw new BusinessException("INCOME_SOURCE_REQUIRED", "Income source is required");
+                }
+                txReq.setIncomeSourceId(req.getIncomeSourceId());
+            } else {
+                txReq.setCategoryId(req.getCategoryId());
+                txReq.setRelatedIncomeSourceId(req.getRelatedIncomeSourceId());
+            }
         } else {
             throw new BusinessException("INVALID_TRANSACTION_TYPE", "Invalid transaction type");
         }
@@ -351,6 +370,8 @@ public class QuickEntryService {
         single.setAmount(req.getAmount());
         single.setWalletId(req.getWalletId());
         single.setCategoryId(req.getCategoryId());
+        single.setIncomeSourceId(req.getIncomeSourceId());
+        single.setRelatedIncomeSourceId(req.getRelatedIncomeSourceId());
         single.setSourceWalletId(req.getSourceWalletId());
         single.setDestinationWalletId(req.getDestinationWalletId());
         single.setTransactionDate(req.getTransactionDate());
@@ -399,6 +420,119 @@ public class QuickEntryService {
                 .idempotentReplay(true)
                 .items(replayedItems)
                 .build();
+    }
+
+    private QuickEntryPreviewResponse applyIncomeSourceDefaults(UUID workspaceId, UUID userId, QuickEntryPreviewResponse preview) {
+        if (preview == null) {
+            return null;
+        }
+        List<IncomeSource> sources = incomeSourceRepository.findAllByWorkspaceIdAndStatusOrderByNameAsc(workspaceId, IncomeSourceStatus.ACTIVE);
+        applyIncomeSourceDefault(workspaceId, userId, preview.getNormalizedInput(), preview, sources);
+        for (QuickEntryPreviewResponse.Candidate candidate : preview.getCandidates()) {
+            applyIncomeSourceDefault(workspaceId, userId,
+                    candidate.getOriginalText() == null ? preview.getNormalizedInput() : candidate.getOriginalText(),
+                    candidate,
+                    sources);
+        }
+        return preview;
+    }
+
+    private void applyIncomeSourceDefault(
+            UUID workspaceId,
+            UUID userId,
+            String text,
+            QuickEntryPreviewResponse preview,
+            List<IncomeSource> sources) {
+        if (preview.getType() != TransactionType.INCOME) {
+            return;
+        }
+        IncomeSource source = defaultIncomeSource(workspaceId, userId, text, sources);
+        if (source == null) {
+            addMissing(preview.getMissingFields(), "incomeSource");
+            preview.setCandidateStatus(VoiceCandidateStatus.NEEDS_REVIEW);
+            preview.setReadyToConfirm(false);
+            preview.setCommitSupported(false);
+            return;
+        }
+        preview.setIncomeSourceId(source.getId());
+        preview.setIncomeSourceName(source.getName());
+        preview.setCategoryId(null);
+        preview.setCategoryName(null);
+        markIncomeReady(preview.getMissingFields(), preview.getWarnings());
+        boolean ready = preview.getAmount() != null && preview.getWalletId() != null && preview.getTransactionDate() != null
+                && preview.getMissingFields().isEmpty();
+        preview.setCandidateStatus(ready ? VoiceCandidateStatus.READY : VoiceCandidateStatus.NEEDS_REVIEW);
+        preview.setReadyToConfirm(ready);
+        preview.setCommitSupported(ready);
+        preview.setConfidence(ready ? 0.95 : preview.getConfidence());
+    }
+
+    private void applyIncomeSourceDefault(
+            UUID workspaceId,
+            UUID userId,
+            String text,
+            QuickEntryPreviewResponse.Candidate candidate,
+            List<IncomeSource> sources) {
+        if (candidate.getType() != TransactionType.INCOME) {
+            return;
+        }
+        IncomeSource source = defaultIncomeSource(workspaceId, userId, text, sources);
+        if (source == null) {
+            addMissing(candidate.getMissingFields(), "incomeSource");
+            candidate.setCandidateStatus(VoiceCandidateStatus.NEEDS_REVIEW);
+            candidate.setReadyToConfirm(false);
+            candidate.setCommitSupported(false);
+            candidate.setValidationStatus("NEEDS_REVIEW");
+            return;
+        }
+        candidate.setIncomeSourceId(source.getId());
+        candidate.setIncomeSourceName(source.getName());
+        candidate.setCategoryId(null);
+        candidate.setCategoryName(null);
+        markIncomeReady(candidate.getMissingFields(), candidate.getWarnings());
+        boolean ready = candidate.getAmount() != null && candidate.getWalletId() != null && candidate.getTransactionDate() != null
+                && candidate.getMissingFields().isEmpty();
+        candidate.setCandidateStatus(ready ? VoiceCandidateStatus.READY : VoiceCandidateStatus.NEEDS_REVIEW);
+        candidate.setReadyToConfirm(ready);
+        candidate.setCommitSupported(ready);
+        candidate.setValidationStatus(ready ? "READY" : "NEEDS_REVIEW");
+        candidate.setConfidence(ready ? 0.95 : candidate.getConfidence());
+    }
+
+    private IncomeSource defaultIncomeSource(UUID workspaceId, UUID userId, String text, List<IncomeSource> sources) {
+        String owner = partnerSpeaker(workspaceId, userId, text) ? "Thu nhập của em" : "Thu nhập của anh";
+        String normalizedOwner = VietnameseTextNormalizer.comparable(owner);
+        return sources.stream()
+                .filter(source -> VietnameseTextNormalizer.comparable(source.getName()).equals(normalizedOwner))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private boolean partnerSpeaker(UUID workspaceId, UUID userId, String text) {
+        String normalized = VietnameseTextNormalizer.comparable(text);
+        if (normalized.matches(".*(?<!\\S)(em|tam)(?!\\S).*")) {
+            return true;
+        }
+        return workspacePersonRepository.findAllByWorkspaceId(workspaceId).stream()
+                .filter(WorkspacePerson::isActive)
+                .filter(person -> person.getLinkedUser() == null || !person.getLinkedUser().getId().equals(userId))
+                .map(WorkspacePerson::getDisplayName)
+                .map(VietnameseTextNormalizer::comparable)
+                .filter(name -> !name.isBlank())
+                .anyMatch(name -> normalized.matches(".*(?<!\\S)" + java.util.regex.Pattern.quote(name) + "(?!\\S).*"));
+    }
+
+    private void markIncomeReady(List<String> missingFields, List<String> warnings) {
+        missingFields.removeIf(field -> field.equals("incomeSource") || field.equals("CATEGORY"));
+        if (warnings != null) {
+            warnings.removeIf(warning -> warning.equals("UNKNOWN_CATEGORY"));
+        }
+    }
+
+    private void addMissing(List<String> missingFields, String field) {
+        if (!missingFields.contains(field)) {
+            missingFields.add(field);
+        }
     }
 
     private void learnKeywordIfRequested(Workspace workspace, QuickEntryConfirmRequest req) {

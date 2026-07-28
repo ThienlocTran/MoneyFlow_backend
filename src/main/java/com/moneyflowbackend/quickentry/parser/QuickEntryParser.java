@@ -158,6 +158,9 @@ public class QuickEntryParser {
         String matchedKeyword = null;
         if (type == TransactionType.TRANSFER) {
             categoryMatch = null;
+        } else if (type == TransactionType.INCOME) {
+            missing.add("incomeSource");
+            categoryMatch = null;
         } else if (ambiguousCategory) {
             missing.add("CATEGORY");
             warnings.add("AMBIGUOUS_CATEGORY");
@@ -169,7 +172,7 @@ public class QuickEntryParser {
             category = categoryMatch.category();
             matchedKeyword = categoryMatch.keyword() == null ? categoryMatch.text() : categoryMatch.keyword().getKeyword();
             }
-        } else if (type == TransactionType.INCOME || type == TransactionType.EXPENSE) {
+        } else if (type == TransactionType.EXPENSE) {
             missing.add("CATEGORY");
             warnings.add("UNKNOWN_CATEGORY");
         }
@@ -256,6 +259,7 @@ public class QuickEntryParser {
                 .note(null)
                 .confidence(confidence)
                 .readyToConfirm(ready)
+                .commitSupported(ready)
                 .unsupportedReason(type == null ? "UNKNOWN_UNSUPPORTED" : null)
                 .missingFields(new ArrayList<>(missing))
                 .warnings(new ArrayList<>(warnings))
@@ -303,6 +307,7 @@ public class QuickEntryParser {
                 .description(VietnameseTextNormalizer.capitalize(display))
                 .confidence(confidence)
                 .readyToConfirm(false)
+                .commitSupported(false)
                 .missingFields(new ArrayList<>(missing))
                 .warnings(new ArrayList<>(warnings))
                 .unsupportedReason(reason)
@@ -318,6 +323,7 @@ public class QuickEntryParser {
                         .transactionTime(time)
                         .confidence(confidence)
                         .readyToConfirm(false)
+                        .commitSupported(false)
                         .missingFields(new ArrayList<>(missing))
                         .warnings(new ArrayList<>(warnings))
                         .unsupportedReason(reason)
@@ -620,6 +626,7 @@ public class QuickEntryParser {
                         .transactionTime(transactionTime)
                         .confidence(0.65)
                         .readyToConfirm(false)
+                        .commitSupported(false)
                         .validationStatus("UNSUPPORTED")
                         .missingFields(missingFields)
                         .warnings(warnings)
@@ -641,13 +648,15 @@ public class QuickEntryParser {
                         ? fallbackType
                         : TransactionType.EXPENSE;
             }
-            Category category = segmentCategory == null || segmentCategory.ambiguous() || !categoryMatchesType(segmentCategory.category(), segmentType)
+            Category category = segmentType == TransactionType.INCOME || segmentCategory == null || segmentCategory.ambiguous() || !categoryMatchesType(segmentCategory.category(), segmentType)
                     ? null
                     : segmentCategory.category();
             String description = candidateDescription(segment, amountCandidate);
             List<String> missingFields = new ArrayList<>();
             List<String> warnings = new ArrayList<>();
-            if (category == null && segmentType != TransactionType.TRANSFER) {
+            if (category == null && segmentType == TransactionType.INCOME) {
+                missingFields.add("incomeSource");
+            } else if (category == null && segmentType == TransactionType.EXPENSE) {
                 missingFields.add("CATEGORY");
                 warnings.add("UNKNOWN_CATEGORY");
             }
@@ -690,6 +699,7 @@ public class QuickEntryParser {
                     .spendingScope(defaultExpenseScope(segmentType, category))
                     .confidence(ready ? 0.95 : 0.65)
                     .readyToConfirm(ready)
+                    .commitSupported(ready)
                     .validationStatus(ready ? "READY" : "NEEDS_REVIEW")
                     .missingFields(missingFields)
                     .warnings(warnings)
@@ -883,7 +893,10 @@ public class QuickEntryParser {
                 || warnings.contains("INVALID_AMOUNT") || warnings.contains("INVALID_DATE")) {
             return false;
         }
-        if (type == TransactionType.INCOME || type == TransactionType.EXPENSE) {
+        if (type == TransactionType.INCOME) {
+            return amount != null && wallet != null && transactionDate != null;
+        }
+        if (type == TransactionType.EXPENSE) {
             return amount != null && category != null && wallet != null && transactionDate != null;
         }
         if (type == TransactionType.TRANSFER) {

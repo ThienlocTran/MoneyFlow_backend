@@ -23,6 +23,8 @@ public class QuickEntryConfirmRequest {
     private BigDecimal amount;
     private UUID walletId;
     private UUID categoryId;
+    private UUID incomeSourceId;
+    private UUID relatedIncomeSourceId;
     private UUID sourceWalletId;
     private UUID destinationWalletId;
     private LocalDate transactionDate;
