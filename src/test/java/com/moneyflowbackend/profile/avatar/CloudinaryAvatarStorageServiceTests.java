@@ -79,6 +79,8 @@ class CloudinaryAvatarStorageServiceTests {
 
     @Test
     void resolvesProfileDefaultsAndOverride() {
+        assertThat(AvatarStorageConfig.resolveBaseFolder("", env("dev")))
+                .isEqualTo("dev");
         assertThat(AvatarStorageConfig.resolveBaseFolder("", env("local")))
                 .isEqualTo("dev");
         assertThat(AvatarStorageConfig.resolveBaseFolder("", env("production")))

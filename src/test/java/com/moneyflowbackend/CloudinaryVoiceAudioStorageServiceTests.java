@@ -105,6 +105,7 @@ class CloudinaryVoiceAudioStorageServiceTests {
 
     @Test
     void resolvesVoiceFolderByEnvironment() {
+        assertThat(VoiceAudioStorageConfig.resolveCloudinaryFolder("", env("dev"))).isEqualTo("dev/voice");
         assertThat(VoiceAudioStorageConfig.resolveCloudinaryFolder("", env("local"))).isEqualTo("dev/voice");
         assertThat(VoiceAudioStorageConfig.resolveCloudinaryFolder("", env("production"))).isEqualTo("production/voice");
         assertThat(VoiceAudioStorageConfig.resolveCloudinaryFolder("", env("prod"))).isEqualTo("production/voice");

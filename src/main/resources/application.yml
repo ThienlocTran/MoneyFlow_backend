@@ -6,7 +6,7 @@ spring:
   application:
     name: moneyflow-backend
   profiles:
-    active: ${SPRING_PROFILES_ACTIVE:local}
+    active: ${SPRING_PROFILES_ACTIVE:dev}
 
   datasource:
     hikari:
