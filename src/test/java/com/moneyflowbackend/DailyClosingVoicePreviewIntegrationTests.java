@@ -141,6 +141,102 @@ class DailyClosingVoicePreviewIntegrationTests {
                 .isEqualTo("FORBIDDEN");
     }
 
+    @Test
+    void splitsBalancesConnectedByVaConnector() {
+        TestContext ctx = context("dc_voice_va");
+        LocalDate closingDate = LocalDate.of(2026, 7, 28);
+        Wallet cash = wallet(ctx, "Tiền mặt", closingDate);
+        Wallet mb = wallet(ctx, "MB Bank", closingDate);
+
+        DailyClosingVoicePreviewResponse response = previewService.preview(ctx.workspace().getId(),
+                request("Tiền mặt còn 500 và MB còn 4 triệu 8", closingDate), ctx.user().getId());
+
+        assertThat(response.getWalletBalanceCandidates()).hasSize(2);
+        assertCandidate(response, cash, "500000", "NEEDS_REVIEW");
+        assertCandidate(response, mb, "4800000", "READY");
+        // The old bug paired the first wallet ("Tiền mặt") with the last amount (4,800,000).
+        assertThat(response.getWalletBalanceCandidates())
+                .filteredOn(candidate -> cash.getId().equals(candidate.getWalletId()))
+                .noneMatch(candidate -> candidate.getActualBalance() != null
+                        && candidate.getActualBalance().compareTo(new BigDecimal("4800000")) == 0);
+    }
+
+    @Test
+    void splitsBalancesConnectedByComma() {
+        TestContext ctx = context("dc_voice_comma");
+        LocalDate closingDate = LocalDate.of(2026, 7, 28);
+        Wallet cash = wallet(ctx, "Tiền mặt", closingDate);
+        Wallet mb = wallet(ctx, "MB Bank", closingDate);
+
+        DailyClosingVoicePreviewResponse response = previewService.preview(ctx.workspace().getId(),
+                request("Tiền mặt còn 500, MB còn 4 triệu 8", closingDate), ctx.user().getId());
+
+        assertThat(response.getWalletBalanceCandidates()).hasSize(2);
+        assertCandidate(response, cash, "500000", "NEEDS_REVIEW");
+        assertCandidate(response, mb, "4800000", "READY");
+    }
+
+    @Test
+    void splitsBalancesAndSkipConnectedByVaConnector() {
+        TestContext ctx = context("dc_voice_va_skip");
+        LocalDate closingDate = LocalDate.of(2026, 7, 28);
+        Wallet cash = wallet(ctx, "Tiền mặt", closingDate);
+        Wallet cake = wallet(ctx, "Cake", closingDate);
+        Wallet momo = wallet(ctx, "MoMo", closingDate);
+
+        DailyClosingVoicePreviewResponse response = previewService.preview(ctx.workspace().getId(),
+                request("Tiền mặt còn 500 và Cake còn 200 và MoMo bỏ qua", closingDate), ctx.user().getId());
+
+        assertThat(response.getWalletBalanceCandidates()).hasSize(2);
+        assertCandidate(response, cash, "500000", "NEEDS_REVIEW");
+        assertCandidate(response, cake, "200000", "NEEDS_REVIEW");
+        assertThat(response.getSkippedWallets()).singleElement().satisfies(skipped -> {
+            assertThat(skipped.getWalletId()).isEqualTo(momo.getId());
+            assertThat(skipped.getReason()).isEqualTo("Người dùng nói bỏ qua");
+        });
+        // A skipped wallet must never leak into balance candidates as a zero balance.
+        assertThat(response.getWalletBalanceCandidates())
+                .noneMatch(candidate -> momo.getId().equals(candidate.getWalletId()));
+    }
+
+    @Test
+    void multipleAmountsInOneSegmentAreNotMarkedReady() {
+        TestContext ctx = context("dc_voice_ambiguous");
+        LocalDate closingDate = LocalDate.of(2026, 7, 28);
+        Wallet cash = wallet(ctx, "Tiền mặt", closingDate);
+
+        // No skip/balance marker follows "và", so the sentence cannot be split reliably.
+        DailyClosingVoicePreviewResponse response = previewService.preview(ctx.workspace().getId(),
+                request("Tiền mặt còn 500 và 200", closingDate), ctx.user().getId());
+
+        assertThat(response.getCandidateStatus()).isEqualTo("NEEDS_REVIEW");
+        assertThat(response.getWalletBalanceCandidates()).singleElement().satisfies(candidate -> {
+            assertThat(candidate.getWalletId()).isEqualTo(cash.getId());
+            assertThat(candidate.getStatus()).isEqualTo("AMBIGUOUS_AMOUNT");
+            assertThat(candidate.getStatus()).isNotEqualTo("READY");
+            assertThat(candidate.getActualBalance()).isNull();
+            assertThat(candidate.getAmbiguities()).contains("actualBalance");
+            assertThat(candidate.getInferenceNotes())
+                    .anyMatch(note -> note.contains("nhiều số tiền"));
+        });
+    }
+
+    @Test
+    void compositeMillionTailStaysOneAmount() {
+        TestContext ctx = context("dc_voice_composite");
+        LocalDate closingDate = LocalDate.of(2026, 7, 28);
+        Wallet mb = wallet(ctx, "MB Bank", closingDate);
+
+        DailyClosingVoicePreviewResponse response = previewService.preview(ctx.workspace().getId(),
+                request("MB còn 4 triệu 8", closingDate), ctx.user().getId());
+
+        assertThat(response.getWalletBalanceCandidates()).singleElement().satisfies(candidate -> {
+            assertThat(candidate.getWalletId()).isEqualTo(mb.getId());
+            assertThat(candidate.getActualBalance()).isEqualByComparingTo("4800000");
+            assertThat(candidate.getStatus()).isEqualTo("READY");
+        });
+    }
+
     private void assertCandidate(DailyClosingVoicePreviewResponse response, Wallet wallet, String amount, String status) {
         assertThat(response.getWalletBalanceCandidates())
                 .filteredOn(candidate -> wallet.getId().equals(candidate.getWalletId()))

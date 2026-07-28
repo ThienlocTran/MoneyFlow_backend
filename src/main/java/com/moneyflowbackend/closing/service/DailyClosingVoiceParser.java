@@ -63,14 +63,50 @@ public class DailyClosingVoiceParser {
         if (compact.isBlank()) {
             return List.of();
         }
+        // Boundary detection runs on a diacritic-insensitive copy that stays index-aligned
+        // with the original text, so "và"/"còn" match the ASCII SPLIT pattern while the
+        // returned segments keep their real Vietnamese characters for wallet matching.
+        String folded = foldAligned(compact);
         List<String> result = new ArrayList<>();
-        for (String part : SPLIT.split(compact)) {
-            String segment = VietnameseTextNormalizer.compact(part);
-            if (!segment.isBlank()) {
-                result.add(segment);
+        Matcher matcher = SPLIT.matcher(folded);
+        int last = 0;
+        while (matcher.find()) {
+            if (matcher.end() == matcher.start()) {
+                continue;
             }
+            addSegment(result, compact.substring(last, matcher.start()));
+            last = matcher.end();
         }
+        addSegment(result, compact.substring(last));
         return result;
+    }
+
+    private void addSegment(List<String> result, String raw) {
+        String segment = VietnameseTextNormalizer.compact(raw);
+        if (!segment.isBlank()) {
+            result.add(segment);
+        }
+    }
+
+    /**
+     * Folds each character to a single lower-case ASCII character (diacritics removed,
+     * đ/Đ mapped to d). Each input character maps to exactly one output character, so the
+     * returned string stays index-aligned with the input and match offsets can be reused
+     * on the original text.
+     */
+    private String foldAligned(String value) {
+        StringBuilder sb = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char lower = Character.toLowerCase(value.charAt(i));
+            if (lower == '\u0111' || lower == '\u0110') {
+                sb.append('d');
+                continue;
+            }
+            String stripped = Normalizer.normalize(String.valueOf(lower), Normalizer.Form.NFD)
+                    .replaceAll("\\p{M}+", "");
+            sb.append(stripped.isEmpty() ? lower : stripped.charAt(0));
+        }
+        return sb.toString();
     }
 
     private DailyClosingVoicePreviewResponse.WalletCandidate candidate(String segment, String spokenWallet, ParsedAmount amount, WalletMatch walletMatch) {
@@ -86,6 +122,14 @@ public class DailyClosingVoiceParser {
         } else if (walletMatch.ambiguous()) {
             status = "AMBIGUOUS_WALLET";
             ambiguities.add("walletId");
+        } else if (amount.ambiguous()) {
+            // Multiple amounts in one segment: keep the wallet for context but refuse to
+            // bind a balance, so the wrong amount can never be assigned silently.
+            status = "AMBIGUOUS_AMOUNT";
+            ambiguities.add("actualBalance");
+            Wallet wallet = walletMatch.matches().getFirst();
+            walletId = wallet.getId();
+            walletName = wallet.getName();
         } else if (amount.amount() == null) {
             status = "INVALID_AMOUNT";
             missing.add("actualBalance");
@@ -136,22 +180,32 @@ public class DailyClosingVoiceParser {
     private ParsedAmount parseAmount(String segment) {
         String normalized = VietnameseTextNormalizer.comparable(segment);
         if (normalized.matches(".*(^|\\s)-\\s*\\d.*")) {
-            return new ParsedAmount(null, List.of("Số dư âm cần kiểm tra lại"), true);
+            return new ParsedAmount(null, List.of("Số dư âm cần kiểm tra lại"), true, false);
+        }
+        // Defensive guard: a single balance segment should carry exactly one amount.
+        // If several amounts survive in one segment (e.g. an unsplit "và" sentence), we
+        // must not silently pick one and risk pairing it with the wrong wallet.
+        QuickAmountParser.AmountParseResult scan = amountParser.parse(segment, "THOUSAND");
+        if (scan.candidates().size() >= 2) {
+            return new ParsedAmount(
+                    null,
+                    List.of("Câu chứa nhiều số tiền nên không thể gán tự động, vui lòng tách và kiểm tra lại"),
+                    true,
+                    true);
         }
         ParsedAmount composite = parseCompositeMillion(normalized);
         if (composite.amount() != null) {
             return composite;
         }
-        QuickAmountParser.AmountParseResult parsed = amountParser.parse(segment, "THOUSAND");
-        if (parsed.single().isPresent()) {
-            QuickAmountParser.AmountCandidate amount = parsed.single().orElseThrow();
+        if (scan.single().isPresent()) {
+            QuickAmountParser.AmountCandidate amount = scan.single().orElseThrow();
             List<String> notes = amount.assumedThousand() || amount.unitlessPlain()
                     ? List.of("Hiểu '" + amount.text() + "' là " + formatVnd(amount.amount()))
                     : List.of();
-            return new ParsedAmount(amount.amount(), notes, amount.assumedThousand() || amount.unitlessPlain());
+            return new ParsedAmount(amount.amount(), notes, amount.assumedThousand() || amount.unitlessPlain(), false);
         }
-        if (parsed.zeroAmount() || normalized.matches(".*\\b0\\b.*")) {
-            return new ParsedAmount(BigDecimal.ZERO, List.of(), false);
+        if (scan.zeroAmount() || normalized.matches(".*\\b0\\b.*")) {
+            return new ParsedAmount(BigDecimal.ZERO, List.of(), false, false);
         }
         return parseWordAmount(normalized);
     }
@@ -162,7 +216,7 @@ public class DailyClosingVoiceParser {
             BigDecimal whole = new BigDecimal(digits.group(1).replace(',', '.')).multiply(BigDecimal.valueOf(1_000_000L));
             BigDecimal tail = BigDecimal.valueOf(Long.parseLong(digits.group(2)) * 100_000L);
             BigDecimal amount = whole.add(tail);
-            return new ParsedAmount(amount, List.of(), false);
+            return new ParsedAmount(amount, List.of(), false, false);
         }
         Matcher words = Pattern.compile("\\b(\\w+)\\s+trieu\\s+(\\w)\\b").matcher(normalized);
         if (words.find()) {
@@ -170,10 +224,10 @@ public class DailyClosingVoiceParser {
             Integer tail = wordNumber(words.group(2));
             if (whole != null && tail != null) {
                 BigDecimal amount = BigDecimal.valueOf(whole * 1_000_000L + tail * 100_000L);
-                return new ParsedAmount(amount, List.of("Hiểu '" + words.group() + "' là " + formatVnd(amount)), true);
+                return new ParsedAmount(amount, List.of("Hiểu '" + words.group() + "' là " + formatVnd(amount)), true, false);
             }
         }
-        return new ParsedAmount(null, List.of(), false);
+        return new ParsedAmount(null, List.of(), false, false);
     }
 
     private ParsedAmount parseWordAmount(String normalized) {
@@ -183,7 +237,7 @@ public class DailyClosingVoiceParser {
             Integer tenth = wordNumber(million.group(2));
             if (whole != null) {
                 BigDecimal amount = BigDecimal.valueOf(whole * 1_000_000L + (tenth == null ? 0 : tenth * 100_000L));
-                return new ParsedAmount(amount, List.of("Hiểu '" + million.group() + "' là " + formatVnd(amount)), tenth != null);
+                return new ParsedAmount(amount, List.of("Hiểu '" + million.group() + "' là " + formatVnd(amount)), tenth != null, false);
             }
         }
         Matcher hundred = Pattern.compile("\\b(\\w+)\\s+tram\\b").matcher(normalized);
@@ -191,10 +245,10 @@ public class DailyClosingVoiceParser {
             Integer value = wordNumber(hundred.group(1));
             if (value != null) {
                 BigDecimal amount = BigDecimal.valueOf(value * 100_000L);
-                return new ParsedAmount(amount, List.of("Hiểu '" + hundred.group() + "' là " + formatVnd(amount)), true);
+                return new ParsedAmount(amount, List.of("Hiểu '" + hundred.group() + "' là " + formatVnd(amount)), true, false);
             }
         }
-        return new ParsedAmount(null, List.of(), true);
+        return new ParsedAmount(null, List.of(), true, false);
     }
 
     private Integer wordNumber(String raw) {
@@ -328,7 +382,7 @@ public class DailyClosingVoiceParser {
         }
     }
 
-    private record ParsedAmount(BigDecimal amount, List<String> notes, boolean needsReview) {
+    private record ParsedAmount(BigDecimal amount, List<String> notes, boolean needsReview, boolean ambiguous) {
     }
 
     public record ParsedPreview(
