@@ -13,6 +13,7 @@ import com.moneyflowbackend.quickentry.dto.QuickEntryButtonRequest;
 import com.moneyflowbackend.quickentry.dto.QuickEntryConfirmRequest;
 import com.moneyflowbackend.quickentry.dto.QuickEntryOptionsResponse;
 import com.moneyflowbackend.quickentry.dto.QuickEntryPreviewResponse;
+import com.moneyflowbackend.quickentry.dto.VoiceCandidateStatus;
 import com.moneyflowbackend.quickentry.dto.VoiceIntentType;
 import com.moneyflowbackend.quickentry.parser.QuickEntryParser;
 import com.moneyflowbackend.quickentry.parser.VietnameseTextNormalizer;
@@ -179,6 +180,7 @@ public class QuickEntryService {
             throw new BusinessException("VOICE_BATCH_EMPTY", "At least one selected candidate is required");
         }
         for (QuickEntryBatchConfirmRequest.CandidateConfirmRequest candidate : selected) {
+            requireReadyVoiceCandidate(candidate.getCandidateStatus());
             rejectUnsupportedVoiceIntent(candidate.getIntentType(), candidate.getType());
         }
         VoiceRecord voiceRecord = voiceRecordRepository.saveAndFlush(VoiceRecord.builder()
@@ -524,6 +526,12 @@ public class QuickEntryService {
 
     private void rejectUnsupportedVoiceIntent(QuickEntryConfirmRequest req) {
         rejectUnsupportedVoiceIntent(req == null ? null : req.getIntentType(), req == null ? null : req.getType());
+    }
+
+    private void requireReadyVoiceCandidate(VoiceCandidateStatus candidateStatus) {
+        if (candidateStatus != VoiceCandidateStatus.READY) {
+            throw new BusinessException("VOICE_CANDIDATE_NOT_READY", "Voice candidate must be READY before commit");
+        }
     }
 
     private void rejectUnsupportedVoiceIntent(VoiceIntentType intentType, TransactionType type) {

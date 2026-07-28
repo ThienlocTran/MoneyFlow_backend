@@ -18,6 +18,7 @@ import com.moneyflowbackend.quickentry.dto.QuickEntryBatchConfirmRequest;
 import com.moneyflowbackend.quickentry.dto.QuickEntryButtonRequest;
 import com.moneyflowbackend.quickentry.dto.QuickEntryConfirmRequest;
 import com.moneyflowbackend.quickentry.dto.QuickEntryPreviewResponse;
+import com.moneyflowbackend.quickentry.dto.VoiceCandidateStatus;
 import com.moneyflowbackend.quickentry.dto.VoiceIntentType;
 import com.moneyflowbackend.quickentry.service.QuickEntryService;
 import com.moneyflowbackend.transaction.model.Transaction;
@@ -329,6 +330,7 @@ class QuickEntryModuleIntegrationTests {
         keyword(ctx, food, "an sang", 10);
         QuickEntryPreviewResponse preview = quickEntryService.parse(ctx.workspace().getId(), "an sang 35k cafe 20k", ctx.user().getId());
         QuickEntryBatchConfirmRequest req = batch("voice-batch-atomic", preview);
+        req.getCandidates().get(1).setCandidateStatus(VoiceCandidateStatus.READY);
         req.getCandidates().get(1).setType(TransactionType.ADJUSTMENT);
 
         assertBusinessCode(() -> quickEntryService.confirmVoiceBatch(ctx.workspace().getId(), req, ctx.user().getId()), "INVALID_TRANSACTION_TYPE");
@@ -372,6 +374,7 @@ class QuickEntryModuleIntegrationTests {
         keyword(ctx, food, "an sang", 10);
         QuickEntryPreviewResponse preview = quickEntryService.parse(ctx.workspace().getId(), "an sang 35k cafe 20k", ctx.user().getId());
         QuickEntryBatchConfirmRequest req = batch("voice-batch-unsupported-intent", preview);
+        req.getCandidates().get(1).setCandidateStatus(VoiceCandidateStatus.READY);
         req.getCandidates().get(1).setIntentType(VoiceIntentType.DEBT_CREATE);
         req.getCandidates().get(1).setType(TransactionType.EXPENSE);
 
@@ -381,6 +384,23 @@ class QuickEntryModuleIntegrationTests {
         TestTransaction.start();
         assertThat(transactionRepository.findAll()).filteredOn(tx -> tx.getWorkspace().getId().equals(ctx.workspace().getId())).isEmpty();
         assertThat(voiceRecordRepository.findAll()).filteredOn(vr -> vr.getWorkspace().getId().equals(ctx.workspace().getId())).isEmpty();
+    }
+
+    @Test
+    void voiceBatchConfirmRequiresSelectedCandidatesToBeReady() {
+        TestContext ctx = createContext("qe_voice_ready_gate", WorkspaceRole.OWNER);
+        wallet(ctx, "Tien mat", WalletType.CASH, true, "0");
+        Category food = category(ctx, "Food", CategoryType.EXPENSE, true, false, false);
+        keyword(ctx, food, "an sang", 10);
+        QuickEntryPreviewResponse preview = quickEntryService.parse(ctx.workspace().getId(), "an sang 35k cafe 20k", ctx.user().getId());
+
+        QuickEntryBatchConfirmRequest needsReview = batch("voice-batch-needs-review", preview);
+        needsReview.getCandidates().get(0).setCandidateStatus(VoiceCandidateStatus.NEEDS_REVIEW);
+        assertBusinessCode(() -> quickEntryService.confirmVoiceBatch(ctx.workspace().getId(), needsReview, ctx.user().getId()), "VOICE_CANDIDATE_NOT_READY");
+
+        QuickEntryBatchConfirmRequest unsupported = batch("voice-batch-unsupported-status", preview);
+        unsupported.getCandidates().get(0).setCandidateStatus(VoiceCandidateStatus.UNSUPPORTED);
+        assertBusinessCode(() -> quickEntryService.confirmVoiceBatch(ctx.workspace().getId(), unsupported, ctx.user().getId()), "VOICE_CANDIDATE_NOT_READY");
     }
 
     @Test
@@ -499,10 +519,10 @@ class QuickEntryModuleIntegrationTests {
         req.setAudioMimeType("audio/webm");
         req.setDurationSeconds(7);
         if (preview.getCandidates().isEmpty()) {
-            req.getCandidates().add(candidate("main", preview.getType(), preview.getStatus(), preview.getAmount(), preview.getWalletId(), preview.getCategoryId(), preview.getTransactionDate(), preview.getDescription()));
+                req.getCandidates().add(candidate("main", preview.getCandidateStatus(), preview.getType(), preview.getStatus(), preview.getAmount(), preview.getWalletId(), preview.getCategoryId(), preview.getTransactionDate(), preview.getDescription()));
         } else {
             for (QuickEntryPreviewResponse.Candidate parsed : preview.getCandidates()) {
-                req.getCandidates().add(candidate(parsed.getCandidateId(), parsed.getType(), parsed.getStatus(), parsed.getAmount(), parsed.getWalletId(), parsed.getCategoryId(), parsed.getTransactionDate(), parsed.getDescription()));
+                req.getCandidates().add(candidate(parsed.getCandidateId(), parsed.getCandidateStatus(), parsed.getType(), parsed.getStatus(), parsed.getAmount(), parsed.getWalletId(), parsed.getCategoryId(), parsed.getTransactionDate(), parsed.getDescription()));
             }
         }
         return req;
@@ -510,6 +530,7 @@ class QuickEntryModuleIntegrationTests {
 
     private QuickEntryBatchConfirmRequest.CandidateConfirmRequest candidate(
             String candidateId,
+            VoiceCandidateStatus candidateStatus,
             TransactionType type,
             TransactionStatus status,
             BigDecimal amount,
@@ -520,6 +541,7 @@ class QuickEntryModuleIntegrationTests {
         QuickEntryBatchConfirmRequest.CandidateConfirmRequest req = new QuickEntryBatchConfirmRequest.CandidateConfirmRequest();
         req.setCandidateId(candidateId);
         req.setSelected(true);
+        req.setCandidateStatus(candidateStatus);
         req.setType(type);
         req.setStatus(status);
         req.setAmount(amount);

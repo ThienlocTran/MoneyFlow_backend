@@ -41,3 +41,9 @@ build/
 !.env.example
 application-secret.yml
 application-local-secret.yml
+
+### Local-only DB dumps/backups ###
+../_local_db_backups/
+../_local_db_dumps/
+_local_db_backups/
+_local_db_dumps/
