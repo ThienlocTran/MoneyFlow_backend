@@ -35,23 +35,31 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class CloudinaryVoiceAudioStorageServiceTests {
     @Test
-    void uploadUsesEnvironmentVoiceFolderInPublicId() {
+    void uploadUsesEnvironmentVoiceAssetFolderAndReturnedPublicId() {
         CapturingHttpClient client = new CapturingHttpClient();
         CloudinaryVoiceAudioStorageService service = new CloudinaryVoiceAudioStorageService(
                 client,
-                Clock.fixed(Instant.parse("2026-06-15T01:00:00Z"), ZoneOffset.UTC),
+                Clock.fixed(Instant.parse("2026-07-28T01:00:00Z"), ZoneOffset.UTC),
                 "demo-cloud",
                 "api-key",
                 "api-secret",
                 "dev/voice");
 
-        service.upload(
-                "2026-06/2026-06-15/11111111-1111-1111-1111-111111111111.webm",
+        var stored = service.upload(
+                "07-2026/28-07-2026/11111111-1111-1111-1111-111111111111.webm",
                 new MockMultipartFile("file", "voice.webm", "audio/webm", new byte[] {1, 2, 3}));
 
+        assertThat(stored.storageKey()).isEqualTo("returned/dev/voice/07-2026/28-07-2026/audio-id");
         assertThat(client.uri).isEqualTo(URI.create("https://api.cloudinary.com/v1_1/demo-cloud/video/upload"));
         assertThat(client.body).contains("name=\"public_id\"");
-        assertThat(client.body).contains("dev/voice/2026-06/2026-06-15/11111111-1111-1111-1111-111111111111.webm");
+        assertThat(client.body).contains("11111111-1111-1111-1111-111111111111");
+        assertThat(client.body).doesNotContain("11111111-1111-1111-1111-111111111111.webm");
+        assertThat(client.body).contains("name=\"asset_folder\"");
+        assertThat(client.body).contains("dev/voice/07-2026/28-07-2026");
+        assertThat(client.body).contains("name=\"use_asset_folder_as_public_id_prefix\"");
+        assertThat(client.body).contains("true");
+        assertThat(client.body).contains("name=\"resource_type\"");
+        assertThat(client.body).contains("video");
         assertThat(client.body).contains("name=\"type\"");
         assertThat(client.body).contains("authenticated");
         assertThat(client.body).doesNotContain("api-secret");
@@ -99,9 +107,10 @@ class CloudinaryVoiceAudioStorageServiceTests {
 
     @Test
     void resolvesVoiceFolderByEnvironment() {
-        assertThat(VoiceAudioStorageConfig.resolveFolder("", env("local"))).isEqualTo("dev/voice");
-        assertThat(VoiceAudioStorageConfig.resolveFolder("", env("production"))).isEqualTo("production/voice");
-        assertThat(VoiceAudioStorageConfig.resolveFolder("custom/voice", env("production"))).isEqualTo("custom/voice");
+        assertThat(VoiceAudioStorageConfig.resolveCloudinaryFolder("", env("local"))).isEqualTo("dev/voice");
+        assertThat(VoiceAudioStorageConfig.resolveCloudinaryFolder("", env("production"))).isEqualTo("production/voice");
+        assertThat(VoiceAudioStorageConfig.resolveCloudinaryFolder("", env("prod"))).isEqualTo("production/voice");
+        assertThat(VoiceAudioStorageConfig.resolveCloudinaryFolder("custom", env("production"))).isEqualTo("custom/voice");
     }
 
     private MockEnvironment env(String profile) {
@@ -181,7 +190,7 @@ class CloudinaryVoiceAudioStorageServiceTests {
         public <T> HttpResponse<T> send(HttpRequest request, HttpResponse.BodyHandler<T> responseBodyHandler) {
             uri = request.uri();
             body = readBody(request);
-            return new FixedResponse<>(request, 200, (T) "{\"public_id\":\"dev\\/voice\\/2026-06\\/2026-06-15\\/11111111-1111-1111-1111-111111111111.webm\"}");
+            return new FixedResponse<>(request, 200, (T) "{\"public_id\":\"returned\\/dev\\/voice\\/07-2026\\/28-07-2026\\/audio-id\"}");
         }
 
         private String readBody(HttpRequest request) {

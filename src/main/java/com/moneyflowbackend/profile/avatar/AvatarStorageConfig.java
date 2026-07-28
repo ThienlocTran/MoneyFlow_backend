@@ -46,7 +46,7 @@ public class AvatarStorageConfig {
             return configured;
         }
         boolean production = Arrays.stream(environment.getActiveProfiles())
-                .anyMatch("production"::equalsIgnoreCase);
+                .anyMatch(profile -> "production".equalsIgnoreCase(profile) || "prod".equalsIgnoreCase(profile));
         return production ? "production" : "dev";
     }
 
