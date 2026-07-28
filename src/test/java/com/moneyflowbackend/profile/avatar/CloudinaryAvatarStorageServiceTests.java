@@ -54,8 +54,7 @@ class CloudinaryAvatarStorageServiceTests {
         assertThat(client.body).doesNotContain("22222222-2222-2222-2222-222222222222.png");
         assertThat(client.body).contains("name=\"asset_folder\"");
         assertThat(client.body).contains("dev/avatars/11111111-1111-1111-1111-111111111111");
-        assertThat(client.body).contains("name=\"use_asset_folder_as_public_id_prefix\"");
-        assertThat(client.body).contains("true");
+        assertThat(client.body).doesNotContain("name=\"use_asset_folder_as_public_id_prefix\"");
         assertThat(client.body).doesNotContain("api-secret");
     }
 

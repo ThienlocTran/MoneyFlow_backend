@@ -56,8 +56,7 @@ class CloudinaryVoiceAudioStorageServiceTests {
         assertThat(client.body).doesNotContain("11111111-1111-1111-1111-111111111111.webm");
         assertThat(client.body).contains("name=\"asset_folder\"");
         assertThat(client.body).contains("dev/voice/07-2026/28-07-2026");
-        assertThat(client.body).contains("name=\"use_asset_folder_as_public_id_prefix\"");
-        assertThat(client.body).contains("true");
+        assertThat(client.body).doesNotContain("name=\"use_asset_folder_as_public_id_prefix\"");
         assertThat(client.body).contains("name=\"resource_type\"");
         assertThat(client.body).contains("video");
         assertThat(client.body).contains("name=\"type\"");

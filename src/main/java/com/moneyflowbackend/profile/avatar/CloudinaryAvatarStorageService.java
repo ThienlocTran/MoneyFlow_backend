@@ -56,7 +56,6 @@ public class CloudinaryAvatarStorageService implements AvatarStorageService {
             Map<String, String> params = signedParams(Map.of(
                     "public_id", publicId,
                     "asset_folder", assetFolder,
-                    "use_asset_folder_as_public_id_prefix", "true",
                     "timestamp", String.valueOf(Instant.now(clock).getEpochSecond()),
                     "overwrite", "true"));
             String boundary = "MoneyFlowBoundary" + UUID.randomUUID();
