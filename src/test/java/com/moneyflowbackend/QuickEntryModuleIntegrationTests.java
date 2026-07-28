@@ -151,12 +151,18 @@ class QuickEntryModuleIntegrationTests {
         categoryRepository.saveAndFlush(food);
         Category salary = category(ctx, "Salary", CategoryType.INCOME, true, false, false);
         keyword(ctx, food, "chi phi cong viec", 10);
+        keyword(ctx, food, "an trua", 10);
         keyword(ctx, salary, "luong", 10);
 
         QuickEntryPreviewResponse preview = quickEntryService.parse(ctx.workspace().getId(), "chi phi cong viec 35k tien mat", ctx.user().getId());
-        assertThat(preview.getSpendingScope()).isNull();
+        assertThat(preview.getSpendingScope()).isEqualTo(SpendingScope.PERSONAL);
         assertThat(quickEntryService.confirm(ctx.workspace().getId(), confirm(preview), ctx.user().getId()).getSpendingScope())
                 .isEqualTo(SpendingScope.PERSONAL);
+
+        QuickEntryPreviewResponse defaultScope = quickEntryService.parse(ctx.workspace().getId(), "an trua 50", ctx.user().getId());
+        assertThat(defaultScope.getType()).isEqualTo(TransactionType.EXPENSE);
+        assertThat(defaultScope.getAmount()).isEqualByComparingTo("50000");
+        assertThat(defaultScope.getSpendingScope()).isEqualTo(SpendingScope.PERSONAL);
 
         QuickEntryConfirmRequest work = confirm(preview);
         work.setSpendingScope(SpendingScope.WORK);

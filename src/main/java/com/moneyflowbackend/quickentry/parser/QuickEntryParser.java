@@ -3,6 +3,7 @@ package com.moneyflowbackend.quickentry.parser;
 import com.moneyflowbackend.category.model.Category;
 import com.moneyflowbackend.category.model.CategoryKeyword;
 import com.moneyflowbackend.category.model.CategoryType;
+import com.moneyflowbackend.common.model.SpendingScope;
 import com.moneyflowbackend.quickentry.dto.QuickEntryPreviewResponse;
 import com.moneyflowbackend.quickentry.dto.VoiceCandidateStatus;
 import com.moneyflowbackend.quickentry.dto.VoiceIntentType;
@@ -250,6 +251,7 @@ public class QuickEntryParser {
                 .destinationWalletName(destinationWallet == null ? null : destinationWallet.getName())
                 .transactionDate(transactionDate)
                 .transactionTime(dateResult.time())
+                .spendingScope(defaultExpenseScope(type, category))
                 .description(description)
                 .note(null)
                 .confidence(confidence)
@@ -685,7 +687,7 @@ public class QuickEntryParser {
                     .destinationWalletName(segmentTransferWallets.destination() == null ? null : segmentTransferWallets.destination().getName())
                     .transactionDate(transactionDate)
                     .transactionTime(transactionTime)
-                    .spendingScope(spendingScope(category))
+                    .spendingScope(defaultExpenseScope(segmentType, category))
                     .confidence(ready ? 0.95 : 0.65)
                     .readyToConfirm(ready)
                     .validationStatus(ready ? "READY" : "NEEDS_REVIEW")
@@ -696,8 +698,13 @@ public class QuickEntryParser {
         return candidates;
     }
 
-    private com.moneyflowbackend.common.model.SpendingScope spendingScope(Category category) {
-        return category == null ? null : category.getDefaultSpendingScope();
+    private SpendingScope defaultExpenseScope(TransactionType type, Category category) {
+        if (type != TransactionType.EXPENSE) {
+            return null;
+        }
+        return category == null || category.getDefaultSpendingScope() == null
+                ? SpendingScope.PERSONAL
+                : category.getDefaultSpendingScope();
     }
 
     private VoiceIntentType intentType(TransactionType type) {
