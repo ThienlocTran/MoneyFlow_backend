@@ -331,7 +331,10 @@ public class QuickEntrySuggestionService {
     private List<SuggestionItemResponse> sortAndLimit(java.util.Collection<SuggestionItemResponse> items) {
         return items.stream()
                 .sorted(Comparator.comparingDouble(SuggestionItemResponse::getConfidence).reversed()
-                        .thenComparing(SuggestionItemResponse::getName, Comparator.nullsLast(String::compareTo)))
+                        .thenComparing(SuggestionItemResponse::getName, Comparator.nullsLast(String::compareTo))
+                        // Final tiebreaker so ties (same confidence and name) still order
+                        // deterministically across calls; the frontend chips depend on stable output.
+                        .thenComparing(item -> item.getId() == null ? "" : item.getId().toString()))
                 .limit(MAX_SUGGESTIONS)
                 .toList();
     }
