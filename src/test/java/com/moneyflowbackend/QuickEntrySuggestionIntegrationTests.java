@@ -14,6 +14,7 @@ import com.moneyflowbackend.income.model.IncomeSourceType;
 import com.moneyflowbackend.income.repository.IncomeSourceRepository;
 import com.moneyflowbackend.suggestion.dto.QuickEntrySuggestionRequest;
 import com.moneyflowbackend.suggestion.dto.QuickEntrySuggestionResponse;
+import com.moneyflowbackend.suggestion.dto.SuggestionItemResponse;
 import com.moneyflowbackend.suggestion.dto.SuggestionSource;
 import com.moneyflowbackend.suggestion.dto.SuggestionTargetType;
 import com.moneyflowbackend.suggestion.service.QuickEntrySuggestionService;
@@ -37,6 +38,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -210,6 +213,57 @@ class QuickEntrySuggestionIntegrationTests {
                 .anyMatch(warning -> warning.getCode().equals("LOW_CONFIDENCE_ONLY"))
                 .anyMatch(warning -> warning.getCode().equals("AMOUNT_MISSING"))
                 .anyMatch(warning -> warning.getCode().equals("NO_CATEGORY_MATCH"));
+    }
+
+    @Test
+    void unsupportedIntentReturnsWarningNotServerError() {
+        TestContext ctx = context("sg_intent");
+        wallet(ctx, "Tiền mặt", true);
+        category(ctx, "Ăn uống", CategoryType.EXPENSE);
+
+        QuickEntrySuggestionResponse response = suggestionService.suggest(
+                ctx.workspace().getId(), request("chuyển khoản linh tinh", "TRANSACTION_LOAN", "50000"), ctx.user().getId());
+
+        // Unknown intents degrade gracefully: a warning, never an exception.
+        assertThat(response.getWarnings())
+                .anyMatch(warning -> warning.getCode().equals("UNSUPPORTED_INTENT_FOR_SUGGESTIONS"));
+        // Only wallet suggestions are offered for an unknown intent; no category / income guesses.
+        assertThat(response.getCategorySuggestions()).isEmpty();
+        assertThat(response.getIncomeSourceSuggestions()).isEmpty();
+    }
+
+    @Test
+    void responseArraysAreNeverNullAndConfidenceStaysBounded() {
+        TestContext ctx = context("sg_contract");
+        Wallet cash = wallet(ctx, "Tiền mặt", true);
+        Category fuel = category(ctx, "Xăng xe", CategoryType.EXPENSE);
+        keyword(ctx, fuel, "xăng", 3);
+        transaction(ctx, cash, fuel, TransactionType.EXPENSE, "50000", "đổ xăng đi làm");
+
+        QuickEntrySuggestionResponse response = suggestionService.suggest(
+                ctx.workspace().getId(), request("đổ xăng 50", "TRANSACTION_EXPENSE", "50000"), ctx.user().getId());
+
+        // Contract: every collection is present, never null, so the frontend can iterate safely.
+        assertThat(response.getCategorySuggestions()).isNotNull();
+        assertThat(response.getWalletSuggestions()).isNotNull();
+        assertThat(response.getIncomeSourceSuggestions()).isNotNull();
+        assertThat(response.getWarnings()).isNotNull();
+
+        List<SuggestionItemResponse> all = new ArrayList<>();
+        all.addAll(response.getCategorySuggestions());
+        all.addAll(response.getWalletSuggestions());
+        all.addAll(response.getIncomeSourceSuggestions());
+        assertThat(all).isNotEmpty();
+        // Confidence is always a probability in [0, 1] and lowConfidence is derived consistently.
+        assertThat(all).allSatisfy(item -> {
+            assertThat(item.getConfidence()).isBetween(0d, 1d);
+            assertThat(item.isLowConfidence()).isEqualTo(item.getConfidence() < 0.6d);
+        });
+        // No duplicate suggestion ids within a single target list.
+        assertThat(response.getCategorySuggestions().stream().map(SuggestionItemResponse::getId).distinct().count())
+                .isEqualTo(response.getCategorySuggestions().size());
+        assertThat(response.getWalletSuggestions().stream().map(SuggestionItemResponse::getId).distinct().count())
+                .isEqualTo(response.getWalletSuggestions().size());
     }
 
     private QuickEntrySuggestionRequest request(String text, String intentType, String amount) {
