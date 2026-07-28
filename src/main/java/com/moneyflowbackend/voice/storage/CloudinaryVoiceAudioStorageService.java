@@ -42,7 +42,7 @@ public class CloudinaryVoiceAudioStorageService implements VoiceAudioStorageServ
         this.cloudName = cloudName;
         this.apiKey = apiKey;
         this.apiSecret = apiSecret;
-        this.folder = trimSlashes(folder == null || folder.isBlank() ? "moneyflow/voice" : folder);
+        this.folder = trimSlashes(folder == null || folder.isBlank() ? "dev/voice" : folder);
     }
 
     @Override
@@ -85,10 +85,13 @@ public class CloudinaryVoiceAudioStorageService implements VoiceAudioStorageServ
 
     @Override
     public VoiceAudioPlayback playbackUrl(String storagePublicId, String mimeType) {
-        Instant expiresAt = Instant.now(clock).plusSeconds(300);
+        long timestamp = Instant.now(clock).getEpochSecond();
+        Instant expiresAt = Instant.ofEpochSecond(timestamp).plusSeconds(300);
         Map<String, String> params = signedParams(Map.of(
                 "public_id", storagePublicId,
                 "type", "authenticated",
+                "format", format(mimeType, storagePublicId),
+                "timestamp", String.valueOf(timestamp),
                 "expires_at", String.valueOf(expiresAt.getEpochSecond())));
         String url = "https://api.cloudinary.com/v1_1/%s/video/download?%s".formatted(cloudName, query(params));
         return new VoiceAudioPlayback(url, expiresAt, mimeType);
@@ -225,16 +228,25 @@ public class CloudinaryVoiceAudioStorageService implements VoiceAudioStorageServ
         return value.replaceAll("^/+", "").replaceAll("/+$", "");
     }
 
+    private String format(String mimeType, String publicId) {
+        return switch (mimeType == null ? "" : mimeType) {
+            case "audio/mp4" -> "m4a";
+            case "audio/mpeg" -> "mp3";
+            case "audio/wav" -> "wav";
+            default -> {
+                int dot = publicId == null ? -1 : publicId.lastIndexOf('.');
+                yield dot >= 0 && dot < publicId.length() - 1 ? publicId.substring(dot + 1) : "webm";
+            }
+        };
+    }
+
     private BusinessException storageFailed(String message) {
-        return new BusinessException("AUDIO_STORAGE_FAILED", message, HttpStatus.BAD_GATEWAY);
+        return new BusinessException("AUDIO_UPLOAD_FAILED", message, HttpStatus.BAD_GATEWAY);
     }
 
     private BusinessException playbackFailed(int statusCode) {
         if (statusCode == 404) {
-            return new BusinessException("AUDIO_NOT_AVAILABLE", "Voice audio is not available", HttpStatus.NOT_FOUND);
-        }
-        if (statusCode == 401 || statusCode == 403) {
-            return new BusinessException("STORAGE_NOT_CONFIGURED", "Voice audio storage is not configured", HttpStatus.SERVICE_UNAVAILABLE);
+            return new BusinessException("AUDIO_OBJECT_MISSING", "Voice audio object is missing", HttpStatus.NOT_FOUND);
         }
         return storageUnavailable();
     }

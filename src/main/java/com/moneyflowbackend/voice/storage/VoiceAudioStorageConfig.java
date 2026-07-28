@@ -3,10 +3,12 @@ package com.moneyflowbackend.voice.storage;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.Environment;
 
 import java.net.http.HttpClient;
 import java.time.Clock;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 @Configuration
@@ -14,12 +16,13 @@ public class VoiceAudioStorageConfig {
     @Bean
     VoiceAudioStorageService voiceAudioStorageService(
             Clock clock,
+            Environment environment,
             @Value("${VOICE_AUDIO_STORAGE_PROVIDER:${MONEYFLOW_AUDIO_STORAGE_PROVIDER:disabled}}") String provider,
             @Value("${VOICE_AUDIO_STORAGE_ENABLED:}") String enabled,
             @Value("${MONEYFLOW_CLOUDINARY_CLOUD_NAME:}") String cloudName,
             @Value("${MONEYFLOW_CLOUDINARY_API_KEY:}") String apiKey,
             @Value("${MONEYFLOW_CLOUDINARY_API_SECRET:}") String apiSecret,
-            @Value("${MONEYFLOW_AUDIO_FOLDER:moneyflow/voice}") String folder,
+            @Value("${MONEYFLOW_AUDIO_FOLDER:}") String folder,
             @Value("${VOICE_AUDIO_S3_BUCKET:moneyflow-voice-audio}") String s3Bucket,
             @Value("${VOICE_AUDIO_S3_REGION:auto}") String s3Region,
             @Value("${VOICE_AUDIO_S3_ENDPOINT:}") String s3Endpoint,
@@ -64,10 +67,19 @@ public class VoiceAudioStorageConfig {
                 cloudName,
                 apiKey,
                 apiSecret,
-                folder);
+                resolveFolder(folder, environment));
     }
 
-    private boolean isBlank(String value) {
+    public static String resolveFolder(String configured, Environment environment) {
+        if (!isBlank(configured)) {
+            return configured;
+        }
+        boolean production = Arrays.stream(environment.getActiveProfiles())
+                .anyMatch("production"::equalsIgnoreCase);
+        return production ? "production/voice" : "dev/voice";
+    }
+
+    private static boolean isBlank(String value) {
         return value == null || value.isBlank();
     }
 

@@ -126,7 +126,7 @@ class VoiceAudioServiceTests {
 
         assertBusinessCode(
                 () -> ctx.service().uploadAudio(ctx.voiceRecord().getId(), file, 12, ctx.user().getId()),
-                "AUDIO_STORAGE_FAILED");
+                "AUDIO_UPLOAD_FAILED");
 
         assertThat(ctx.voiceRecord().getStoragePublicId()).isNull();
         assertThat(ctx.voiceRecord().getOriginalTranscript()).isEqualTo("an sang 35k");
@@ -152,7 +152,7 @@ class VoiceAudioServiceTests {
 
         assertBusiness(
                 () -> ctx.service().playbackUrl(ctx.voiceRecord().getId(), ctx.user().getId()),
-                "AUDIO_NOT_AVAILABLE",
+                "AUDIO_NOT_UPLOADED",
                 HttpStatus.NOT_FOUND);
     }
 
@@ -174,7 +174,7 @@ class VoiceAudioServiceTests {
 
         assertBusiness(
                 () -> ctx.service().streamAudio(ctx.voiceRecord().getId(), ctx.user().getId()),
-                "AUDIO_NOT_AVAILABLE",
+                "AUDIO_NOT_UPLOADED",
                 HttpStatus.NOT_FOUND);
     }
 
@@ -185,7 +185,7 @@ class VoiceAudioServiceTests {
 
         assertBusiness(
                 () -> ctx.service().streamAudio(ctx.voiceRecord().getId(), ctx.user().getId()),
-                "AUDIO_STORAGE_FAILED",
+                "AUDIO_UPLOAD_FAILED",
                 HttpStatus.CONFLICT);
     }
 
@@ -197,8 +197,21 @@ class VoiceAudioServiceTests {
 
         assertBusiness(
                 () -> ctx.service().streamAudio(ctx.voiceRecord().getId(), ctx.user().getId()),
-                "AUDIO_NOT_AVAILABLE",
+                "AUDIO_OBJECT_MISSING",
                 HttpStatus.NOT_FOUND);
+    }
+
+    @Test
+    void streamAudioReturnsDeletedWhenAudioWasDeleted() {
+        TestContext ctx = context(new FakeStorageService());
+        ctx.voiceRecord().setVoiceStatus(VoiceRecordStatus.AUDIO_DELETED);
+        ctx.voiceRecord().setAudioStorageKey("stored/deleted");
+        ctx.voiceRecord().setMimeType("audio/webm");
+
+        assertBusiness(
+                () -> ctx.service().streamAudio(ctx.voiceRecord().getId(), ctx.user().getId()),
+                "AUDIO_DELETED",
+                HttpStatus.GONE);
     }
 
     @Test
@@ -437,29 +450,29 @@ class VoiceAudioServiceTests {
 
         @Override
         public StoredVoiceAudio upload(String objectKey, org.springframework.web.multipart.MultipartFile file) {
-            throw new BusinessException("AUDIO_STORAGE_FAILED", "Storage failed");
+            throw new BusinessException("AUDIO_UPLOAD_FAILED", "Upload failed");
         }
 
         @Override
         public VoiceAudioPlayback playbackUrl(String storagePublicId, String mimeType) {
-            throw new BusinessException("AUDIO_STORAGE_FAILED", "Storage failed");
+            throw new BusinessException("AUDIO_UPLOAD_FAILED", "Upload failed");
         }
 
         @Override
         public StoredVoiceAudioStream open(String storagePublicId, String mimeType) {
-            throw new BusinessException("AUDIO_STORAGE_FAILED", "Storage failed");
+            throw new BusinessException("AUDIO_OBJECT_MISSING", "Voice audio object is missing");
         }
 
         @Override
         public void delete(String storagePublicId) {
-            throw new BusinessException("AUDIO_STORAGE_FAILED", "Storage failed");
+            throw new BusinessException("AUDIO_UPLOAD_FAILED", "Upload failed");
         }
     }
 
     private static final class MissingStorageService extends FakeStorageService {
         @Override
         public StoredVoiceAudioStream open(String storagePublicId, String mimeType) {
-            throw new BusinessException("AUDIO_NOT_AVAILABLE", "Voice audio is not available", HttpStatus.NOT_FOUND);
+            throw new BusinessException("AUDIO_OBJECT_MISSING", "Voice audio object is missing", HttpStatus.NOT_FOUND);
         }
     }
 

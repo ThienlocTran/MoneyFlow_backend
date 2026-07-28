@@ -223,12 +223,12 @@ public class S3VoiceAudioStorageService implements VoiceAudioStorageService {
     }
 
     private BusinessException storageFailed(String message) {
-        return new BusinessException("AUDIO_STORAGE_FAILED", message, HttpStatus.BAD_GATEWAY);
+        return new BusinessException("AUDIO_UPLOAD_FAILED", message, HttpStatus.BAD_GATEWAY);
     }
 
     private BusinessException playbackFailed(int statusCode) {
         if (statusCode == 404) {
-            return new BusinessException("AUDIO_NOT_AVAILABLE", "Voice audio is not available", HttpStatus.NOT_FOUND);
+            return new BusinessException("AUDIO_OBJECT_MISSING", "Voice audio object is missing", HttpStatus.NOT_FOUND);
         }
         if (statusCode == 401 || statusCode == 403) {
             return new BusinessException("STORAGE_NOT_CONFIGURED", "Voice audio storage is not configured", HttpStatus.SERVICE_UNAVAILABLE);
