@@ -27,6 +27,17 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID>,
         UUID getCategoryId();
     }
 
+    /**
+     * Read-only history row used by the quick entry suggestion engine.
+     */
+    interface SuggestionHistoryRow {
+        UUID getCategoryId();
+        UUID getWalletId();
+        UUID getIncomeSourceId();
+        String getDescription();
+        String getRawInput();
+    }
+
     long countByWorkspaceIdAndCategoryId(UUID workspaceId, UUID categoryId);
     boolean existsByWorkspaceIdAndVoiceRecordIdAndSourceType(UUID workspaceId, UUID voiceRecordId, TransactionSourceType sourceType);
     Optional<Transaction> findByWorkspaceIdAndVoiceRecordIdAndSourceType(UUID workspaceId, UUID voiceRecordId, TransactionSourceType sourceType);
@@ -90,6 +101,28 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID>,
             @Param("workspaceId") UUID workspaceId,
             @Param("userId") UUID userId,
             @Param("transactionType") com.moneyflowbackend.transaction.model.TransactionType transactionType);
+
+    @Query("""
+            SELECT c.id AS categoryId,
+                   w.id AS walletId,
+                   s.id AS incomeSourceId,
+                   t.description AS description,
+                   t.rawInput AS rawInput
+            FROM Transaction t
+            LEFT JOIN t.category c
+            LEFT JOIN t.wallet w
+            LEFT JOIN t.incomeSource s
+            WHERE t.workspace.id = :workspaceId
+              AND t.transactionType = :transactionType
+              AND t.transactionStatus = com.moneyflowbackend.transaction.model.TransactionStatus.POSTED
+              AND t.deletedAt IS NULL
+              AND t.sourceType <> com.moneyflowbackend.transaction.model.TransactionSourceType.EXCEL_MIGRATION
+            ORDER BY t.transactionDate DESC, t.createdAt DESC
+            """)
+    List<SuggestionHistoryRow> findSuggestionHistory(
+            @Param("workspaceId") UUID workspaceId,
+            @Param("transactionType") com.moneyflowbackend.transaction.model.TransactionType transactionType,
+            Pageable pageable);
 
     @Query("""
             SELECT COUNT(t) FROM Transaction t
