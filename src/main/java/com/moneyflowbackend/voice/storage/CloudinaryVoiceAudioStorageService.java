@@ -101,13 +101,13 @@ public class CloudinaryVoiceAudioStorageService implements VoiceAudioStorageServ
             HttpRequest request = HttpRequest.newBuilder(URI.create(playback.playbackUrl())).GET().build();
             HttpResponse<byte[]> response = httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                throw storageFailed("Cloudinary playback failed");
+                throw playbackFailed(response.statusCode());
             }
             return new StoredVoiceAudioStream(response.body(), mimeType, response.body().length);
         } catch (BusinessException ex) {
             throw ex;
         } catch (Exception ex) {
-            throw storageFailed("Cloudinary playback failed");
+            throw storageUnavailable();
         }
     }
 
@@ -227,5 +227,19 @@ public class CloudinaryVoiceAudioStorageService implements VoiceAudioStorageServ
 
     private BusinessException storageFailed(String message) {
         return new BusinessException("AUDIO_STORAGE_FAILED", message, HttpStatus.BAD_GATEWAY);
+    }
+
+    private BusinessException playbackFailed(int statusCode) {
+        if (statusCode == 404) {
+            return new BusinessException("AUDIO_NOT_AVAILABLE", "Voice audio is not available", HttpStatus.NOT_FOUND);
+        }
+        if (statusCode == 401 || statusCode == 403) {
+            return new BusinessException("STORAGE_NOT_CONFIGURED", "Voice audio storage is not configured", HttpStatus.SERVICE_UNAVAILABLE);
+        }
+        return storageUnavailable();
+    }
+
+    private BusinessException storageUnavailable() {
+        return new BusinessException("AUDIO_STORAGE_UNAVAILABLE", "Voice audio storage is temporarily unavailable", HttpStatus.SERVICE_UNAVAILABLE);
     }
 }
