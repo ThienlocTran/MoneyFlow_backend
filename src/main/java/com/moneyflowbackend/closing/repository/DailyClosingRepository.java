@@ -1,6 +1,7 @@
 package com.moneyflowbackend.closing.repository;
 
 import com.moneyflowbackend.closing.model.DailyClosing;
+import com.moneyflowbackend.closing.model.DailyClosingStatus;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -26,6 +27,7 @@ public interface DailyClosingRepository extends JpaRepository<DailyClosing, UUID
     }
 
     Optional<DailyClosing> findByWorkspaceIdAndClosingDate(UUID workspaceId, LocalDate closingDate);
+    Optional<DailyClosing> findTopByWorkspaceIdAndStatusOrderByClosingDateDesc(UUID workspaceId, DailyClosingStatus status);
     boolean existsByWorkspaceIdAndClosingDate(UUID workspaceId, LocalDate closingDate);
 
     @Query("""

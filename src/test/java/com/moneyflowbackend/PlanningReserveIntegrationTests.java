@@ -79,6 +79,10 @@ class PlanningReserveIntegrationTests {
         assertThat(response.reserveBreakdown().savingsGoals()).isEqualByComparingTo("50");
         assertThat(response.reserveBreakdown().emergencyFund()).isEqualByComparingTo("25");
         assertThat(response.reserveBreakdown().total()).isEqualByComparingTo("175");
+        assertThat(response.reservedTotal()).isEqualByComparingTo("175");
+        assertThat(response.breakdown().reserves().total()).isEqualByComparingTo("175");
+        assertThat(response.formula().components()).extracting("label")
+                .containsExactly("Ví khả dụng", "Tiền giữ lại", "Nghĩa vụ định kỳ", "Công nợ phải trả", "Còn được xài");
         assertThat(response.actuallySpendable()).isEqualByComparingTo("825");
         assertThat(response.assumptions()).anyMatch(text -> text.contains("PAUSED, COMPLETED, and ARCHIVED"));
         assertThat(response.warnings()).anyMatch(text -> text.contains("overlap"));
@@ -95,6 +99,7 @@ class PlanningReserveIntegrationTests {
 
         assertThat(response.reserveBreakdown().total()).isEqualByComparingTo("0");
         assertThat(response.actuallySpendable()).isEqualByComparingTo("1000");
+        assertThat(response.warningDetails()).anyMatch(warning -> warning.code().equals("NO_RESERVES_CONFIGURED"));
         assertThat(walletRepository.count()).isEqualTo(walletCount);
         assertThat(transactionRepository.count()).isEqualTo(transactionCount);
     }
