@@ -16,6 +16,7 @@ import java.util.UUID;
 public class VoiceAudioUploadResponse {
     private UUID voiceRecordId;
     private boolean voiceAudioAvailable;
+    private String audioStatus;
     private String voiceAudioStatus;
     private String mimeType;
     private Long fileSizeBytes;

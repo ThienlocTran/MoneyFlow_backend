@@ -330,6 +330,7 @@ public class VoiceAudioService {
         return VoiceAudioUploadResponse.builder()
                 .voiceRecordId(voiceRecord.getId())
                 .voiceAudioAvailable(voiceRecord.getStoragePublicId() != null)
+                .audioStatus(voiceRecord.getVoiceStatus().name())
                 .voiceAudioStatus(voiceRecord.getVoiceStatus().name())
                 .mimeType(voiceRecord.getMimeType())
                 .fileSizeBytes(voiceRecord.getFileSizeBytes())

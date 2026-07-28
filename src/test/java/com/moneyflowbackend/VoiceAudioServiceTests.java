@@ -103,6 +103,7 @@ class VoiceAudioServiceTests {
         var response = ctx.service().uploadAudio(ctx.voiceRecord().getId(), file, 12, ctx.user().getId());
 
         assertThat(response.isVoiceAudioAvailable()).isTrue();
+        assertThat(response.getAudioStatus()).isEqualTo("AUDIO_STORED");
         assertThat(response.getVoiceAudioStatus()).isEqualTo("AUDIO_STORED");
         assertThat(response.getRetentionUntil()).isNull();
         assertThat(ctx.voiceRecord().getStoragePublicId())
