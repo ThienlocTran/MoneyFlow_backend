@@ -270,6 +270,32 @@ class QuickEntryModuleIntegrationTests {
     }
 
     @Test
+    void interestPhrasesAreClassifiedSafely() {
+        TestContext ctx = createContext("qe_interest_voice", WorkspaceRole.OWNER);
+        wallet(ctx, "Tien mat", WalletType.CASH, true, "0");
+        IncomeSource anh = incomeSource(ctx, "Thu nhập của anh");
+
+        QuickEntryPreviewResponse payInterest = quickEntryService.parse(ctx.workspace().getId(), "tôi trả lãi 20k", ctx.user().getId());
+        assertThat(payInterest.getIntentType()).isEqualTo(VoiceIntentType.DEBT_PAYMENT);
+        assertThat(payInterest.getCandidateStatus()).isEqualTo(VoiceCandidateStatus.UNSUPPORTED);
+        assertThat(payInterest.getType()).isNull();
+        assertThat(payInterest.isCommitSupported()).isFalse();
+
+        QuickEntryPreviewResponse payInterestMoney = quickEntryService.parse(ctx.workspace().getId(), "tôi trả tiền lãi 20k", ctx.user().getId());
+        assertThat(payInterestMoney.getIntentType()).isEqualTo(VoiceIntentType.DEBT_PAYMENT);
+        assertThat(payInterestMoney.getCandidateStatus()).isEqualTo(VoiceCandidateStatus.UNSUPPORTED);
+        assertThat(payInterestMoney.getType()).isNull();
+        assertThat(payInterestMoney.isCommitSupported()).isFalse();
+
+        QuickEntryPreviewResponse bankInterest = quickEntryService.parse(ctx.workspace().getId(), "nhận lãi ngân hàng 20k", ctx.user().getId());
+        assertThat(bankInterest.getIntentType()).isEqualTo(VoiceIntentType.TRANSACTION_INCOME);
+        assertThat(bankInterest.getType()).isEqualTo(TransactionType.INCOME);
+        assertThat(bankInterest.getAmount()).isEqualByComparingTo("20000");
+        assertThat(bankInterest.getIncomeSourceId()).isEqualTo(anh.getId());
+        assertThat(bankInterest.getIntentType()).isNotEqualTo(VoiceIntentType.DEBT_PAYMENT);
+    }
+
+    @Test
     void voiceConfirmIsIdempotentPerWorkspaceUserAndKey() {
         TestContext ctx = createContext("qe_voice_idem", WorkspaceRole.OWNER);
         Wallet cash = wallet(ctx, "Tien mat", WalletType.CASH, true, "0");
