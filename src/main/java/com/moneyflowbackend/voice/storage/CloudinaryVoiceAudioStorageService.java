@@ -1,6 +1,9 @@
 package com.moneyflowbackend.voice.storage;
 
 import com.moneyflowbackend.common.exception.BusinessException;
+import com.moneyflowbackend.common.security.LogRedactor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -22,6 +25,7 @@ import java.util.UUID;
 
 public class CloudinaryVoiceAudioStorageService implements VoiceAudioStorageService {
     private static final String PROVIDER = "cloudinary";
+    private static final Logger log = LoggerFactory.getLogger(CloudinaryVoiceAudioStorageService.class);
 
     private final HttpClient httpClient;
     private final Clock clock;
@@ -76,13 +80,16 @@ public class CloudinaryVoiceAudioStorageService implements VoiceAudioStorageServ
                     .build();
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                throw storageFailed("Cloudinary upload failed");
+                log.warn("Cloudinary voice upload failed: status={}, assetFolder={}, publicId={}, body={}",
+                        response.statusCode(), assetFolder, publicId, LogRedactor.redact(response.body()));
+                throw storageFailed("Cloudinary upload failed: status=" + response.statusCode());
             }
             String storedPublicId = publicIdFrom(response.body(), fallbackPublicId);
             return new StoredVoiceAudio(PROVIDER, storedPublicId, "authenticated");
         } catch (BusinessException ex) {
             throw ex;
         } catch (Exception ex) {
+            log.warn("Cloudinary voice upload failed before response: exception={}", ex.getClass().getSimpleName());
             throw storageFailed("Cloudinary upload failed");
         }
     }
