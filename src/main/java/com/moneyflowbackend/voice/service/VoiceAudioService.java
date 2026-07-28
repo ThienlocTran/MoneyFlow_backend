@@ -27,7 +27,6 @@ import org.springframework.web.multipart.MultipartFile;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.YearMonth;
 import java.util.Arrays;
 import java.util.Locale;
 import java.util.Set;
@@ -283,9 +282,12 @@ public class VoiceAudioService {
 
     private String objectKey(VoiceRecord voiceRecord) {
         LocalDate today = LocalDate.now(clock);
-        return "%s/%s/%s.%s".formatted(
-                YearMonth.from(today),
-                today,
+        return "%02d-%d/%02d-%02d-%d/%s.%s".formatted(
+                today.getMonthValue(),
+                today.getYear(),
+                today.getDayOfMonth(),
+                today.getMonthValue(),
+                today.getYear(),
                 UUID.randomUUID(),
                 extension(voiceRecord.getMimeType()));
     }

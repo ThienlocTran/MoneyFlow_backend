@@ -106,7 +106,7 @@ class VoiceAudioServiceTests {
         assertThat(response.getVoiceAudioStatus()).isEqualTo("AUDIO_STORED");
         assertThat(response.getRetentionUntil()).isNull();
         assertThat(ctx.voiceRecord().getStoragePublicId())
-                .startsWith("stored/2026-06/2026-06-15/");
+                .startsWith("stored/06-2026/15-06-2026/");
         assertThat(ctx.voiceRecord().getStorageProvider()).isEqualTo("test");
         assertThat(ctx.voiceRecord().getStorageKey()).isEqualTo(ctx.voiceRecord().getStoragePublicId());
         assertThat(ctx.voiceRecord().getAudioStorageProvider()).isEqualTo("test");

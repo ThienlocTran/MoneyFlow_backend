@@ -58,10 +58,16 @@ public class CloudinaryVoiceAudioStorageService implements VoiceAudioStorageServ
     @Override
     public StoredVoiceAudio upload(String objectKey, MultipartFile file) {
         try {
-            String publicId = folder + "/" + trimSlashes(objectKey);
+            String cleanKey = trimSlashes(objectKey);
+            String assetFolder = folder + parentFolder(cleanKey);
+            String publicId = stripExtension(leaf(cleanKey));
+            String fallbackPublicId = assetFolder + "/" + publicId;
             long timestamp = Instant.now(clock).getEpochSecond();
             Map<String, String> params = signedParams(Map.of(
                     "public_id", publicId,
+                    "asset_folder", assetFolder,
+                    "use_asset_folder_as_public_id_prefix", "true",
+                    "resource_type", "video",
                     "timestamp", String.valueOf(timestamp),
                     "type", "authenticated",
                     "overwrite", "true"));
@@ -74,7 +80,7 @@ public class CloudinaryVoiceAudioStorageService implements VoiceAudioStorageServ
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
                 throw storageFailed("Cloudinary upload failed");
             }
-            String storedPublicId = publicIdFrom(response.body(), publicId);
+            String storedPublicId = publicIdFrom(response.body(), fallbackPublicId);
             return new StoredVoiceAudio(PROVIDER, storedPublicId, "authenticated");
         } catch (BusinessException ex) {
             throw ex;
@@ -226,6 +232,21 @@ public class CloudinaryVoiceAudioStorageService implements VoiceAudioStorageServ
 
     private String trimSlashes(String value) {
         return value.replaceAll("^/+", "").replaceAll("/+$", "");
+    }
+
+    private String parentFolder(String value) {
+        int slash = value.lastIndexOf('/');
+        return slash < 0 ? "" : "/" + value.substring(0, slash);
+    }
+
+    private String leaf(String value) {
+        int slash = value.lastIndexOf('/');
+        return slash < 0 ? value : value.substring(slash + 1);
+    }
+
+    private String stripExtension(String value) {
+        int dot = value.lastIndexOf('.');
+        return dot <= 0 ? value : value.substring(0, dot);
     }
 
     private String format(String mimeType, String publicId) {

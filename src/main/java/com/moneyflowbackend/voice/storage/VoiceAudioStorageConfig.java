@@ -22,6 +22,7 @@ public class VoiceAudioStorageConfig {
             @Value("${MONEYFLOW_CLOUDINARY_CLOUD_NAME:}") String cloudName,
             @Value("${MONEYFLOW_CLOUDINARY_API_KEY:}") String apiKey,
             @Value("${MONEYFLOW_CLOUDINARY_API_SECRET:}") String apiSecret,
+            @Value("${moneyflow.cloudinary.base-folder:${MONEYFLOW_CLOUDINARY_BASE_FOLDER:}}") String cloudinaryBaseFolder,
             @Value("${MONEYFLOW_AUDIO_FOLDER:}") String folder,
             @Value("${VOICE_AUDIO_S3_BUCKET:moneyflow-voice-audio}") String s3Bucket,
             @Value("${VOICE_AUDIO_S3_REGION:auto}") String s3Region,
@@ -67,7 +68,7 @@ public class VoiceAudioStorageConfig {
                 cloudName,
                 apiKey,
                 apiSecret,
-                resolveFolder(folder, environment));
+                resolveCloudinaryFolder(cloudinaryBaseFolder, environment));
     }
 
     public static String resolveFolder(String configured, Environment environment) {
@@ -77,6 +78,21 @@ public class VoiceAudioStorageConfig {
         boolean production = Arrays.stream(environment.getActiveProfiles())
                 .anyMatch("production"::equalsIgnoreCase);
         return production ? "production/voice" : "dev/voice";
+    }
+
+    public static String resolveCloudinaryFolder(String baseFolder, Environment environment) {
+        String root = !isBlank(baseFolder) ? trimSlashes(baseFolder) : environmentRoot(environment);
+        return root + "/voice";
+    }
+
+    private static String environmentRoot(Environment environment) {
+        boolean production = Arrays.stream(environment.getActiveProfiles())
+                .anyMatch(profile -> "production".equalsIgnoreCase(profile) || "prod".equalsIgnoreCase(profile));
+        return production ? "production" : "dev";
+    }
+
+    private static String trimSlashes(String value) {
+        return value.replaceAll("^/+", "").replaceAll("/+$", "");
     }
 
     private static boolean isBlank(String value) {

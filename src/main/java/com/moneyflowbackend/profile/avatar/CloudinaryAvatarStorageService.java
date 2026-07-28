@@ -50,9 +50,13 @@ public class CloudinaryAvatarStorageService implements AvatarStorageService {
     @Override
     public String upload(String objectKey, MultipartFile file) {
         try {
-            String publicId = baseFolder + "/" + trimSlashes(objectKey);
+            String cleanKey = trimSlashes(objectKey);
+            String assetFolder = baseFolder + parentFolder(cleanKey);
+            String publicId = leaf(cleanKey);
             Map<String, String> params = signedParams(Map.of(
                     "public_id", publicId,
+                    "asset_folder", assetFolder,
+                    "use_asset_folder_as_public_id_prefix", "true",
                     "timestamp", String.valueOf(Instant.now(clock).getEpochSecond()),
                     "overwrite", "true"));
             String boundary = "MoneyFlowBoundary" + UUID.randomUUID();
@@ -64,7 +68,7 @@ public class CloudinaryAvatarStorageService implements AvatarStorageService {
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
                 throw storageFailed();
             }
-            return jsonString(response.body(), "secure_url", cloudinaryUrl(publicId));
+            return jsonString(response.body(), "secure_url", cloudinaryUrl(assetFolder + "/" + publicId));
         } catch (BusinessException ex) {
             throw ex;
         } catch (Exception ex) {
@@ -188,6 +192,16 @@ public class CloudinaryAvatarStorageService implements AvatarStorageService {
 
     private String trimSlashes(String value) {
         return value.replaceAll("^/+", "").replaceAll("/+$", "");
+    }
+
+    private String parentFolder(String value) {
+        int slash = value.lastIndexOf('/');
+        return slash < 0 ? "" : "/" + value.substring(0, slash);
+    }
+
+    private String leaf(String value) {
+        int slash = value.lastIndexOf('/');
+        return slash < 0 ? value : value.substring(slash + 1);
     }
 
     private BusinessException storageFailed() {
