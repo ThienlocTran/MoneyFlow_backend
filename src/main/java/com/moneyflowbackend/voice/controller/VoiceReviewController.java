@@ -43,12 +43,30 @@ public class VoiceReviewController {
         return ResponseEntity.ok(ApiResponse.ok("Voice review draft validated", voiceReviewService.patchDraft(workspaceId, voiceRecordId, req, currentUserId())));
     }
 
+    @PatchMapping("/{voiceRecordId}/drafts/{draftId}")
+    public ResponseEntity<ApiResponse<VoiceReviewDraftResponse>> patchDraftItem(
+            @PathVariable UUID workspaceId,
+            @PathVariable UUID voiceRecordId,
+            @PathVariable String draftId,
+            @RequestBody VoiceReviewDraftRequest req) {
+        return ResponseEntity.ok(ApiResponse.ok("Voice review draft validated", voiceReviewService.patchDraft(workspaceId, voiceRecordId, draftId, req, currentUserId())));
+    }
+
     @PostMapping("/{voiceRecordId}/confirm")
     public ResponseEntity<ApiResponse<VoiceReviewConfirmResponse>> confirm(
             @PathVariable UUID workspaceId,
             @PathVariable UUID voiceRecordId,
             @RequestBody VoiceReviewConfirmRequest req) {
         return ResponseEntity.ok(ApiResponse.ok("Voice review transaction posted", voiceReviewService.confirm(workspaceId, voiceRecordId, req, currentUserId())));
+    }
+
+    @PostMapping("/{voiceRecordId}/drafts/{draftId}/confirm")
+    public ResponseEntity<ApiResponse<VoiceReviewConfirmResponse>> confirmDraftItem(
+            @PathVariable UUID workspaceId,
+            @PathVariable UUID voiceRecordId,
+            @PathVariable String draftId,
+            @RequestBody(required = false) VoiceReviewConfirmRequest req) {
+        return ResponseEntity.ok(ApiResponse.ok("Voice review transaction posted", voiceReviewService.confirmDraft(workspaceId, voiceRecordId, draftId, req, currentUserId())));
     }
 
     private UUID currentUserId() {

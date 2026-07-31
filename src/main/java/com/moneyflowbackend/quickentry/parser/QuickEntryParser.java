@@ -40,7 +40,7 @@ public class QuickEntryParser {
             "hoan tien", "gia dinh gui", "kiem duoc", "kiem tien", "nhan luong", "duoc tra", "duoc chuyen");
     private static final Set<String> EXPENSE_WORDS = Set.of(
             "chi", "mua", "tra", "dong", "dong tien", "thanh toan", "an", "uong", "cafe",
-            "ca phe", "xang", "gui xe");
+            "ca phe", "xang", "do xang", "gui xe", "het", "cua hang");
     private static final List<AliasRule> CATEGORY_ALIASES = List.of(
             new AliasRule(CategoryType.EXPENSE, List.of("do an ngoai", "mua do an ngoai", "an ngoai"),
                     List.of("Mua do an ngoai")),

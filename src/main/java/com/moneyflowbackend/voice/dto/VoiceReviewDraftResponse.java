@@ -19,13 +19,18 @@ import java.util.UUID;
 public class VoiceReviewDraftResponse {
     private UUID voiceRecordId;
     private String transcript;
+    private String mode;
     private String status;
     private String confidence;
     private Candidate candidate;
     @Builder.Default
     private List<String> warnings = new ArrayList<>();
     @Builder.Default
+    private List<Warning> warningDetails = new ArrayList<>();
+    @Builder.Default
     private List<Suggestion> suggestions = new ArrayList<>();
+    @Builder.Default
+    private List<DraftItem> drafts = new ArrayList<>();
     private String audioStatus;
 
     @Data
@@ -57,6 +62,33 @@ public class VoiceReviewDraftResponse {
     public static class Suggestion {
         private String field;
         private String reason;
+        private String message;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    public static class DraftItem {
+        private String draftId;
+        private int index;
+        private String sourceText;
+        private String confidence;
+        private Candidate candidate;
+        @Builder.Default
+        private List<Warning> warnings = new ArrayList<>();
+        @Builder.Default
+        private List<Suggestion> suggestions = new ArrayList<>();
+        private boolean canConfirm;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    public static class Warning {
+        private String code;
+        private String field;
         private String message;
     }
 }

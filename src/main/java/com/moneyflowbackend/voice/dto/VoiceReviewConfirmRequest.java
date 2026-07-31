@@ -4,5 +4,6 @@ import lombok.Data;
 
 @Data
 public class VoiceReviewConfirmRequest {
+    private String draftId;
     private VoiceReviewDraftRequest candidate;
 }
