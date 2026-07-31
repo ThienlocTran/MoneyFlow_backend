@@ -29,7 +29,6 @@ import java.nio.charset.StandardCharsets;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.startsWith;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -91,57 +90,6 @@ class ProfileAvatarIntegrationTests {
     }
 
     @Test
-    void replacementDeletesPreviousAvatarAfterNewUploadSucceeds() throws Exception {
-        TokenResponse token = createUser("avatar_replace");
-        User user = userRepository.findById(token.getUser().getId()).orElseThrow();
-        user.setAvatarUrl("https://cdn.example/old-avatar.png");
-        userRepository.save(user);
-        MockMultipartFile file = new MockMultipartFile("file", "avatar.png", "image/png", new byte[] {1});
-
-        mockMvc.perform(multipart("/api/me/avatar")
-                        .file(file)
-                        .header("Authorization", bearer(token)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.avatarUrl").value(startsWith("https://cdn.example/avatars/" + token.getUser().getId() + "/")));
-
-        assertThat(avatarStorageService.deletedAvatarUrl).isEqualTo("https://cdn.example/old-avatar.png");
-    }
-
-    @Test
-    void replacementKeepsNewAvatarWhenOldCleanupFails() throws Exception {
-        TokenResponse token = createUser("avatar_replace_cleanup_fail");
-        User user = userRepository.findById(token.getUser().getId()).orElseThrow();
-        user.setAvatarUrl("https://cdn.example/old-avatar.png");
-        userRepository.save(user);
-        avatarStorageService.failDelete = true;
-        MockMultipartFile file = new MockMultipartFile("file", "avatar.png", "image/png", new byte[] {1});
-
-        mockMvc.perform(multipart("/api/me/avatar")
-                        .file(file)
-                        .header("Authorization", bearer(token)))
-                .andExpect(status().isOk());
-
-        assertThat(userRepository.findById(token.getUser().getId()).orElseThrow().getAvatarUrl())
-                .startsWith("https://cdn.example/avatars/" + token.getUser().getId() + "/");
-    }
-
-    @Test
-    void deleteAvatarClearsProfileAndDeletesStoredAvatar() throws Exception {
-        TokenResponse token = createUser("avatar_delete");
-        User user = userRepository.findById(token.getUser().getId()).orElseThrow();
-        user.setAvatarUrl("https://cdn.example/delete-me.png");
-        userRepository.save(user);
-
-        mockMvc.perform(delete("/api/me/avatar")
-                        .header("Authorization", bearer(token)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.avatarUrl").doesNotExist());
-
-        assertThat(userRepository.findById(token.getUser().getId()).orElseThrow().getAvatarUrl()).isNull();
-        assertThat(avatarStorageService.deletedAvatarUrl).isEqualTo("https://cdn.example/delete-me.png");
-    }
-
-    @Test
     void updateProfileDoesNotClearAvatarUrlWhenAvatarMissingOrBlank() throws Exception {
         TokenResponse token = createUser("avatar_profile_update");
         User user = userRepository.findById(token.getUser().getId()).orElseThrow();
@@ -173,7 +121,8 @@ class ProfileAvatarIntegrationTests {
                         .file(file)
                         .header("Authorization", bearer(token)))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("INVALID_AVATAR_FILE_TYPE"));
+                .andExpect(jsonPath("$.code").value("INVALID_AVATAR_FILE_TYPE"))
+                .andExpect(jsonPath("$.message").value("Ảnh đại diện phải là JPEG, PNG hoặc WebP."));
     }
 
     @Test
@@ -183,7 +132,8 @@ class ProfileAvatarIntegrationTests {
         mockMvc.perform(multipart("/api/me/avatar")
                         .header("Authorization", bearer(token)))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("AVATAR_FILE_REQUIRED"));
+                .andExpect(jsonPath("$.code").value("AVATAR_FILE_REQUIRED"))
+                .andExpect(jsonPath("$.message").value("Vui lòng chọn ảnh đại diện."));
     }
 
     @Test
@@ -195,7 +145,8 @@ class ProfileAvatarIntegrationTests {
                         .file(file)
                         .header("Authorization", bearer(token)))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("AVATAR_FILE_TOO_LARGE"));
+                .andExpect(jsonPath("$.code").value("AVATAR_FILE_TOO_LARGE"))
+                .andExpect(jsonPath("$.message").value("Ảnh đại diện không được vượt quá 2MB."));
     }
 
     @Test
@@ -208,7 +159,8 @@ class ProfileAvatarIntegrationTests {
                         .file(file)
                         .header("Authorization", bearer(token)))
                 .andExpect(status().isServiceUnavailable())
-                .andExpect(jsonPath("$.code").value("STORAGE_NOT_CONFIGURED"));
+                .andExpect(jsonPath("$.code").value("STORAGE_NOT_CONFIGURED"))
+                .andExpect(jsonPath("$.message").value("Dịch vụ lưu trữ chưa được cấu hình. Vui lòng kiểm tra cấu hình máy chủ."));
     }
 
     @Test
@@ -221,7 +173,8 @@ class ProfileAvatarIntegrationTests {
                         .file(file)
                         .header("Authorization", bearer(token)))
                 .andExpect(status().isBadGateway())
-                .andExpect(jsonPath("$.code").value("AVATAR_STORAGE_FAILED"));
+                .andExpect(jsonPath("$.code").value("AVATAR_STORAGE_FAILED"))
+                .andExpect(jsonPath("$.message").value("Tải ảnh đại diện thất bại. Vui lòng thử lại."));
     }
 
     @Test
@@ -268,17 +221,13 @@ class ProfileAvatarIntegrationTests {
 
     static class FakeAvatarStorageService implements AvatarStorageService {
         private String lastObjectKey;
-        private String deletedAvatarUrl;
         private boolean enabled = true;
         private boolean failUpload;
-        private boolean failDelete;
 
         void reset() {
             lastObjectKey = null;
-            deletedAvatarUrl = null;
             enabled = true;
             failUpload = false;
-            failDelete = false;
         }
 
         @Override
@@ -293,14 +242,6 @@ class ProfileAvatarIntegrationTests {
             }
             lastObjectKey = objectKey;
             return "https://cdn.example/" + objectKey + ".png";
-        }
-
-        @Override
-        public void delete(String avatarUrl) {
-            if (failDelete) {
-                throw new BusinessException("AVATAR_STORAGE_FAILED", "provider secret detail", HttpStatus.BAD_GATEWAY);
-            }
-            deletedAvatarUrl = avatarUrl;
         }
     }
 }
