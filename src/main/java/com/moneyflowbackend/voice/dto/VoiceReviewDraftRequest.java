@@ -9,6 +9,7 @@ import java.util.UUID;
 
 @Data
 public class VoiceReviewDraftRequest {
+    private String draftId;
     private VoiceReviewDraftType type;
     private BigDecimal amount;
     private OffsetDateTime occurredAt;

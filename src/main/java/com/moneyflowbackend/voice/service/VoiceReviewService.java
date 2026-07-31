@@ -110,6 +110,18 @@ public class VoiceReviewService {
     }
 
     @Transactional
+    public VoiceReviewDraftResponse patchDraft(UUID workspaceId, UUID voiceRecordId, String draftId, VoiceReviewDraftRequest req, UUID userId) {
+        Workspace workspace = requireWritableMember(workspaceId, userId).getWorkspace();
+        VoiceRecord record = voiceRecord(workspaceId, voiceRecordId);
+        requireDraft(workspaceId, record, draftId, userId);
+        if (req != null) {
+            req.setDraftId(draftId);
+        }
+        String transcript = record.getEditedTranscript() != null ? record.getEditedTranscript() : record.getOriginalTranscript();
+        return fromDraftItem(workspace, record, transcript, draftId, validateDraft(workspaceId, req, false));
+    }
+
+    @Transactional
     public VoiceReviewConfirmResponse confirm(UUID workspaceId, UUID voiceRecordId, VoiceReviewConfirmRequest req, UUID userId) {
         Workspace workspace = requireWritableMember(workspaceId, userId).getWorkspace();
         VoiceRecord record = voiceRecord(workspaceId, voiceRecordId);
@@ -130,6 +142,33 @@ public class VoiceReviewService {
                 "voice-review:" + voiceRecordId);
         record.setVoiceStatus(VoiceRecordStatus.CONFIRMED);
         voiceRecordRepository.save(record);
+        return confirmResponse(record, tx);
+    }
+
+    @Transactional
+    public VoiceReviewConfirmResponse confirmDraft(UUID workspaceId, UUID voiceRecordId, String draftId, VoiceReviewConfirmRequest req, UUID userId) {
+        Workspace workspace = requireWritableMember(workspaceId, userId).getWorkspace();
+        VoiceRecord record = voiceRecord(workspaceId, voiceRecordId);
+        String sourceReference = draftSourceReference(voiceRecordId, draftId);
+        var existing = transactionRepository.findSourceReferenceMatches(workspaceId, userId, TransactionSourceType.VOICE, sourceReference);
+        if (!existing.isEmpty()) {
+            return confirmResponse(record, transactionService.mapExistingToResponse(existing.get(0)));
+        }
+        VoiceReviewDraftRequest candidate = req == null ? null : req.getCandidate();
+        if (candidate == null) {
+            candidate = toRequest(requireDraft(workspaceId, record, draftId, userId).getCandidate());
+        } else {
+            candidate.setDraftId(draftId);
+        }
+        DraftValidation validation = validateDraft(workspaceId, candidate, true);
+        TransactionResponse tx = transactionService.createWithSource(
+                workspaceId,
+                toTransactionRequest(toQuickEntryConfirm(workspace, validation)),
+                userId,
+                TransactionSourceType.VOICE,
+                requireDraft(workspaceId, record, draftId, userId).getSourceText(),
+                voiceRecordId,
+                sourceReference);
         return confirmResponse(record, tx);
     }
 
@@ -182,11 +221,14 @@ public class VoiceReviewService {
         return VoiceReviewDraftResponse.builder()
                 .voiceRecordId(record.getId())
                 .transcript(preview.getRawInput())
+                .mode(drafts(workspace, preview).size() > 1 ? "MULTI" : "SINGLE")
                 .status("NEEDS_REVIEW")
                 .confidence(confidence(preview.getConfidence()))
                 .candidate(candidate)
-                .warnings(preview.getWarnings() == null ? List.of() : preview.getWarnings())
+                .warnings(topWarnings(workspace, preview))
+                .warningDetails(warnings(topWarnings(workspace, preview)))
                 .suggestions(suggestions(candidate.getNeedsFields()))
+                .drafts(drafts(workspace, preview))
                 .audioStatus(audioStatus(record))
                 .build();
     }
@@ -195,12 +237,111 @@ public class VoiceReviewService {
         return VoiceReviewDraftResponse.builder()
                 .voiceRecordId(record.getId())
                 .transcript(transcript)
+                .mode("SINGLE")
                 .status("NEEDS_REVIEW")
                 .confidence(validation.needsFields().isEmpty() ? "HIGH" : "LOW")
                 .candidate(validation.candidate())
                 .warnings(validation.warnings())
+                .warningDetails(warnings(validation.warnings()))
                 .suggestions(suggestions(validation.candidate().getNeedsFields()))
+                .drafts(List.of(draftItem(normalize(validation.candidate().getNote()), "draft", 0, validation.candidate(), validation.warnings(), validation.needsFields().isEmpty())))
                 .audioStatus(audioStatus(record))
+                .build();
+    }
+
+    private VoiceReviewDraftResponse fromDraftItem(Workspace workspace, VoiceRecord record, String transcript, String draftId, DraftValidation validation) {
+        VoiceReviewDraftResponse response = fromCandidate(workspace, record, transcript, validation);
+        response.getDrafts().get(0).setDraftId(draftId);
+        response.getDrafts().get(0).setCanConfirm(canConfirm(validation.candidate()));
+        return response;
+    }
+
+    private List<String> topWarnings(Workspace workspace, QuickEntryPreviewResponse preview) {
+        List<String> warnings = new ArrayList<>(preview.getWarnings() == null ? List.of() : preview.getWarnings());
+        if (drafts(workspace, preview).size() > 1 && !warnings.contains("MULTIPLE_AMOUNTS_DETECTED")) {
+            warnings.add("MULTIPLE_AMOUNTS_DETECTED");
+        }
+        return warnings;
+    }
+
+    private List<VoiceReviewDraftResponse.DraftItem> drafts(Workspace workspace, QuickEntryPreviewResponse preview) {
+        List<QuickEntryPreviewResponse.Candidate> candidates = preview.getCandidates() == null ? List.of() : preview.getCandidates();
+        if (candidates.isEmpty()) {
+            return List.of(draftItem(preview.getRawInput(), preview.getCandidateId(), 0, candidate(workspace, preview), preview.getWarnings(), preview.isReadyToConfirm()));
+        }
+        List<VoiceReviewDraftResponse.DraftItem> items = new ArrayList<>();
+        for (int i = 0; i < candidates.size(); i++) {
+            QuickEntryPreviewResponse.Candidate c = candidates.get(i);
+            items.add(draftItem(c.getOriginalText(), c.getCandidateId(), i, candidate(workspace, c), c.getWarnings(), c.isReadyToConfirm()));
+        }
+        return items;
+    }
+
+    private VoiceReviewDraftResponse.DraftItem draftItem(String sourceText, String draftId, int index, VoiceReviewDraftResponse.Candidate candidate, List<String> warningCodes, boolean ready) {
+        List<String> codes = new ArrayList<>(warningCodes == null ? List.of() : warningCodes);
+        if (candidate.getType() == VoiceReviewDraftType.INCOME && candidate.getWalletId() == null && !codes.contains("INCOME_WALLET_NOT_SELECTED")) {
+            codes.add("INCOME_WALLET_NOT_SELECTED");
+        }
+        if (!supported(candidate.getType()) && !codes.contains("DRAFT_UNSUPPORTED_TYPE")) {
+            codes.add("DRAFT_UNSUPPORTED_TYPE");
+        }
+        return VoiceReviewDraftResponse.DraftItem.builder()
+                .draftId(draftId)
+                .index(index)
+                .sourceText(sourceText)
+                .confidence(ready ? "HIGH" : "LOW")
+                .candidate(candidate)
+                .warnings(warnings(codes))
+                .suggestions(suggestions(candidate.getNeedsFields()))
+                .canConfirm(ready && canConfirm(candidate))
+                .build();
+    }
+
+    private VoiceReviewDraftResponse.Candidate candidate(Workspace workspace, QuickEntryPreviewResponse preview) {
+        VoiceReviewDraftType draftType = type(preview.getIntentType(), preview.getType());
+        List<String> needsFields = fields(preview.getMissingFields());
+        if (draftType == VoiceReviewDraftType.INCOME && preview.getWalletId() == null) {
+            needsFields = needsFields.stream().filter(field -> !field.equals("walletId")).toList();
+        }
+        return VoiceReviewDraftResponse.Candidate.builder()
+                .type(draftType)
+                .amount(preview.getAmount())
+                .currency(currency(workspace))
+                .occurredAt(occurredAt(workspace, preview.getTransactionDate(), preview.getTransactionTime()))
+                .walletId(preview.getWalletId())
+                .walletName(preview.getWalletName())
+                .categoryId(preview.getCategoryId())
+                .categoryName(preview.getCategoryName())
+                .incomeSourceId(preview.getIncomeSourceId())
+                .incomeSourceName(preview.getIncomeSourceName())
+                .note(preview.getDescription())
+                .scope(preview.getSpendingScope())
+                .affectsWalletBalance(preview.getWalletId() != null && (preview.getType() == TransactionType.EXPENSE || preview.getType() == TransactionType.INCOME))
+                .needsFields(needsFields)
+                .build();
+    }
+
+    private VoiceReviewDraftResponse.Candidate candidate(Workspace workspace, QuickEntryPreviewResponse.Candidate preview) {
+        VoiceReviewDraftType draftType = type(preview.getIntentType(), preview.getType());
+        List<String> needsFields = fields(preview.getMissingFields());
+        if (draftType == VoiceReviewDraftType.INCOME && preview.getWalletId() == null) {
+            needsFields = needsFields.stream().filter(field -> !field.equals("walletId")).toList();
+        }
+        return VoiceReviewDraftResponse.Candidate.builder()
+                .type(draftType)
+                .amount(preview.getAmount())
+                .currency(currency(workspace))
+                .occurredAt(occurredAt(workspace, preview.getTransactionDate(), preview.getTransactionTime()))
+                .walletId(preview.getWalletId())
+                .walletName(preview.getWalletName())
+                .categoryId(preview.getCategoryId())
+                .categoryName(preview.getCategoryName())
+                .incomeSourceId(preview.getIncomeSourceId())
+                .incomeSourceName(preview.getIncomeSourceName())
+                .note(preview.getDescription())
+                .scope(preview.getSpendingScope())
+                .affectsWalletBalance(preview.getWalletId() != null && (preview.getType() == TransactionType.EXPENSE || preview.getType() == TransactionType.INCOME))
+                .needsFields(needsFields)
                 .build();
     }
 
@@ -373,6 +514,83 @@ public class VoiceReviewService {
                         .message(message(field))
                         .build())
                 .toList();
+    }
+
+    private List<VoiceReviewDraftResponse.Warning> warnings(List<String> codes) {
+        if (codes == null) return List.of();
+        return codes.stream()
+                .distinct()
+                .map(code -> VoiceReviewDraftResponse.Warning.builder()
+                        .code(code)
+                        .field(warningField(code))
+                        .message(warningMessage(code))
+                        .build())
+                .toList();
+    }
+
+    private String warningField(String code) {
+        return switch (code) {
+            case "INCOME_WALLET_NOT_SELECTED", "MISSING_WALLET" -> "walletId";
+            case "MISSING_CATEGORY", "CATEGORY_TYPE_MISMATCH", "UNKNOWN_CATEGORY" -> "categoryId";
+            case "MISSING_INCOMESOURCE" -> "incomeSourceId";
+            default -> null;
+        };
+    }
+
+    private String warningMessage(String code) {
+        return switch (code) {
+            case "MULTIPLE_AMOUNTS_DETECTED", "MULTIPLE_ITEMS_DETECTED" -> "Đã phát hiện nhiều khoản, hãy kiểm tra từng dòng trước khi lưu.";
+            case "INCOME_WALLET_NOT_SELECTED", "MISSING_WALLET" -> "Chọn ví trước khi lưu khoản này.";
+            case "UNSUPPORTED_INTENT", "DRAFT_UNSUPPORTED_TYPE", "VOICE_INTENT_NOT_COMMITTABLE" -> "Loại khoản này chưa hỗ trợ ghi sổ trực tiếp.";
+            case "CATEGORY_TYPE_MISMATCH" -> "Danh mục không khớp loại khoản.";
+            case "MISSING_CATEGORY", "UNKNOWN_CATEGORY" -> "Chọn danh mục trước khi lưu khoản này.";
+            case "MISSING_INCOMESOURCE" -> "Chọn nguồn thu trước khi lưu khoản này.";
+            default -> "Hãy kiểm tra khoản này trước khi lưu.";
+        };
+    }
+
+    private boolean supported(VoiceReviewDraftType type) {
+        return type == VoiceReviewDraftType.EXPENSE || type == VoiceReviewDraftType.INCOME;
+    }
+
+    private boolean canConfirm(VoiceReviewDraftResponse.Candidate candidate) {
+        if (candidate == null || !supported(candidate.getType())) return false;
+        if (candidate.getAmount() == null || candidate.getAmount().compareTo(BigDecimal.ZERO) <= 0) return false;
+        if (candidate.getOccurredAt() == null || candidate.getWalletId() == null) return false;
+        if (candidate.getType() == VoiceReviewDraftType.EXPENSE) return candidate.getCategoryId() != null;
+        return candidate.getIncomeSourceId() != null;
+    }
+
+    private VoiceReviewDraftRequest toRequest(VoiceReviewDraftResponse.Candidate candidate) {
+        VoiceReviewDraftRequest req = new VoiceReviewDraftRequest();
+        req.setType(candidate.getType());
+        req.setAmount(candidate.getAmount());
+        req.setOccurredAt(candidate.getOccurredAt());
+        req.setWalletId(candidate.getWalletId());
+        req.setCategoryId(candidate.getCategoryId());
+        req.setIncomeSourceId(candidate.getIncomeSourceId());
+        req.setNote(candidate.getNote());
+        req.setScope(candidate.getScope());
+        return req;
+    }
+
+    private VoiceReviewDraftResponse.DraftItem requireDraft(UUID workspaceId, VoiceRecord record, String draftId, UUID userId) {
+        String normalizedDraftId = normalize(draftId);
+        if (normalizedDraftId == null) {
+            throw new BusinessException("VOICE_DRAFT_NOT_FOUND", "Không tìm thấy draft giọng nói.", HttpStatus.NOT_FOUND);
+        }
+        QuickEntryPreviewResponse preview = quickEntryService.parse(workspaceId,
+                record.getEditedTranscript() != null ? record.getEditedTranscript() : record.getOriginalTranscript(),
+                userId);
+        Workspace workspace = record.getWorkspace();
+        return drafts(workspace, preview).stream()
+                .filter(draft -> normalizedDraftId.equals(draft.getDraftId()))
+                .findFirst()
+                .orElseThrow(() -> new BusinessException("VOICE_DRAFT_NOT_FOUND", "Không tìm thấy draft giọng nói.", HttpStatus.NOT_FOUND));
+    }
+
+    private String draftSourceReference(UUID voiceRecordId, String draftId) {
+        return "voice-review:" + voiceRecordId + ":" + normalize(draftId);
     }
 
     private String reason(String field) {

@@ -76,7 +76,44 @@ class VoiceReviewIntegrationTests {
         assertThat(response.getCandidate().getWalletId()).isEqualTo(cash.getId());
         assertThat(response.getCandidate().getCategoryId()).isEqualTo(gas.getId());
         assertThat(response.getCandidate().isAffectsWalletBalance()).isTrue();
+        assertThat(response.getMode()).isEqualTo("SINGLE");
+        assertThat(response.getDrafts()).hasSize(1);
         assertThat(transactionRepository.count()).isEqualTo(before);
+    }
+
+    @Test
+    void parseIncomeReturnsSingleDraftWithoutInventingWallet() {
+        TestContext ctx = context("voice_review_income_single", WorkspaceRole.OWNER);
+        wallet(ctx, "Cash");
+
+        VoiceReviewDraftResponse response = voiceReviewService.parse(ctx.workspace().getId(), parse("hôm nay tôi kiếm được 800"), ctx.user().getId());
+
+        assertThat(response.getMode()).isEqualTo("SINGLE");
+        assertThat(response.getDrafts()).hasSize(1);
+        assertThat(response.getCandidate().getType()).isEqualTo(VoiceReviewDraftType.INCOME);
+        assertThat(response.getCandidate().getAmount()).isEqualByComparingTo("800000");
+        assertThat(response.getCandidate().getWalletId()).isNull();
+    }
+
+    @Test
+    void multiTranscriptReturnsSeparateDraftsWithUnsupportedSavings() {
+        TestContext ctx = context("voice_review_multi", WorkspaceRole.OWNER);
+        Category gas = category(ctx, "Xăng xe", CategoryType.EXPENSE);
+        keyword(ctx, gas, "xăng");
+
+        VoiceReviewDraftResponse response = voiceReviewService.parse(ctx.workspace().getId(), parse("Hôm nay tôi kiếm được 800 cho đổ xăng hết 60.000 cửa hàng hết 50.000 tôi gửi tiết kiệm 85"), ctx.user().getId());
+
+        assertThat(response.getMode()).isEqualTo("MULTI");
+        assertThat(response.getWarnings()).contains("MULTIPLE_AMOUNTS_DETECTED");
+        assertThat(response.getDrafts()).hasSize(4);
+        assertThat(response.getDrafts()).extracting(draft -> draft.getCandidate().getType())
+                .containsExactly(VoiceReviewDraftType.INCOME, VoiceReviewDraftType.EXPENSE, VoiceReviewDraftType.EXPENSE, VoiceReviewDraftType.SAVINGS);
+        assertThat(response.getDrafts()).extracting(draft -> draft.getCandidate().getAmount())
+                .containsExactly(new BigDecimal("800000"), new BigDecimal("60000"), new BigDecimal("50000"), new BigDecimal("85000"));
+        assertThat(response.getDrafts().get(0).getCandidate().getWalletId()).isNull();
+        assertThat(response.getDrafts().get(1).getCandidate().getCategoryId()).isEqualTo(gas.getId());
+        assertThat(response.getDrafts().get(3).isCanConfirm()).isFalse();
+        assertThat(response.getDrafts().get(3).getWarnings()).extracting("code").contains("DRAFT_UNSUPPORTED_TYPE");
     }
 
     @Test
@@ -125,6 +162,49 @@ class VoiceReviewIntegrationTests {
     }
 
     @Test
+    void confirmOneDraftDoesNotConfirmAllAndIsIdempotent() {
+        Fixture fixture = fixture("voice_review_confirm_one");
+        VoiceReviewDraftResponse parsed = voiceReviewService.parse(fixture.ctx().workspace().getId(), parse("đổ xăng hết 60.000 ăn hết 50.000"), fixture.ctx().user().getId());
+        VoiceReviewDraftResponse.DraftItem firstDraft = parsed.getDrafts().get(0);
+        VoiceReviewConfirmRequest req = new VoiceReviewConfirmRequest();
+        req.setCandidate(draft(VoiceReviewDraftType.EXPENSE, "60000", fixture.cash(), fixture.gas(), null, "gas"));
+
+        VoiceReviewConfirmResponse first = voiceReviewService.confirmDraft(fixture.ctx().workspace().getId(), parsed.getVoiceRecordId(), firstDraft.getDraftId(), req, fixture.ctx().user().getId());
+        VoiceReviewConfirmResponse replay = voiceReviewService.confirmDraft(fixture.ctx().workspace().getId(), parsed.getVoiceRecordId(), firstDraft.getDraftId(), req, fixture.ctx().user().getId());
+
+        assertThat(replay.getTransactionId()).isEqualTo(first.getTransactionId());
+        assertThat(transactionRepository.findAllByWorkspaceIdAndVoiceRecordIdAndSourceTypeOrderByCreatedAtAsc(
+                fixture.ctx().workspace().getId(), parsed.getVoiceRecordId(), com.moneyflowbackend.transaction.model.TransactionSourceType.VOICE)).hasSize(1);
+    }
+
+    @Test
+    void patchDraftIdUpdatesOnlyRequestedDraft() {
+        Fixture fixture = fixture("voice_review_patch_one");
+        VoiceReviewDraftResponse parsed = voiceReviewService.parse(fixture.ctx().workspace().getId(), parse("đổ xăng hết 60.000 ăn hết 50.000"), fixture.ctx().user().getId());
+        String secondDraftId = parsed.getDrafts().get(1).getDraftId();
+
+        VoiceReviewDraftResponse patched = voiceReviewService.patchDraft(
+                fixture.ctx().workspace().getId(),
+                parsed.getVoiceRecordId(),
+                secondDraftId,
+                draft(VoiceReviewDraftType.EXPENSE, "50000", fixture.cash(), fixture.gas(), null, "food"),
+                fixture.ctx().user().getId());
+
+        assertThat(patched.getDrafts()).hasSize(1);
+        assertThat(patched.getDrafts().get(0).getDraftId()).isEqualTo(secondDraftId);
+        assertThat(patched.getCandidate().getNote()).isEqualTo("food");
+    }
+
+    @Test
+    void invalidDraftIdReturnsFriendlyNotFound() {
+        Fixture fixture = fixture("voice_review_bad_draft");
+        VoiceReviewDraftResponse parsed = voiceReviewService.parse(fixture.ctx().workspace().getId(), parse("đổ xăng hết 60.000 ăn hết 50.000"), fixture.ctx().user().getId());
+
+        assertBusinessCode(() -> voiceReviewService.patchDraft(fixture.ctx().workspace().getId(), parsed.getVoiceRecordId(), "missing", draft(VoiceReviewDraftType.EXPENSE, "50000", fixture.cash(), fixture.gas(), null, "bad"), fixture.ctx().user().getId()),
+                "VOICE_DRAFT_NOT_FOUND");
+    }
+
+    @Test
     void missingWalletOrCategoryReturnsIncompleteDraftCode() {
         Fixture fixture = fixture("voice_review_missing");
         VoiceRecord record = record(fixture.ctx(), VoiceRecordStatus.PARSED);
@@ -159,6 +239,16 @@ class VoiceReviewIntegrationTests {
         assertThat(response.getCandidate().getType()).isEqualTo(VoiceReviewDraftType.DEBT);
         assertThat(response.getCandidate().isAffectsWalletBalance()).isFalse();
         assertThat(response.getWarnings()).contains("VOICE_INTENT_NOT_COMMITTABLE");
+    }
+
+    @Test
+    void savingsDraftCannotConfirmAsNormalTransaction() {
+        Fixture fixture = fixture("voice_review_savings");
+        VoiceReviewDraftResponse parsed = voiceReviewService.parse(fixture.ctx().workspace().getId(), parse("tôi gửi tiết kiệm 85"), fixture.ctx().user().getId());
+
+        assertThat(parsed.getCandidate().getType()).isEqualTo(VoiceReviewDraftType.SAVINGS);
+        assertBusinessCode(() -> voiceReviewService.confirmDraft(fixture.ctx().workspace().getId(), parsed.getVoiceRecordId(), parsed.getDrafts().get(0).getDraftId(), null, fixture.ctx().user().getId()),
+                "VOICE_DRAFT_INCOMPLETE");
     }
 
     @Test
