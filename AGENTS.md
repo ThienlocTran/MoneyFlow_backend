@@ -6,6 +6,13 @@ Before any MoneyFlow task, read:
 - `docs/product/MONEYFLOW_PRODUCT_SOURCE_OF_TRUTH.md`
 - `docs/product/MONEYFLOW_TASK_GUARDRAIL.md`
 
+Before large module work, also read:
+- `docs/agent-skills/README.md`
+- `docs/agent-skills/registry.md`
+- the relevant playbook under `docs/agent-skills/`
+
+Do not install external tools from the registry unless a module explicitly approves it.
+
 Every task must state:
 - Which product principle it affects
 - Which domain object it touches
