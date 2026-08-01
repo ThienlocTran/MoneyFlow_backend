@@ -538,7 +538,7 @@ public class TransactionService {
                 .sourceReference(normalizeText(sourceReference))
                 .walletUnknown(false)
                 .historical(false)
-                .affectsWalletBalance(true)
+                .affectsWalletBalance(req.getAffectsWalletBalance() == null ? true : req.getAffectsWalletBalance())
                 .build();
         if (voiceRecordId != null) {
             voiceRecordRepository.findByIdAndWorkspaceId(voiceRecordId, workspaceId)
@@ -568,7 +568,8 @@ public class TransactionService {
             return mapToResponse(tx);
         }
 
-        Wallet wallet = resolveWallet(workspaceId, req.getWalletId(), true, true, "WALLET_NOT_FOUND");
+        boolean walletRequired = type != TransactionType.INCOME || !Boolean.FALSE.equals(req.getAffectsWalletBalance());
+        Wallet wallet = resolveWallet(workspaceId, req.getWalletId(), walletRequired, true, "WALLET_NOT_FOUND");
         Category category = resolveCategory(workspaceId, req.getCategoryId(), type, false, true);
         tx.setSpendingScope(resolveSpendingScopeForCreate(type, normalizedSourceType, req, category));
         tx.setWallet(wallet);

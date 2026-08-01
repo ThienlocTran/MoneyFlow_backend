@@ -90,9 +90,11 @@ class VoiceReviewIntegrationTests {
 
         assertThat(response.getMode()).isEqualTo("SINGLE");
         assertThat(response.getDrafts()).hasSize(1);
-        assertThat(response.getCandidate().getType()).isEqualTo(VoiceReviewDraftType.INCOME);
+        assertThat(response.getCandidate().getType()).isEqualTo(VoiceReviewDraftType.INCOME_FACT);
         assertThat(response.getCandidate().getAmount()).isEqualByComparingTo("800000");
         assertThat(response.getCandidate().getWalletId()).isNull();
+        assertThat(response.getCandidate().isAffectsWalletBalance()).isFalse();
+        assertThat(response.getDrafts().get(0).isCanConfirm()).isTrue();
     }
 
     @Test
@@ -107,7 +109,7 @@ class VoiceReviewIntegrationTests {
         assertThat(response.getWarnings()).contains("MULTIPLE_AMOUNTS_DETECTED");
         assertThat(response.getDrafts()).hasSize(4);
         assertThat(response.getDrafts()).extracting(draft -> draft.getCandidate().getType())
-                .containsExactly(VoiceReviewDraftType.INCOME, VoiceReviewDraftType.EXPENSE, VoiceReviewDraftType.EXPENSE, VoiceReviewDraftType.SAVINGS);
+                .containsExactly(VoiceReviewDraftType.INCOME_FACT, VoiceReviewDraftType.EXPENSE, VoiceReviewDraftType.EXPENSE, VoiceReviewDraftType.SAVINGS);
         assertThat(response.getDrafts()).extracting(draft -> draft.getCandidate().getAmount())
                 .containsExactly(new BigDecimal("800000"), new BigDecimal("60000"), new BigDecimal("50000"), new BigDecimal("85000"));
         assertThat(response.getDrafts().get(0).getCandidate().getWalletId()).isNull();
@@ -224,10 +226,75 @@ class VoiceReviewIntegrationTests {
 
         VoiceReviewDraftResponse response = voiceReviewService.parse(ctx.workspace().getId(), parse("hom nay toi kiem duoc 800"), ctx.user().getId());
 
-        assertThat(response.getCandidate().getType()).isEqualTo(VoiceReviewDraftType.INCOME);
+        assertThat(response.getCandidate().getType()).isEqualTo(VoiceReviewDraftType.INCOME_FACT);
         assertThat(response.getCandidate().getWalletId()).isNull();
         assertThat(response.getCandidate().isAffectsWalletBalance()).isFalse();
         assertThat(response.getCandidate().getNeedsFields()).doesNotContain("walletId");
+    }
+
+    @Test
+    void confirmIncomeFactWithoutWalletDoesNotAffectWalletAndIsIdempotent() {
+        Fixture fixture = fixture("vr_income_fact");
+        VoiceRecord record = record(fixture.ctx(), VoiceRecordStatus.PARSED);
+
+        VoiceReviewConfirmRequest req = new VoiceReviewConfirmRequest();
+        req.setCandidate(draft(VoiceReviewDraftType.INCOME_FACT, "800000", null, null, null, "income fact"));
+
+        VoiceReviewConfirmResponse first = voiceReviewService.confirm(fixture.ctx().workspace().getId(), record.getId(), req, fixture.ctx().user().getId());
+        VoiceReviewConfirmResponse second = voiceReviewService.confirm(fixture.ctx().workspace().getId(), record.getId(), req, fixture.ctx().user().getId());
+
+        assertThat(second.getTransactionId()).isEqualTo(first.getTransactionId());
+        assertThat(first.getTransaction().getWalletId()).isNull();
+        assertThat(first.getTransaction().isAffectsWalletBalance()).isFalse();
+        assertThat(transactionRepository.findAllByWorkspaceIdAndVoiceRecordIdAndSourceTypeOrderByCreatedAtAsc(
+                fixture.ctx().workspace().getId(), record.getId(), com.moneyflowbackend.transaction.model.TransactionSourceType.VOICE)).hasSize(1);
+    }
+
+    @Test
+    void parseWalletSnapshotDraftMatchesWalletAndDoesNotBecomeIncome() {
+        TestContext ctx = context("voice_review_snapshot", WorkspaceRole.OWNER);
+        Wallet mb = wallet(ctx, "MB Bank");
+
+        VoiceReviewDraftResponse response = voiceReviewService.parse(ctx.workspace().getId(), parse("MB con 4 trieu 8"), ctx.user().getId());
+
+        assertThat(response.getCandidate().getType()).isEqualTo(VoiceReviewDraftType.WALLET_SNAPSHOT);
+        assertThat(response.getCandidate().getAmount()).isEqualByComparingTo("4800000");
+        assertThat(response.getCandidate().getWalletId()).isEqualTo(mb.getId());
+        assertThat(response.getCandidate().isAffectsWalletBalance()).isFalse();
+        assertThat(response.getDrafts().get(0).isCanConfirm()).isFalse();
+        assertThat(response.getDrafts().get(0).getWarnings()).extracting("code").contains("WALLET_SNAPSHOT_CONFIRM_NOT_SUPPORTED");
+    }
+
+    @Test
+    void walletSnapshotConfirmReturnsCleanUnsupportedAndCreatesNoTransaction() {
+        TestContext ctx = context("voice_review_snapshot_confirm", WorkspaceRole.OWNER);
+        Wallet mb = wallet(ctx, "MB Bank");
+        VoiceRecord record = record(ctx, VoiceRecordStatus.PARSED);
+        long before = transactionRepository.count();
+
+        VoiceReviewConfirmRequest req = new VoiceReviewConfirmRequest();
+        req.setCandidate(draft(VoiceReviewDraftType.WALLET_SNAPSHOT, "4800000", mb, null, null, "MB con 4 trieu 8"));
+
+        assertBusinessCode(() -> voiceReviewService.confirm(ctx.workspace().getId(), record.getId(), req, ctx.user().getId()),
+                "WALLET_SNAPSHOT_CONFIRM_NOT_SUPPORTED");
+        assertThat(transactionRepository.count()).isEqualTo(before);
+    }
+
+    @Test
+    void mixedIncomeFactSnapshotAndExpenseReturnSeparateDraftTypes() {
+        TestContext ctx = context("voice_review_mixed_snapshot", WorkspaceRole.OWNER);
+        Wallet mb = wallet(ctx, "MB Bank");
+        Category food = category(ctx, "An uong", CategoryType.EXPENSE);
+        keyword(ctx, food, "an");
+
+        VoiceReviewDraftResponse response = voiceReviewService.parse(ctx.workspace().getId(),
+                parse("Hom nay kiem duoc 800, MB con 4tr8, toi an 50k"), ctx.user().getId());
+
+        assertThat(response.getMode()).isEqualTo("MULTI");
+        assertThat(response.getDrafts()).extracting(draft -> draft.getCandidate().getType())
+                .containsExactly(VoiceReviewDraftType.INCOME_FACT, VoiceReviewDraftType.WALLET_SNAPSHOT, VoiceReviewDraftType.EXPENSE);
+        assertThat(response.getDrafts().get(1).getCandidate().getWalletId()).isEqualTo(mb.getId());
+        assertThat(response.getDrafts().get(2).getCandidate().getCategoryId()).isEqualTo(food.getId());
     }
 
     @Test

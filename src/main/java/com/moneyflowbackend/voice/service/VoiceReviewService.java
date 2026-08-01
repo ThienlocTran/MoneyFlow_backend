@@ -196,7 +196,7 @@ public class VoiceReviewService {
     }
 
     private VoiceReviewDraftResponse fromPreview(Workspace workspace, VoiceRecord record, QuickEntryPreviewResponse preview) {
-        VoiceReviewDraftType draftType = type(preview.getIntentType(), preview.getType());
+        VoiceReviewDraftType draftType = type(preview.getIntentType(), preview.getType(), preview.isAffectsWalletBalance(), preview.getWalletId());
         List<String> needsFields = fields(preview.getMissingFields());
         if (draftType == VoiceReviewDraftType.INCOME && preview.getWalletId() == null) {
             needsFields = needsFields.stream().filter(field -> !field.equals("walletId")).toList();
@@ -214,8 +214,7 @@ public class VoiceReviewService {
                 .incomeSourceName(preview.getIncomeSourceName())
                 .note(preview.getDescription())
                 .scope(preview.getSpendingScope())
-                .affectsWalletBalance(preview.getWalletId() != null
-                        && (preview.getType() == TransactionType.EXPENSE || preview.getType() == TransactionType.INCOME || preview.getType() == TransactionType.TRANSFER))
+                .affectsWalletBalance(preview.isAffectsWalletBalance())
                 .needsFields(needsFields)
                 .build();
         return VoiceReviewDraftResponse.builder()
@@ -282,6 +281,12 @@ public class VoiceReviewService {
         if (candidate.getType() == VoiceReviewDraftType.INCOME && candidate.getWalletId() == null && !codes.contains("INCOME_WALLET_NOT_SELECTED")) {
             codes.add("INCOME_WALLET_NOT_SELECTED");
         }
+        if (candidate.getType() == VoiceReviewDraftType.INCOME_FACT && !codes.contains("INCOME_FACT_NO_WALLET_EFFECT")) {
+            codes.add("INCOME_FACT_NO_WALLET_EFFECT");
+        }
+        if (candidate.getType() == VoiceReviewDraftType.WALLET_SNAPSHOT && !codes.contains("WALLET_SNAPSHOT_CONFIRM_NOT_SUPPORTED")) {
+            codes.add("WALLET_SNAPSHOT_CONFIRM_NOT_SUPPORTED");
+        }
         if (!supported(candidate.getType()) && !codes.contains("DRAFT_UNSUPPORTED_TYPE")) {
             codes.add("DRAFT_UNSUPPORTED_TYPE");
         }
@@ -298,7 +303,7 @@ public class VoiceReviewService {
     }
 
     private VoiceReviewDraftResponse.Candidate candidate(Workspace workspace, QuickEntryPreviewResponse preview) {
-        VoiceReviewDraftType draftType = type(preview.getIntentType(), preview.getType());
+        VoiceReviewDraftType draftType = type(preview.getIntentType(), preview.getType(), preview.isAffectsWalletBalance(), preview.getWalletId());
         List<String> needsFields = fields(preview.getMissingFields());
         if (draftType == VoiceReviewDraftType.INCOME && preview.getWalletId() == null) {
             needsFields = needsFields.stream().filter(field -> !field.equals("walletId")).toList();
@@ -316,13 +321,13 @@ public class VoiceReviewService {
                 .incomeSourceName(preview.getIncomeSourceName())
                 .note(preview.getDescription())
                 .scope(preview.getSpendingScope())
-                .affectsWalletBalance(preview.getWalletId() != null && (preview.getType() == TransactionType.EXPENSE || preview.getType() == TransactionType.INCOME))
+                .affectsWalletBalance(preview.isAffectsWalletBalance())
                 .needsFields(needsFields)
                 .build();
     }
 
     private VoiceReviewDraftResponse.Candidate candidate(Workspace workspace, QuickEntryPreviewResponse.Candidate preview) {
-        VoiceReviewDraftType draftType = type(preview.getIntentType(), preview.getType());
+        VoiceReviewDraftType draftType = type(preview.getIntentType(), preview.getType(), preview.isAffectsWalletBalance(), preview.getWalletId());
         List<String> needsFields = fields(preview.getMissingFields());
         if (draftType == VoiceReviewDraftType.INCOME && preview.getWalletId() == null) {
             needsFields = needsFields.stream().filter(field -> !field.equals("walletId")).toList();
@@ -340,7 +345,7 @@ public class VoiceReviewService {
                 .incomeSourceName(preview.getIncomeSourceName())
                 .note(preview.getDescription())
                 .scope(preview.getSpendingScope())
-                .affectsWalletBalance(preview.getWalletId() != null && (preview.getType() == TransactionType.EXPENSE || preview.getType() == TransactionType.INCOME))
+                .affectsWalletBalance(preview.isAffectsWalletBalance())
                 .needsFields(needsFields)
                 .build();
     }
@@ -396,9 +401,19 @@ public class VoiceReviewService {
                 if (category != null) throw new BusinessException("CATEGORY_NOT_ALLOWED", "Income draft cannot use categoryId");
                 if (wallet == null) warnings.add("INCOME_WALLET_NOT_SELECTED");
             }
+            case INCOME_FACT -> {
+                if (category != null) throw new BusinessException("CATEGORY_NOT_ALLOWED", "Income draft cannot use categoryId");
+                if (wallet != null) throw new BusinessException("WALLET_NOT_ALLOWED", "Income fact must not use walletId");
+                warnings.add("INCOME_FACT_NO_WALLET_EFFECT");
+            }
             case TRANSFER -> {
                 warnings.add("VOICE_TRANSFER_CONFIRM_UNSUPPORTED");
                 if (committing) throw incomplete("transfer");
+            }
+            case WALLET_SNAPSHOT -> {
+                if (wallet == null) needs.add("walletId");
+                warnings.add(wallet == null ? "WALLET_SNAPSHOT_NO_WALLET" : "WALLET_SNAPSHOT_CONFIRM_NOT_SUPPORTED");
+                if (committing) throw new BusinessException("WALLET_SNAPSHOT_CONFIRM_NOT_SUPPORTED", "MoneyFlow đã hiểu đây là số dư ví, nhưng luồng lưu snapshot chưa bật.");
             }
             case DEBT -> {
                 warnings.add("VOICE_DEBT_CONFIRM_UNSUPPORTED");
@@ -413,8 +428,8 @@ public class VoiceReviewService {
                 if (committing) throw incomplete("type");
             }
         }
-        if (committing && (!needs.isEmpty() || (type == VoiceReviewDraftType.INCOME && wallet == null))) {
-            throw incomplete(String.join(",", needs.isEmpty() ? List.of("walletId") : needs));
+        if (committing && !needs.isEmpty()) {
+            throw incomplete(String.join(",", needs));
         }
         VoiceReviewDraftResponse.Candidate candidate = VoiceReviewDraftResponse.Candidate.builder()
                 .type(type)
@@ -438,7 +453,7 @@ public class VoiceReviewService {
     private QuickEntryConfirmRequest toQuickEntryConfirm(Workspace workspace, DraftValidation validation) {
         VoiceReviewDraftResponse.Candidate candidate = validation.candidate();
         QuickEntryConfirmRequest req = new QuickEntryConfirmRequest();
-        req.setType(candidate.getType() == VoiceReviewDraftType.INCOME ? TransactionType.INCOME : TransactionType.EXPENSE);
+        req.setType(candidate.getType() == VoiceReviewDraftType.INCOME || candidate.getType() == VoiceReviewDraftType.INCOME_FACT ? TransactionType.INCOME : TransactionType.EXPENSE);
         req.setStatus(TransactionStatus.POSTED);
         req.setAmount(candidate.getAmount());
         req.setWalletId(candidate.getWalletId());
@@ -466,6 +481,7 @@ public class VoiceReviewService {
         txReq.setTransactionTime(req.getTransactionTime());
         txReq.setDescription(req.getDescription());
         txReq.setNote(req.getNote());
+        txReq.setAffectsWalletBalance(req.getWalletId() != null);
         if (req.hasSpendingScope()) {
             txReq.setSpendingScope(req.getSpendingScope());
         }
@@ -482,9 +498,12 @@ public class VoiceReviewService {
                 .build();
     }
 
-    private VoiceReviewDraftType type(VoiceIntentType intentType, TransactionType transactionType) {
+    private VoiceReviewDraftType type(VoiceIntentType intentType, TransactionType transactionType, boolean affectsWalletBalance, UUID walletId) {
+        if (intentType == VoiceIntentType.WALLET_BALANCE_SNAPSHOT) return VoiceReviewDraftType.WALLET_SNAPSHOT;
         if (transactionType == TransactionType.EXPENSE) return VoiceReviewDraftType.EXPENSE;
-        if (transactionType == TransactionType.INCOME) return VoiceReviewDraftType.INCOME;
+        if (transactionType == TransactionType.INCOME) {
+            return affectsWalletBalance || walletId != null ? VoiceReviewDraftType.INCOME : VoiceReviewDraftType.INCOME_FACT;
+        }
         if (transactionType == TransactionType.TRANSFER) return VoiceReviewDraftType.TRANSFER;
         if (intentType == null) return VoiceReviewDraftType.UNKNOWN;
         return switch (intentType) {
@@ -530,7 +549,7 @@ public class VoiceReviewService {
 
     private String warningField(String code) {
         return switch (code) {
-            case "INCOME_WALLET_NOT_SELECTED", "MISSING_WALLET" -> "walletId";
+            case "INCOME_WALLET_NOT_SELECTED", "MISSING_WALLET", "WALLET_SNAPSHOT_WALLET_NOT_MATCHED", "WALLET_MATCH_AMBIGUOUS", "WALLET_SNAPSHOT_NO_WALLET" -> "walletId";
             case "MISSING_CATEGORY", "CATEGORY_TYPE_MISMATCH", "UNKNOWN_CATEGORY" -> "categoryId";
             case "MISSING_INCOMESOURCE" -> "incomeSourceId";
             default -> null;
@@ -541,6 +560,12 @@ public class VoiceReviewService {
         return switch (code) {
             case "MULTIPLE_AMOUNTS_DETECTED", "MULTIPLE_ITEMS_DETECTED" -> "Đã phát hiện nhiều khoản, hãy kiểm tra từng dòng trước khi lưu.";
             case "INCOME_WALLET_NOT_SELECTED", "MISSING_WALLET" -> "Chọn ví trước khi lưu khoản này.";
+            case "INCOME_FACT_NO_WALLET_EFFECT" -> "Khoản này ghi nhận thu nhập, nhưng không cộng vào ví nào. Số dư ví sẽ được kiểm tra qua chốt sổ.";
+            case "INCOME_SPLIT_NOT_SUPPORTED" -> "MoneyFlow chưa tự chia khoản thu này vào nhiều ví. Hãy kiểm tra lại hoặc dùng chốt sổ để cập nhật số dư ví.";
+            case "WALLET_SNAPSHOT_WALLET_NOT_MATCHED" -> "Chưa xác định được ví cần cập nhật số dư.";
+            case "WALLET_MATCH_AMBIGUOUS" -> "Có nhiều ví giống tên này. Vui lòng chọn ví chính xác.";
+            case "WALLET_SNAPSHOT_CONFIRM_NOT_SUPPORTED" -> "MoneyFlow đã hiểu đây là số dư ví, nhưng luồng lưu snapshot chưa bật.";
+            case "WALLET_SNAPSHOT_NO_WALLET" -> "Chọn ví trước khi lưu số dư kiểm tra.";
             case "UNSUPPORTED_INTENT", "DRAFT_UNSUPPORTED_TYPE", "VOICE_INTENT_NOT_COMMITTABLE" -> "Loại khoản này chưa hỗ trợ ghi sổ trực tiếp.";
             case "CATEGORY_TYPE_MISMATCH" -> "Danh mục không khớp loại khoản.";
             case "MISSING_CATEGORY", "UNKNOWN_CATEGORY" -> "Chọn danh mục trước khi lưu khoản này.";
@@ -550,15 +575,16 @@ public class VoiceReviewService {
     }
 
     private boolean supported(VoiceReviewDraftType type) {
-        return type == VoiceReviewDraftType.EXPENSE || type == VoiceReviewDraftType.INCOME;
+        return type == VoiceReviewDraftType.EXPENSE || type == VoiceReviewDraftType.INCOME || type == VoiceReviewDraftType.INCOME_FACT;
     }
 
     private boolean canConfirm(VoiceReviewDraftResponse.Candidate candidate) {
         if (candidate == null || !supported(candidate.getType())) return false;
         if (candidate.getAmount() == null || candidate.getAmount().compareTo(BigDecimal.ZERO) <= 0) return false;
-        if (candidate.getOccurredAt() == null || candidate.getWalletId() == null) return false;
+        if (candidate.getOccurredAt() == null) return false;
         if (candidate.getType() == VoiceReviewDraftType.EXPENSE) return candidate.getCategoryId() != null;
-        return candidate.getIncomeSourceId() != null;
+        if (candidate.getType() == VoiceReviewDraftType.INCOME) return candidate.getWalletId() != null && candidate.getIncomeSourceId() != null;
+        return true;
     }
 
     private VoiceReviewDraftRequest toRequest(VoiceReviewDraftResponse.Candidate candidate) {

@@ -129,7 +129,7 @@ class VoiceCommandEngineParserTests {
         assertThat(preview.getCandidates()).noneSatisfy(candidate ->
                 assertThat(candidate.getIntentType()).isEqualTo(VoiceIntentType.UNKNOWN_UNSUPPORTED));
         assertThat(preview.getCandidates().get(0).getWalletId()).isNull();
-        assertThat(preview.getCandidates().get(0).getLedgerEffect()).isEqualTo(VoiceLedgerEffect.NEEDS_WALLET_REVIEW);
+        assertThat(preview.getCandidates().get(0).getLedgerEffect()).isEqualTo(VoiceLedgerEffect.DOES_NOT_AFFECT_WALLET);
         assertThat(preview.getCandidates().get(1).isCommitSupported()).isTrue();
         assertThat(preview.getCandidates().get(1).getSpendingScope()).isEqualTo(com.moneyflowbackend.common.model.SpendingScope.PERSONAL);
         assertThat(preview.getCandidates().get(6).getLedgerEffect()).isEqualTo(VoiceLedgerEffect.READ_ONLY);
@@ -137,12 +137,16 @@ class VoiceCommandEngineParserTests {
 
     private void assertDraft(QuickEntryPreviewResponse preview, VoiceIntentType intentType, String amount) {
         assertThat(preview.getIntentType()).isEqualTo(intentType);
-        assertThat(preview.getCandidateStatus()).isEqualTo(VoiceCandidateStatus.MANUAL);
+        assertThat(preview.getCandidateStatus()).isEqualTo(intentType == VoiceIntentType.WALLET_BALANCE_SNAPSHOT
+                ? VoiceCandidateStatus.NEEDS_REVIEW
+                : VoiceCandidateStatus.MANUAL);
         assertThat(preview.getLedgerEffect()).isIn(VoiceLedgerEffect.MANUAL_UNSUPPORTED, VoiceLedgerEffect.DOES_NOT_AFFECT_WALLET);
         assertThat(preview.getType()).isNull();
         assertThat(preview.getAmount()).isEqualByComparingTo(amount);
         assertThat(preview.isReadyToConfirm()).isFalse();
-        assertThat(preview.getWarnings()).contains("VOICE_INTENT_NOT_COMMITTABLE");
+        assertThat(preview.getWarnings()).contains(intentType == VoiceIntentType.WALLET_BALANCE_SNAPSHOT
+                ? "WALLET_SNAPSHOT_CONFIRM_NOT_SUPPORTED"
+                : "VOICE_INTENT_NOT_COMMITTABLE");
         assertThat(preview.getCandidates()).hasSize(1);
         assertThat(preview.getCandidates().get(0).getIntentType()).isEqualTo(intentType);
     }

@@ -63,7 +63,10 @@ public class QuickAmountParser {
                 continue;
             }
             BigDecimal millions = decimalNumber(matcher.group(1)).multiply(new BigDecimal("1000000"));
-            BigDecimal thousands = new BigDecimal(matcher.group(2)).multiply(new BigDecimal("1000"));
+            BigDecimal tail = new BigDecimal(matcher.group(2));
+            BigDecimal thousands = matcher.group(2).length() == 1
+                    ? tail.multiply(new BigDecimal("100000"))
+                    : tail.multiply(new BigDecimal("1000"));
             addCandidate(millions.add(thousands), matcher.start(), matcher.end(), display, candidates, zero, false, false);
         }
     }

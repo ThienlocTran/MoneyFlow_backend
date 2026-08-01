@@ -453,10 +453,17 @@ public class QuickEntryService {
         }
         IncomeSource source = defaultIncomeSource(userId, member, text, sources, people);
         if (source == null) {
-            addMissing(preview.getMissingFields(), "incomeSourceId");
-            preview.setCandidateStatus(VoiceCandidateStatus.NEEDS_REVIEW);
-            preview.setReadyToConfirm(false);
+            if (preview.getWalletId() != null) {
+                addMissing(preview.getMissingFields(), "incomeSourceId");
+                preview.setCandidateStatus(VoiceCandidateStatus.NEEDS_REVIEW);
+                preview.setReadyToConfirm(false);
+            } else {
+                markIncomeReady(preview.getMissingFields(), preview.getWarnings());
+                preview.setCandidateStatus(preview.getAmount() != null && preview.getTransactionDate() != null ? VoiceCandidateStatus.READY : VoiceCandidateStatus.NEEDS_REVIEW);
+                preview.setReadyToConfirm(preview.getCandidateStatus() == VoiceCandidateStatus.READY);
+            }
             preview.setCommitSupported(true);
+            preview.setAffectsWalletBalance(false);
             return;
         }
         preview.setIncomeSourceId(source.getId());
@@ -464,11 +471,12 @@ public class QuickEntryService {
         preview.setCategoryId(null);
         preview.setCategoryName(null);
         markIncomeReady(preview.getMissingFields(), preview.getWarnings());
-        boolean ready = preview.getAmount() != null && preview.getWalletId() != null && preview.getTransactionDate() != null
+        boolean ready = preview.getAmount() != null && preview.getTransactionDate() != null
                 && preview.getMissingFields().isEmpty();
         preview.setCandidateStatus(ready ? VoiceCandidateStatus.READY : VoiceCandidateStatus.NEEDS_REVIEW);
         preview.setReadyToConfirm(ready);
         preview.setCommitSupported(true);
+        preview.setAffectsWalletBalance(preview.getWalletId() != null);
         preview.setConfidence(ready ? 0.95 : preview.getConfidence());
     }
 
@@ -484,11 +492,18 @@ public class QuickEntryService {
         }
         IncomeSource source = defaultIncomeSource(userId, member, text, sources, people);
         if (source == null) {
-            addMissing(candidate.getMissingFields(), "incomeSourceId");
-            candidate.setCandidateStatus(VoiceCandidateStatus.NEEDS_REVIEW);
-            candidate.setReadyToConfirm(false);
+            if (candidate.getWalletId() != null) {
+                addMissing(candidate.getMissingFields(), "incomeSourceId");
+                candidate.setCandidateStatus(VoiceCandidateStatus.NEEDS_REVIEW);
+                candidate.setReadyToConfirm(false);
+            } else {
+                markIncomeReady(candidate.getMissingFields(), candidate.getWarnings());
+                candidate.setCandidateStatus(candidate.getAmount() != null && candidate.getTransactionDate() != null ? VoiceCandidateStatus.READY : VoiceCandidateStatus.NEEDS_REVIEW);
+                candidate.setReadyToConfirm(candidate.getCandidateStatus() == VoiceCandidateStatus.READY);
+            }
             candidate.setCommitSupported(true);
-            candidate.setValidationStatus("NEEDS_REVIEW");
+            candidate.setValidationStatus(candidate.getCandidateStatus() == VoiceCandidateStatus.READY ? "READY" : "NEEDS_REVIEW");
+            candidate.setAffectsWalletBalance(false);
             return;
         }
         candidate.setIncomeSourceId(source.getId());
@@ -496,11 +511,12 @@ public class QuickEntryService {
         candidate.setCategoryId(null);
         candidate.setCategoryName(null);
         markIncomeReady(candidate.getMissingFields(), candidate.getWarnings());
-        boolean ready = candidate.getAmount() != null && candidate.getWalletId() != null && candidate.getTransactionDate() != null
+        boolean ready = candidate.getAmount() != null && candidate.getTransactionDate() != null
                 && candidate.getMissingFields().isEmpty();
         candidate.setCandidateStatus(ready ? VoiceCandidateStatus.READY : VoiceCandidateStatus.NEEDS_REVIEW);
         candidate.setReadyToConfirm(ready);
         candidate.setCommitSupported(true);
+        candidate.setAffectsWalletBalance(candidate.getWalletId() != null);
         candidate.setValidationStatus(ready ? "READY" : "NEEDS_REVIEW");
         candidate.setConfidence(ready ? 0.95 : candidate.getConfidence());
     }
@@ -606,7 +622,7 @@ public class QuickEntryService {
     }
 
     private void markIncomeReady(List<String> missingFields, List<String> warnings) {
-        missingFields.removeIf(field -> field.equals("incomeSource") || field.equals("incomeSourceId") || field.equals("CATEGORY") || field.equals("categoryId"));
+        missingFields.removeIf(field -> field.equals("incomeSource") || field.equals("incomeSourceId") || field.equals("CATEGORY") || field.equals("categoryId") || field.equals("walletId"));
         if (warnings != null) {
             warnings.removeIf(warning -> warning.equals("UNKNOWN_CATEGORY"));
         }
