@@ -19,7 +19,8 @@ public record RuntimeDiagnosticsResponse(
 
     public record Storage(
             VoiceAudio voiceAudio,
-            Avatar avatar) {
+            Avatar avatar,
+            ReceiptOcr receiptOcr) {
     }
 
     public record VoiceAudio(
@@ -42,6 +43,15 @@ public record RuntimeDiagnosticsResponse(
             boolean apiSecretPresent,
             String baseFolder,
             long maxBytes) {
+    }
+
+    public record ReceiptOcr(
+            String provider,
+            boolean enabled,
+            boolean configured,
+            int maxImages,
+            long maxImageBytes,
+            boolean externalServiceConfigured) {
     }
 
     public record Security(boolean authenticated) {

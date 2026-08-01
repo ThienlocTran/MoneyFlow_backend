@@ -22,6 +22,10 @@ public class ReceiptReviewParseResponse {
     private String status;
     private ReceiptReviewSource source;
     private String rawText;
+    private int imageCount;
+    @Builder.Default
+    private List<Attachment> attachments = new ArrayList<>();
+    private Ocr ocr;
     private Candidate candidate;
     private Extracted extracted;
     @Builder.Default
@@ -41,8 +45,34 @@ public class ReceiptReviewParseResponse {
         private String categoryName;
         private String merchantName;
         private String note;
+        private boolean affectsWalletBalance;
         @Builder.Default
         private List<String> needsFields = new ArrayList<>();
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    public static class Attachment {
+        private int index;
+        private String status;
+        private String filename;
+        private String contentType;
+        private long sizeBytes;
+        private String storageStatus;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    public static class Ocr {
+        private String provider;
+        private String status;
+        private String text;
+        @Builder.Default
+        private List<Warning> warnings = new ArrayList<>();
     }
 
     @Data

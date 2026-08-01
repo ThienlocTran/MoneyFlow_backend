@@ -2,6 +2,7 @@ package com.moneyflowbackend;
 
 import com.moneyflowbackend.diagnostics.service.RuntimeDiagnosticsService;
 import com.moneyflowbackend.profile.avatar.DisabledAvatarStorageService;
+import com.moneyflowbackend.receipt.ocr.ReceiptOcrProperties;
 import com.moneyflowbackend.voice.storage.DisabledVoiceAudioStorageService;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.env.MockEnvironment;
@@ -23,6 +24,7 @@ class RuntimeDiagnosticsServiceTests {
                 new MockEnvironment().withProperty("spring.profiles.active", "dev"),
                 new DisabledVoiceAudioStorageService(),
                 new DisabledAvatarStorageService(),
+                new ReceiptOcrProperties("none", 5, 5242880, 30, ""),
                 "cloudinary",
                 "cloudinary",
                 "",
@@ -39,6 +41,9 @@ class RuntimeDiagnosticsServiceTests {
         assertThat(response.storage().voiceAudio().apiKeyPresent()).isFalse();
         assertThat(response.storage().voiceAudio().apiSecretPresent()).isFalse();
         assertThat(response.storage().avatar().configured()).isFalse();
+        assertThat(response.storage().receiptOcr().provider()).isEqualTo("NONE");
+        assertThat(response.storage().receiptOcr().enabled()).isFalse();
+        assertThat(response.storage().receiptOcr().configured()).isFalse();
     }
 
     private DataSource readyDataSource() throws Exception {

@@ -2,6 +2,8 @@ package com.moneyflowbackend.diagnostics.service;
 
 import com.moneyflowbackend.diagnostics.dto.RuntimeDiagnosticsResponse;
 import com.moneyflowbackend.profile.avatar.AvatarStorageService;
+import com.moneyflowbackend.receipt.ocr.ReceiptOcrProperties;
+import com.moneyflowbackend.receipt.ocr.ReceiptOcrProviderType;
 import com.moneyflowbackend.voice.storage.VoiceAudioStorageService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.env.Environment;
@@ -19,6 +21,7 @@ public class RuntimeDiagnosticsService {
     private final Environment environment;
     private final VoiceAudioStorageService voiceAudioStorageService;
     private final AvatarStorageService avatarStorageService;
+    private final ReceiptOcrProperties receiptOcrProperties;
     private final String voiceProvider;
     private final String avatarProvider;
     private final String cloudName;
@@ -33,6 +36,7 @@ public class RuntimeDiagnosticsService {
             Environment environment,
             VoiceAudioStorageService voiceAudioStorageService,
             AvatarStorageService avatarStorageService,
+            ReceiptOcrProperties receiptOcrProperties,
             @Value("${VOICE_AUDIO_STORAGE_PROVIDER:${MONEYFLOW_AUDIO_STORAGE_PROVIDER:disabled}}") String voiceProvider,
             @Value("${MONEYFLOW_AVATAR_STORAGE_PROVIDER:${MONEYFLOW_AUDIO_STORAGE_PROVIDER:disabled}}") String avatarProvider,
             @Value("${MONEYFLOW_CLOUDINARY_CLOUD_NAME:}") String cloudName,
@@ -45,6 +49,7 @@ public class RuntimeDiagnosticsService {
         this.environment = environment;
         this.voiceAudioStorageService = voiceAudioStorageService;
         this.avatarStorageService = avatarStorageService;
+        this.receiptOcrProperties = receiptOcrProperties;
         this.voiceProvider = cleanProvider(voiceProvider);
         this.avatarProvider = cleanProvider(avatarProvider);
         this.cloudName = cloudName;
@@ -82,7 +87,15 @@ public class RuntimeDiagnosticsService {
                                 apiKeyPresent,
                                 apiSecretPresent,
                                 baseFolder(root),
-                                avatarMaxBytes)),
+                                avatarMaxBytes),
+                        new RuntimeDiagnosticsResponse.ReceiptOcr(
+                                receiptOcrProperties.provider().name(),
+                                receiptOcrProperties.provider() != ReceiptOcrProviderType.NONE,
+                                receiptOcrProperties.provider() == ReceiptOcrProviderType.MOCK
+                                        || (receiptOcrProperties.provider() == ReceiptOcrProviderType.EXTERNAL_HTTP && receiptOcrProperties.externalServiceConfigured()),
+                                receiptOcrProperties.maxImages(),
+                                receiptOcrProperties.maxImageBytes(),
+                                receiptOcrProperties.externalServiceConfigured())),
                 new RuntimeDiagnosticsResponse.Security(authenticated));
     }
 

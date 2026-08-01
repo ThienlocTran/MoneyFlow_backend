@@ -10,6 +10,10 @@ import com.moneyflowbackend.quickentry.parser.VietnameseTextNormalizer;
 import com.moneyflowbackend.receipt.dto.ReceiptReviewParseRequest;
 import com.moneyflowbackend.receipt.dto.ReceiptReviewParseResponse;
 import com.moneyflowbackend.receipt.dto.ReceiptReviewSource;
+import com.moneyflowbackend.receipt.ocr.ReceiptImageInput;
+import com.moneyflowbackend.receipt.ocr.ReceiptOcrResult;
+import com.moneyflowbackend.receipt.ocr.ReceiptOcrService;
+import com.moneyflowbackend.receipt.ocr.ReceiptOcrStatus;
 import com.moneyflowbackend.transaction.model.TransactionType;
 import com.moneyflowbackend.wallet.model.Wallet;
 import com.moneyflowbackend.wallet.repository.WalletRepository;
@@ -20,6 +24,7 @@ import com.moneyflowbackend.workspace.repository.WorkspaceRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
 import java.time.Clock;
@@ -31,13 +36,16 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
 public class ReceiptReviewService {
     private static final String FALLBACK_ZONE = "Asia/Ho_Chi_Minh";
+    private static final Set<String> ALLOWED_IMAGE_TYPES = Set.of("image/jpeg", "image/png", "image/webp");
 
     private final ReceiptTextParser parser;
+    private final ReceiptOcrService ocrService;
     private final WorkspaceRepository workspaceRepository;
     private final WorkspaceMemberRepository workspaceMemberRepository;
     private final WalletRepository walletRepository;
@@ -47,6 +55,7 @@ public class ReceiptReviewService {
 
     public ReceiptReviewService(
             ReceiptTextParser parser,
+            ReceiptOcrService ocrService,
             WorkspaceRepository workspaceRepository,
             WorkspaceMemberRepository workspaceMemberRepository,
             WalletRepository walletRepository,
@@ -54,6 +63,7 @@ public class ReceiptReviewService {
             CategoryKeywordRepository categoryKeywordRepository,
             Clock clock) {
         this.parser = parser;
+        this.ocrService = ocrService;
         this.workspaceRepository = workspaceRepository;
         this.workspaceMemberRepository = workspaceMemberRepository;
         this.walletRepository = walletRepository;
@@ -71,7 +81,7 @@ public class ReceiptReviewService {
         if (rawText == null || rawText.length() < 4) {
             warnings.add(warning("RECEIPT_TEXT_TOO_SHORT", "rawText"));
             warnings.add(warning("RECEIPT_UNSUPPORTED_TEXT", "rawText"));
-            return response(source, rawText, null, null, null, warnings, "UNSUPPORTED");
+            return response(source, rawText, 0, List.of(), skippedOcr(), null, null, null, warnings, "UNSUPPORTED");
         }
 
         ReceiptTextParser.ParsedReceipt parsed = parser.parse(rawText);
@@ -116,6 +126,7 @@ public class ReceiptReviewService {
                 .categoryName(category == null ? null : category.getName())
                 .merchantName(parsed.merchantName())
                 .note(parsed.merchantName() == null ? "Receipt" : parsed.merchantName())
+                .affectsWalletBalance(true)
                 .needsFields(needs.stream().distinct().toList())
                 .build();
         ReceiptReviewParseResponse.Extracted extracted = ReceiptReviewParseResponse.Extracted.builder()
@@ -124,12 +135,59 @@ public class ReceiptReviewService {
                 .totalAmount(parsed.totalAmount())
                 .lineAmounts(parsed.lineAmounts())
                 .build();
-        return response(source, rawText, candidate, extracted, parsed.totalAmount(), warnings, "NEEDS_REVIEW");
+        return response(source, rawText, 0, List.of(), skippedOcr(), candidate, extracted, parsed.totalAmount(), warnings, "NEEDS_REVIEW");
+    }
+
+    @Transactional(readOnly = true)
+    public ReceiptReviewParseResponse parseWithImages(
+            UUID workspaceId,
+            List<MultipartFile> images,
+            String rawText,
+            ReceiptReviewSource source,
+            OffsetDateTime occurredAtHint,
+            UUID walletId,
+            String timezone,
+            UUID userId) {
+        requireMember(workspaceId, userId);
+        List<ReceiptReviewParseResponse.Attachment> attachments = validateImages(images);
+        String normalizedText = normalize(rawText);
+        if (normalizedText == null && attachments.isEmpty()) {
+            throw new BusinessException("RECEIPT_IMAGE_REQUIRED", "Receipt text or image is required", HttpStatus.BAD_REQUEST);
+        }
+        ReceiptReviewSource effectiveSource = source == null
+                ? (attachments.isEmpty() ? ReceiptReviewSource.MANUAL_TEXT : ReceiptReviewSource.PHOTO_PENDING_OCR)
+                : source;
+
+        if (normalizedText != null) {
+            return withImageData(parse(workspaceId, request(normalizedText, effectiveSource, occurredAtHint, walletId), userId), attachments, skippedOcr());
+        }
+
+        ReceiptOcrResult ocr = ocrService.extractText(attachments.stream()
+                .map(attachment -> new ReceiptImageInput(attachment.getIndex(), attachment.getFilename(), attachment.getContentType(), attachment.getSizeBytes()))
+                .toList());
+        ReceiptReviewParseResponse.Ocr ocrDto = ocr(ocr);
+        if (ocr.status() == ReceiptOcrStatus.DISABLED || ocr.status() == ReceiptOcrStatus.UNSUPPORTED) {
+            List<ReceiptReviewParseResponse.Warning> warnings = new ArrayList<>(ocr.warnings());
+            warnings.add(warning("RECEIPT_TEXT_REQUIRED_WHEN_OCR_DISABLED", "rawText"));
+            return response(ReceiptReviewSource.PHOTO_PENDING_OCR, null, attachments.size(), attachments, ocrDto,
+                    null, null, null, warnings, "OCR_NOT_CONFIGURED");
+        }
+        String ocrText = normalize(ocr.text());
+        if (ocrText == null) {
+            List<ReceiptReviewParseResponse.Warning> warnings = new ArrayList<>(ocr.warnings());
+            warnings.add(warning("RECEIPT_OCR_TEXT_EMPTY", "ocr"));
+            return response(ReceiptReviewSource.PHOTO_PENDING_OCR, null, attachments.size(), attachments, ocrDto,
+                    null, null, null, warnings, "NEEDS_TEXT");
+        }
+        return withImageData(parse(workspaceId, request(ocrText, ReceiptReviewSource.PHOTO_OCR, occurredAtHint, walletId), userId), attachments, ocrDto);
     }
 
     private ReceiptReviewParseResponse response(
             ReceiptReviewSource source,
             String rawText,
+            int imageCount,
+            List<ReceiptReviewParseResponse.Attachment> attachments,
+            ReceiptReviewParseResponse.Ocr ocr,
             ReceiptReviewParseResponse.Candidate candidate,
             ReceiptReviewParseResponse.Extracted extracted,
             BigDecimal amount,
@@ -140,9 +198,80 @@ public class ReceiptReviewService {
                 .status(amount == null && "NEEDS_REVIEW".equals(status) ? "UNSUPPORTED" : status)
                 .source(source)
                 .rawText(rawText)
+                .imageCount(imageCount)
+                .attachments(attachments)
+                .ocr(ocr)
                 .candidate(candidate)
                 .extracted(extracted)
                 .warnings(warnings.stream().distinct().toList())
+                .build();
+    }
+
+    private ReceiptReviewParseResponse withImageData(
+            ReceiptReviewParseResponse response,
+            List<ReceiptReviewParseResponse.Attachment> attachments,
+            ReceiptReviewParseResponse.Ocr ocr) {
+        response.setImageCount(attachments.size());
+        response.setAttachments(attachments);
+        response.setOcr(ocr);
+        return response;
+    }
+
+    private ReceiptReviewParseRequest request(String rawText, ReceiptReviewSource source, OffsetDateTime occurredAtHint, UUID walletId) {
+        ReceiptReviewParseRequest req = new ReceiptReviewParseRequest();
+        req.setRawText(rawText);
+        req.setSource(source);
+        req.setOccurredAtHint(occurredAtHint);
+        req.setWalletId(walletId);
+        return req;
+    }
+
+    private List<ReceiptReviewParseResponse.Attachment> validateImages(List<MultipartFile> images) {
+        List<MultipartFile> files = images == null ? List.of() : images.stream()
+                .filter(file -> file != null)
+                .toList();
+        if (files.size() > ocrService.properties().maxImages()) {
+            throw new BusinessException("RECEIPT_TOO_MANY_IMAGES", "Too many receipt images", HttpStatus.BAD_REQUEST);
+        }
+        List<ReceiptReviewParseResponse.Attachment> attachments = new ArrayList<>();
+        for (int i = 0; i < files.size(); i++) {
+            MultipartFile file = files.get(i);
+            String contentType = file.getContentType() == null ? "" : file.getContentType().toLowerCase();
+            if (file.getSize() <= 0) {
+                throw new BusinessException("RECEIPT_IMAGE_REQUIRED", "Receipt image is empty", HttpStatus.BAD_REQUEST);
+            }
+            if (file.getSize() > ocrService.properties().maxImageBytes()) {
+                throw new BusinessException("RECEIPT_IMAGE_TOO_LARGE", "Receipt image is too large", HttpStatus.BAD_REQUEST);
+            }
+            if (!ALLOWED_IMAGE_TYPES.contains(contentType)) {
+                throw new BusinessException("RECEIPT_IMAGE_TYPE_UNSUPPORTED", "Receipt image type is unsupported", HttpStatus.BAD_REQUEST);
+            }
+            attachments.add(ReceiptReviewParseResponse.Attachment.builder()
+                    .index(i)
+                    .status("ACCEPTED")
+                    .filename(file.getOriginalFilename())
+                    .contentType(contentType)
+                    .sizeBytes(file.getSize())
+                    .storageStatus("NOT_STORED")
+                    .build());
+        }
+        return attachments;
+    }
+
+    private ReceiptReviewParseResponse.Ocr skippedOcr() {
+        return ReceiptReviewParseResponse.Ocr.builder()
+                .provider(ocrService.properties().provider().name())
+                .status("SKIPPED")
+                .warnings(List.of())
+                .build();
+    }
+
+    private ReceiptReviewParseResponse.Ocr ocr(ReceiptOcrResult result) {
+        return ReceiptReviewParseResponse.Ocr.builder()
+                .provider(result.provider().name())
+                .status(result.status().name())
+                .text(result.text())
+                .warnings(result.warnings())
                 .build();
     }
 
@@ -216,6 +345,8 @@ public class ReceiptReviewService {
             case "RECEIPT_CATEGORY_NOT_SELECTED" -> "Choose a category before saving.";
             case "RECEIPT_WALLET_NOT_SELECTED" -> "Choose a wallet before saving.";
             case "RECEIPT_TEXT_TOO_SHORT" -> "Receipt text is too short.";
+            case "RECEIPT_TEXT_REQUIRED_WHEN_OCR_DISABLED" -> "OCR hóa đơn chưa được bật. Hãy dán nội dung hóa đơn để tạo bản nháp.";
+            case "RECEIPT_OCR_TEXT_EMPTY" -> "OCR không đọc được nội dung hóa đơn.";
             default -> "Receipt text is not supported yet.";
         };
     }
