@@ -26,6 +26,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.DateTimeException;
@@ -162,9 +163,7 @@ public class ReceiptReviewService {
             return withImageData(parse(workspaceId, request(normalizedText, effectiveSource, occurredAtHint, walletId), userId), attachments, skippedOcr());
         }
 
-        ReceiptOcrResult ocr = ocrService.extractText(attachments.stream()
-                .map(attachment -> new ReceiptImageInput(attachment.getIndex(), attachment.getFilename(), attachment.getContentType(), attachment.getSizeBytes()))
-                .toList());
+        ReceiptOcrResult ocr = ocrService.extractText(imageInputs(images));
         ReceiptReviewParseResponse.Ocr ocrDto = ocr(ocr);
         if (ocr.status() == ReceiptOcrStatus.DISABLED || ocr.status() == ReceiptOcrStatus.UNSUPPORTED) {
             List<ReceiptReviewParseResponse.Warning> warnings = new ArrayList<>(ocr.warnings());
@@ -172,12 +171,16 @@ public class ReceiptReviewService {
             return response(ReceiptReviewSource.PHOTO_PENDING_OCR, null, attachments.size(), attachments, ocrDto,
                     null, null, null, warnings, "OCR_NOT_CONFIGURED");
         }
+        if (ocr.status() == ReceiptOcrStatus.FAILED || ocr.status() == ReceiptOcrStatus.TIMEOUT) {
+            return response(ReceiptReviewSource.PHOTO_PENDING_OCR, null, attachments.size(), attachments, ocrDto,
+                    null, null, null, new ArrayList<>(ocr.warnings()), "OCR_FAILED");
+        }
         String ocrText = normalize(ocr.text());
         if (ocrText == null) {
             List<ReceiptReviewParseResponse.Warning> warnings = new ArrayList<>(ocr.warnings());
             warnings.add(warning("RECEIPT_OCR_TEXT_EMPTY", "ocr"));
             return response(ReceiptReviewSource.PHOTO_PENDING_OCR, null, attachments.size(), attachments, ocrDto,
-                    null, null, null, warnings, "NEEDS_TEXT");
+                    null, null, null, warnings, "OCR_TEXT_EMPTY");
         }
         return withImageData(parse(workspaceId, request(ocrText, ReceiptReviewSource.PHOTO_OCR, occurredAtHint, walletId), userId), attachments, ocrDto);
     }
@@ -226,6 +229,24 @@ public class ReceiptReviewService {
         return req;
     }
 
+    private List<ReceiptImageInput> imageInputs(List<MultipartFile> images) {
+        List<MultipartFile> files = images == null ? List.of() : images.stream()
+                .filter(file -> file != null)
+                .toList();
+        List<ReceiptImageInput> inputs = new ArrayList<>();
+        for (int i = 0; i < files.size(); i++) {
+            MultipartFile file = files.get(i);
+            try {
+                inputs.add(new ReceiptImageInput(i, file.getOriginalFilename(),
+                        file.getContentType() == null ? "" : file.getContentType().toLowerCase(),
+                        file.getSize(), file.getBytes()));
+            } catch (IOException ex) {
+                throw new BusinessException("RECEIPT_IMAGE_READ_FAILED", "Receipt image could not be read", HttpStatus.BAD_REQUEST);
+            }
+        }
+        return inputs;
+    }
+
     private List<ReceiptReviewParseResponse.Attachment> validateImages(List<MultipartFile> images) {
         List<MultipartFile> files = images == null ? List.of() : images.stream()
                 .filter(file -> file != null)
@@ -271,6 +292,13 @@ public class ReceiptReviewService {
                 .provider(result.provider().name())
                 .status(result.status().name())
                 .text(result.text())
+                .pages(result.pages().stream()
+                        .map(page -> ReceiptReviewParseResponse.OcrPage.builder()
+                                .index(page.index())
+                                .text(page.text())
+                                .confidence(page.confidence())
+                                .build())
+                        .toList())
                 .warnings(result.warnings())
                 .build();
     }

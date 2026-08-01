@@ -42,7 +42,7 @@ class ReceiptOcrMockIntegrationTests {
                 .andExpect(jsonPath("$.data.source").value("PHOTO_OCR"))
                 .andExpect(jsonPath("$.data.imageCount").value(1))
                 .andExpect(jsonPath("$.data.ocr.provider").value("MOCK"))
-                .andExpect(jsonPath("$.data.ocr.status").value("EXTRACTED"))
+                .andExpect(jsonPath("$.data.ocr.status").value("SUCCEEDED"))
                 .andExpect(jsonPath("$.data.candidate.type").value("EXPENSE"))
                 .andExpect(jsonPath("$.data.candidate.amount").value(40000));
     }

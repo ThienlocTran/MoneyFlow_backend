@@ -51,6 +51,9 @@ public record RuntimeDiagnosticsResponse(
             boolean configured,
             int maxImages,
             long maxImageBytes,
+            int timeoutSeconds,
+            String language,
+            boolean serviceUrlConfigured,
             boolean externalServiceConfigured) {
     }
 

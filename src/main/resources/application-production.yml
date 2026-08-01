@@ -7,7 +7,7 @@ spring:
       connection-init-sql: SET search_path TO public
   docker:
     compose:
-      enabled: false
+      pnpenabled: false
   jpa:
     properties:
       hibernate:

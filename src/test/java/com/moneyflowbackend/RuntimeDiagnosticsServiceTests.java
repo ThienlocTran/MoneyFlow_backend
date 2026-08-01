@@ -44,6 +44,9 @@ class RuntimeDiagnosticsServiceTests {
         assertThat(response.storage().receiptOcr().provider()).isEqualTo("NONE");
         assertThat(response.storage().receiptOcr().enabled()).isFalse();
         assertThat(response.storage().receiptOcr().configured()).isFalse();
+        assertThat(response.storage().receiptOcr().timeoutSeconds()).isEqualTo(30);
+        assertThat(response.storage().receiptOcr().language()).isEqualTo("vi");
+        assertThat(response.storage().receiptOcr().serviceUrlConfigured()).isFalse();
     }
 
     private DataSource readyDataSource() throws Exception {

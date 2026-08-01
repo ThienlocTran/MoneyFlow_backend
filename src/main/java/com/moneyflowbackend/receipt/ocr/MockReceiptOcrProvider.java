@@ -13,7 +13,7 @@ public class MockReceiptOcrProvider implements ReceiptOcrProvider {
 
     @Override
     public ReceiptOcrResult extractText(List<ReceiptImageInput> images) {
-        return new ReceiptOcrResult(type(), ReceiptOcrStatus.EXTRACTED, """
+        return new ReceiptOcrResult(type(), ReceiptOcrStatus.SUCCEEDED, """
                 Mock Mart
                 Date 2026-08-01
                 Item 25.000

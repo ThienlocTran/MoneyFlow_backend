@@ -72,7 +72,19 @@ public class ReceiptReviewParseResponse {
         private String status;
         private String text;
         @Builder.Default
+        private List<OcrPage> pages = new ArrayList<>();
+        @Builder.Default
         private List<Warning> warnings = new ArrayList<>();
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    public static class OcrPage {
+        private int index;
+        private String text;
+        private Double confidence;
     }
 
     @Data

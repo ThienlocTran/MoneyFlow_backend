@@ -4,5 +4,6 @@ public record ReceiptImageInput(
         int index,
         String filename,
         String contentType,
-        long sizeBytes) {
+        long sizeBytes,
+        byte[] bytes) {
 }

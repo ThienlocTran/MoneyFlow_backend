@@ -95,6 +95,9 @@ public class RuntimeDiagnosticsService {
                                         || (receiptOcrProperties.provider() == ReceiptOcrProviderType.EXTERNAL_HTTP && receiptOcrProperties.externalServiceConfigured()),
                                 receiptOcrProperties.maxImages(),
                                 receiptOcrProperties.maxImageBytes(),
+                                receiptOcrProperties.timeoutSeconds(),
+                                receiptOcrProperties.language(),
+                                receiptOcrProperties.externalServiceConfigured(),
                                 receiptOcrProperties.externalServiceConfigured())),
                 new RuntimeDiagnosticsResponse.Security(authenticated));
     }
