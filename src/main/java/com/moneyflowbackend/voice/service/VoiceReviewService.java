@@ -278,6 +278,9 @@ public class VoiceReviewService {
         if (drafts(workspace, preview).size() > 1 && !warnings.contains("MULTIPLE_AMOUNTS_DETECTED")) {
             warnings.add("MULTIPLE_AMOUNTS_DETECTED");
         }
+        if (drafts(workspace, preview).size() > 1 && !warnings.contains("VOICE_MULTI_INTENT_DETECTED")) {
+            warnings.add("VOICE_MULTI_INTENT_DETECTED");
+        }
         return warnings;
     }
 
@@ -313,6 +316,7 @@ public class VoiceReviewService {
         }
         if (!supported(candidate.getType()) && !codes.contains("DRAFT_UNSUPPORTED_TYPE")) {
             codes.add("DRAFT_UNSUPPORTED_TYPE");
+            codes.add("VOICE_SEGMENT_UNSUPPORTED");
         }
         candidate.setCanConfirm(ready && canConfirm(candidate));
         return VoiceReviewDraftResponse.DraftItem.builder()
@@ -783,6 +787,7 @@ public class VoiceReviewService {
         if ("DEBT_QUERY_USE_ASK_MODE".equals(code)) return "This is a debt question. MoneyFlow will answer read-only and will not create a transaction.";
         return switch (code) {
             case "MULTIPLE_AMOUNTS_DETECTED", "MULTIPLE_ITEMS_DETECTED" -> "Đã phát hiện nhiều khoản, hãy kiểm tra từng dòng trước khi lưu.";
+            case "VOICE_MULTI_INTENT_DETECTED" -> "MoneyFlow phát hiện nhiều khoản trong một câu. Hãy kiểm tra từng dòng trước khi lưu.";
             case "INCOME_WALLET_NOT_SELECTED", "MISSING_WALLET" -> "Chọn ví trước khi lưu khoản này.";
             case "INCOME_FACT_NO_WALLET_EFFECT" -> "Khoản này ghi nhận thu nhập, nhưng không cộng vào ví nào. Số dư ví sẽ được kiểm tra qua chốt sổ.";
             case "INCOME_SPLIT_NOT_SUPPORTED" -> "MoneyFlow chưa tự chia khoản thu này vào nhiều ví. Hãy kiểm tra lại hoặc dùng chốt sổ để cập nhật số dư ví.";
@@ -790,7 +795,7 @@ public class VoiceReviewService {
             case "WALLET_MATCH_AMBIGUOUS" -> "Có nhiều ví giống tên này. Vui lòng chọn ví chính xác.";
             case "WALLET_SNAPSHOT_CONFIRM_NOT_SUPPORTED" -> "MoneyFlow đã hiểu đây là số dư ví, nhưng luồng lưu snapshot chưa bật.";
             case "WALLET_SNAPSHOT_NO_WALLET" -> "Chọn ví trước khi lưu số dư kiểm tra.";
-            case "UNSUPPORTED_INTENT", "DRAFT_UNSUPPORTED_TYPE", "VOICE_INTENT_NOT_COMMITTABLE" -> "Loại khoản này chưa hỗ trợ ghi sổ trực tiếp.";
+            case "UNSUPPORTED_INTENT", "DRAFT_UNSUPPORTED_TYPE", "VOICE_INTENT_NOT_COMMITTABLE", "VOICE_SEGMENT_UNSUPPORTED" -> "MoneyFlow chưa hỗ trợ lưu ý này tự động.";
             case "CATEGORY_TYPE_MISMATCH" -> "Danh mục không khớp loại khoản.";
             case "MISSING_CATEGORY", "UNKNOWN_CATEGORY" -> "Chọn danh mục trước khi lưu khoản này.";
             case "MISSING_INCOMESOURCE" -> "Chọn nguồn thu trước khi lưu khoản này.";

@@ -123,6 +123,32 @@ class VoiceReviewIntegrationTests {
     }
 
     @Test
+    void exactFinancialInboxTranscriptParseReturnsSafeMultiDraft() {
+        TestContext ctx = context("voice_review_truth", WorkspaceRole.OWNER);
+        Category fuel = category(ctx, "Xăng xe", CategoryType.EXPENSE);
+        keyword(ctx, fuel, "xăng");
+        long before = transactionRepository.count();
+
+        VoiceReviewDraftResponse response = voiceReviewService.parse(ctx.workspace().getId(),
+                parse("Hôm nay đã kiếm được 800 Tôi ăn hết 50 Cái đổ xăng hết 65.000 Ta gửi tiết kiệm hết 35"), ctx.user().getId());
+
+        assertThat(response.getMode()).isEqualTo("MULTI");
+        assertThat(response.getStatus()).isEqualTo("NEEDS_REVIEW");
+        assertThat(response.getVoiceRecordId()).isNotNull();
+        assertThat(response.getWarnings()).contains("VOICE_MULTI_INTENT_DETECTED");
+        assertThat(response.getDrafts()).hasSize(4);
+        assertThat(response.getDrafts()).extracting(draft -> draft.getCandidate().getType())
+                .containsExactly(VoiceReviewDraftType.INCOME_FACT, VoiceReviewDraftType.EXPENSE, VoiceReviewDraftType.EXPENSE, VoiceReviewDraftType.SAVINGS_ALLOCATION);
+        assertThat(response.getDrafts()).extracting(draft -> draft.getCandidate().getAmount())
+                .containsExactly(new BigDecimal("800000"), new BigDecimal("50000"), new BigDecimal("65000"), new BigDecimal("35000"));
+        assertThat(response.getDrafts().get(0).getCandidate().isWalletRequired()).isFalse();
+        assertThat(response.getDrafts().get(0).getCandidate().isAffectsWalletBalance()).isFalse();
+        assertThat(response.getDrafts().get(2).getCandidate().getCategoryId()).isEqualTo(fuel.getId());
+        assertThat(response.getDrafts().get(3).getCandidate().isCountsAsExpense()).isFalse();
+        assertThat(transactionRepository.count()).isEqualTo(before);
+    }
+
+    @Test
     void patchDraftUpdatesFieldsWithoutCreatingTransaction() {
         Fixture fixture = fixture("voice_review_patch");
         VoiceRecord record = record(fixture.ctx(), VoiceRecordStatus.PARSED);

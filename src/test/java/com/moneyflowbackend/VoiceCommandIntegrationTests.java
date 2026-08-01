@@ -185,6 +185,40 @@ class VoiceCommandIntegrationTests {
     }
 
     @Test
+    void exactFinancialInboxTranscriptReturnsMultiDraftWithoutPosting() throws Exception {
+        TestUser owner = registerAndLogin("voice_command_truth");
+        wallet(owner.workspace(), "Cash");
+        Category fuel = category(owner.workspace(), "Xăng xe", CategoryType.EXPENSE);
+        keyword(owner.workspace(), fuel, "xăng");
+        long txBefore = transactionRepository.count();
+
+        mockMvc.perform(post("/api/workspaces/{workspaceId}/voice-command/interpret", owner.workspace().getId())
+                        .header("Authorization", bearer(owner.token()))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("text", "Hôm nay đã kiếm được 800 Tôi ăn hết 50 Cái đổ xăng hết 65.000 Ta gửi tiết kiệm hết 35"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.mode").value("MULTI_DRAFT_REVIEW"))
+                .andExpect(jsonPath("$.data.status").value("NEEDS_REVIEW"))
+                .andExpect(jsonPath("$.data.commandType").value("LEDGER_DRAFT"))
+                .andExpect(jsonPath("$.data.drafts.length()").value(4))
+                .andExpect(jsonPath("$.data.drafts[0].candidate.type").value("INCOME_FACT"))
+                .andExpect(jsonPath("$.data.drafts[0].candidate.amount").value(800000))
+                .andExpect(jsonPath("$.data.drafts[0].candidate.walletRequired").value(false))
+                .andExpect(jsonPath("$.data.drafts[0].candidate.affectsWalletBalance").value(false))
+                .andExpect(jsonPath("$.data.drafts[1].candidate.type").value("EXPENSE"))
+                .andExpect(jsonPath("$.data.drafts[1].candidate.amount").value(50000))
+                .andExpect(jsonPath("$.data.drafts[2].candidate.type").value("EXPENSE"))
+                .andExpect(jsonPath("$.data.drafts[2].candidate.amount").value(65000))
+                .andExpect(jsonPath("$.data.drafts[2].candidate.categoryId").value(fuel.getId().toString()))
+                .andExpect(jsonPath("$.data.drafts[3].candidate.type").value("SAVINGS_ALLOCATION"))
+                .andExpect(jsonPath("$.data.drafts[3].candidate.amount").value(35000))
+                .andExpect(jsonPath("$.data.drafts[3].candidate.countsAsExpense").value(false))
+                .andExpect(jsonPath("$.data.warnings[1].code").value("VOICE_MULTI_INTENT_DETECTED"));
+
+        assertThat(transactionRepository.count()).isEqualTo(txBefore);
+    }
+
+    @Test
     void debtMovementRoutesToDebtDraftWithoutPosting() throws Exception {
         TestUser owner = registerAndLogin("voice_command_debt");
         long txBefore = transactionRepository.count();

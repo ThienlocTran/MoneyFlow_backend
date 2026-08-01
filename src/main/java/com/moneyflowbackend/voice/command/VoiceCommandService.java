@@ -11,6 +11,7 @@ import com.moneyflowbackend.voice.service.VoiceReviewService;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -82,9 +83,21 @@ public class VoiceCommandService {
                 .review(review)
                 .drafts(review.getDrafts())
                 .answerText(unsupported ? UNSUPPORTED_MESSAGE : ROUTED_TO_REVIEW_MESSAGE)
-                .warnings(List.of(warning(unsupported ? "VOICE_COMMAND_UNSUPPORTED" : "VOICE_COMMAND_ROUTED_TO_REVIEW",
-                        unsupported ? UNSUPPORTED_MESSAGE : ROUTED_TO_REVIEW_MESSAGE)))
+                .warnings(reviewWarnings(review, unsupported))
                 .build();
+    }
+
+    private List<VoiceCommandWarningDto> reviewWarnings(VoiceReviewDraftResponse review, boolean unsupported) {
+        List<VoiceCommandWarningDto> warnings = new ArrayList<>();
+        warnings.add(warning(unsupported ? "VOICE_COMMAND_UNSUPPORTED" : "VOICE_COMMAND_ROUTED_TO_REVIEW",
+                unsupported ? UNSUPPORTED_MESSAGE : ROUTED_TO_REVIEW_MESSAGE));
+        if (review.getWarningDetails() != null) {
+            review.getWarningDetails().stream()
+                    .filter(item -> "VOICE_MULTI_INTENT_DETECTED".equals(item.getCode()))
+                    .findFirst()
+                    .ifPresent(item -> warnings.add(warning(item.getCode(), item.getMessage())));
+        }
+        return warnings;
     }
 
     private VoiceCommandMode mode(VoiceReviewDraftResponse review) {
