@@ -65,7 +65,7 @@ class VoiceCommandEngineParserTests {
 
         assertDraft(parser.parse("Bảo nợ tôi 500k", f.workspace(), f.keywords(), f.categories(), f.wallets()), VoiceIntentType.DEBT_CREATE_RECEIVABLE, "500000");
         assertDraft(parser.parse("cho Bảo mượn 500k tiền mặt", f.workspace(), f.keywords(), f.categories(), f.wallets()), VoiceIntentType.LOAN_DISBURSEMENT, "500000");
-        assertDraft(parser.parse("tôi trả chị Nga 1 triệu", f.workspace(), f.keywords(), f.categories(), f.wallets()), VoiceIntentType.DEBT_PAYMENT, "1000000");
+        assertDraft(parser.parse("tôi trả chị Nga 1 triệu", f.workspace(), f.keywords(), f.categories(), f.wallets()), VoiceIntentType.PAYABLE_REPAYMENT, "1000000");
         assertDraft(parser.parse("bỏ 500k vào quỹ khẩn cấp từ ví tiền mặt", f.workspace(), f.keywords(), f.categories(), f.wallets()), VoiceIntentType.EMERGENCY_FUND_CONTRIBUTION, "500000");
         assertDraft(parser.parse("ví tiền mặt của anh còn 2 triệu", f.workspace(), f.keywords(), f.categories(), f.wallets()), VoiceIntentType.WALLET_BALANCE_SNAPSHOT, "2000000");
 

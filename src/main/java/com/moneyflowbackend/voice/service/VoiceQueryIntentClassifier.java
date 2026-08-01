@@ -53,10 +53,10 @@ public class VoiceQueryIntentClassifier {
                 && containsAny(value, "kiem duoc bao nhieu", "thu bao nhieu", "thu nhap", "tong thu", "thu duoc bao nhieu")) {
             return "MONTH_INCOME_TOTAL";
         }
-        if (containsAny(value, "ai con no toi", "ai no toi", "nguoi khac con no toi", "phai thu", "tong no phai thu", "thu no")) {
+        if (containsAny(value, "ai con no toi", "ai no toi", "nguoi khac con no toi", "con no toi", "no toi bao nhieu", "phai thu", "tong no phai thu", "thu no")) {
             return "RECEIVABLE_SUMMARY";
         }
-        if (containsAny(value, "toi dang no ai", "toi no ai", "con phai tra bao nhieu", "tong no phai tra", "no phai tra", "phai tra")) {
+        if (containsAny(value, "toi dang no ai", "toi no ai", "toi con no", "con phai tra bao nhieu", "tong no phai tra", "no phai tra", "phai tra")) {
             return "PAYABLE_SUMMARY";
         }
         if (containsAny(value, "thang sau", "ngay mai", "nam sau", "du bao", "du tinh", "du tien khong")) {

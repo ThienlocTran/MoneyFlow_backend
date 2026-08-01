@@ -98,7 +98,14 @@ public class VoiceCommandService {
         if (type == VoiceReviewDraftType.WALLET_SNAPSHOT) {
             return VoiceCommandMode.WALLET_SNAPSHOT_REVIEW;
         }
-        if (type == VoiceReviewDraftType.DEBT || type == VoiceReviewDraftType.UNKNOWN || type == null) {
+        if (type == VoiceReviewDraftType.DEBT
+                || type == VoiceReviewDraftType.LOAN_DISBURSEMENT
+                || type == VoiceReviewDraftType.LOAN_COLLECTION
+                || type == VoiceReviewDraftType.BORROWING_RECEIPT
+                || type == VoiceReviewDraftType.BORROWING_REPAYMENT) {
+            return VoiceCommandMode.DEBT_DRAFT;
+        }
+        if (type == VoiceReviewDraftType.UNKNOWN || type == null) {
             return VoiceCommandMode.UNSUPPORTED;
         }
         return VoiceCommandMode.TRANSACTION_REVIEW;

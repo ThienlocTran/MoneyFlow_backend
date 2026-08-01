@@ -394,9 +394,10 @@ public class QuickEntryParser {
                 || hasAny(normalized, "cuoi ngay", "so du", "cap nhat so du", "chot so du", "balance snapshot")) return VoiceIntentType.WALLET_BALANCE_SNAPSHOT;
         if (hasAny(normalized, "nhan lai ngan hang", "lai ngan hang", "lai cake", "tien lai hom nay")) return VoiceIntentType.INTEREST_INCOME;
         if (hasAny(normalized, "tra tien lai", "tra lai vay", "tra lai")) return VoiceIntentType.INTEREST_EXPENSE;
-        if (hasAny(normalized, "bao tra toi", "thu no")) return VoiceIntentType.LOAN_COLLECTION;
-        if (hasAny(normalized, "tra no", "thanh toan no", "dong no", "tra toi", "tra minh", "tra cho", "tra chi", "tra anh", "tra em")) return VoiceIntentType.DEBT_PAYMENT;
-        if (hasAny(normalized, "cho vay", "cho muon", "dua vay")
+        if (hasAny(normalized, "toi muon", "minh muon", "toi vay", "minh vay", "cho toi muon", "cho minh muon", "cho toi vay", "cho minh vay")) return VoiceIntentType.BORROWING_RECEIPT;
+        if (hasAny(normalized, "bao tra toi", "tra no toi", "tra no minh", "thu no", "tra toi", "tra minh", "chuyen lai", "gui lai")) return VoiceIntentType.LOAN_COLLECTION;
+        if (hasAny(normalized, "tra no", "thanh toan no", "dong no", "tra cho", "tra chi", "tra anh", "tra em")) return VoiceIntentType.PAYABLE_REPAYMENT;
+        if (hasAny(normalized, "cho vay", "cho muon", "dua vay", "dua muon")
                 || (hasAny(normalized, "cho") && hasAny(normalized, "muon", "vay"))) return VoiceIntentType.LOAN_DISBURSEMENT;
         if (hasAny(normalized, "toi no", "minh no")) return VoiceIntentType.DEBT_CREATE_PAYABLE;
         if (hasAny(normalized, "no toi", "no minh", "thieu toi", "tao no", "them no")) return VoiceIntentType.DEBT_CREATE_RECEIVABLE;
@@ -412,7 +413,7 @@ public class QuickEntryParser {
 
     private String suggestedManualRoute(VoiceIntentType intentType) {
         return switch (intentType) {
-            case DEBT_CREATE, DEBT_CREATE_RECEIVABLE, DEBT_CREATE_PAYABLE, DEBT_PAYMENT, LOAN_DISBURSEMENT, LOAN_COLLECTION, PAYABLE_REPAYMENT, INTEREST_EXPENSE -> "/debts";
+            case DEBT_CREATE, DEBT_CREATE_RECEIVABLE, DEBT_CREATE_PAYABLE, DEBT_PAYMENT, LOAN_DISBURSEMENT, LOAN_COLLECTION, BORROWING_RECEIPT, PAYABLE_REPAYMENT, INTEREST_EXPENSE -> "/debts";
             case INTEREST_INCOME -> "/income-sources";
             case SAVINGS_GOAL_CONTRIBUTION -> "/savings-goals";
             case SINKING_FUND_CONTRIBUTION -> "/sinking-funds";
@@ -425,6 +426,9 @@ public class QuickEntryParser {
     }
 
     private String suggestedManualActionLabel(VoiceIntentType intentType) {
+        if (intentType == VoiceIntentType.BORROWING_RECEIPT) {
+            return "Open debts";
+        }
         return switch (intentType) {
             case DEBT_CREATE, DEBT_CREATE_RECEIVABLE, DEBT_CREATE_PAYABLE, DEBT_PAYMENT, LOAN_DISBURSEMENT, LOAN_COLLECTION, PAYABLE_REPAYMENT, INTEREST_EXPENSE -> "Mở trang nợ";
             case INTEREST_INCOME -> "Mở nguồn thu";
@@ -456,7 +460,7 @@ public class QuickEntryParser {
         return switch (intentType) {
             case WALLET_BALANCE_SNAPSHOT, DAILY_CLOSING -> List.of("walletId");
             case DEBT_PAYMENT, LOAN_COLLECTION, PAYABLE_REPAYMENT, INTEREST_EXPENSE -> List.of("debtId");
-            case DEBT_CREATE, DEBT_CREATE_RECEIVABLE, DEBT_CREATE_PAYABLE, LOAN_DISBURSEMENT -> List.of("counterpartyId");
+            case DEBT_CREATE, DEBT_CREATE_RECEIVABLE, DEBT_CREATE_PAYABLE, LOAN_DISBURSEMENT, BORROWING_RECEIPT -> List.of("counterpartyId");
             case INTEREST_INCOME -> List.of("incomeSourceId");
             case SAVINGS_GOAL_CONTRIBUTION -> List.of("savingsGoalId");
             case SINKING_FUND_CONTRIBUTION -> List.of("sinkingFundId");
@@ -515,7 +519,7 @@ public class QuickEntryParser {
         return switch (intentType) {
             case STAT_QUERY, ANALYTICS_QUERY -> "REPORTS";
             case WALLET_BALANCE_SNAPSHOT, DAILY_CLOSING -> "WALLET_SNAPSHOT";
-            case DEBT_CREATE, DEBT_CREATE_RECEIVABLE, DEBT_CREATE_PAYABLE, DEBT_PAYMENT, LOAN_DISBURSEMENT, LOAN_COLLECTION, PAYABLE_REPAYMENT, INTEREST_EXPENSE -> "DEBT";
+            case DEBT_CREATE, DEBT_CREATE_RECEIVABLE, DEBT_CREATE_PAYABLE, DEBT_PAYMENT, LOAN_DISBURSEMENT, LOAN_COLLECTION, BORROWING_RECEIPT, PAYABLE_REPAYMENT, INTEREST_EXPENSE -> "DEBT";
             case INTEREST_INCOME -> "INCOME";
             case SAVINGS_GOAL_CONTRIBUTION -> "SAVINGS_GOAL";
             case SINKING_FUND_CONTRIBUTION -> "SINKING_FUND";

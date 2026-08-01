@@ -44,6 +44,9 @@ public class VoiceCommandClassifier {
                 "chi nhieu nhat",
                 "ai con no toi",
                 "toi dang no ai",
+                "con no",
+                "no toi bao nhieu",
+                "toi con no",
                 "con that su tieu duoc bao nhieu",
                 "con co the chi",
                 "con co the tieu");
@@ -67,7 +70,13 @@ public class VoiceCommandClassifier {
                 "gui tiet kiem",
                 "bo vao quy",
                 "cho muon",
-                "tra no");
+                "cho vay",
+                "muon",
+                "vay",
+                "tra no",
+                "thu no",
+                "tra toi",
+                "thanh toan no");
     }
 
     private boolean hasAmount(String value) {

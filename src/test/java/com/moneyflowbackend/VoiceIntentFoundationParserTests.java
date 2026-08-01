@@ -51,7 +51,7 @@ class VoiceIntentFoundationParserTests {
 
         var preview = parser.parse("tra no 500k hom qua", f.workspace(), f.keywords(), f.categories(), f.wallets());
 
-        assertThat(preview.getIntentType()).isEqualTo(VoiceIntentType.DEBT_PAYMENT);
+        assertThat(preview.getIntentType()).isEqualTo(VoiceIntentType.PAYABLE_REPAYMENT);
         assertThat(preview.getCandidateStatus()).isEqualTo(VoiceCandidateStatus.MANUAL);
         assertThat(preview.getType()).isNull();
         assertThat(preview.getAmount()).isEqualByComparingTo("500000");
@@ -78,7 +78,7 @@ class VoiceIntentFoundationParserTests {
 
         assertDraft(parser.parse("cho Bảo mượn 750k", f.workspace(), f.keywords(), f.categories(), f.wallets()), VoiceIntentType.LOAN_DISBURSEMENT);
         assertDraft(parser.parse("Bảo trả tôi 180k", f.workspace(), f.keywords(), f.categories(), f.wallets()), VoiceIntentType.LOAN_COLLECTION);
-        assertDraft(parser.parse("trả nợ 1 triệu cho chị Nga", f.workspace(), f.keywords(), f.categories(), f.wallets()), VoiceIntentType.DEBT_PAYMENT);
+        assertDraft(parser.parse("trả nợ 1 triệu cho chị Nga", f.workspace(), f.keywords(), f.categories(), f.wallets()), VoiceIntentType.PAYABLE_REPAYMENT);
         assertDraft(parser.parse("góp 300k vào mục tiêu du lịch", f.workspace(), f.keywords(), f.categories(), f.wallets()), VoiceIntentType.SAVINGS_GOAL_CONTRIBUTION);
         assertDraft(parser.parse("góp 500k vào quỹ sửa xe", f.workspace(), f.keywords(), f.categories(), f.wallets()), VoiceIntentType.SINKING_FUND_CONTRIBUTION);
         assertDraft(parser.parse("ví tiền mặt còn 2 triệu", f.workspace(), f.keywords(), f.categories(), f.wallets()), VoiceIntentType.WALLET_BALANCE_SNAPSHOT);

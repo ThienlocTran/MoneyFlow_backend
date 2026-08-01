@@ -307,9 +307,54 @@ class VoiceReviewIntegrationTests {
 
         VoiceReviewDraftResponse response = voiceReviewService.parse(fixture.ctx().workspace().getId(), parse("Bao tra no toi 500"), fixture.ctx().user().getId());
 
-        assertThat(response.getCandidate().getType()).isEqualTo(VoiceReviewDraftType.DEBT);
-        assertThat(response.getCandidate().isAffectsWalletBalance()).isFalse();
-        assertThat(response.getWarnings()).contains("VOICE_INTENT_NOT_COMMITTABLE");
+        assertThat(response.getCandidate().getType()).isEqualTo(VoiceReviewDraftType.LOAN_COLLECTION);
+        assertThat(response.getCandidate().getDebtDirection()).isEqualTo("RECEIVABLE");
+        assertThat(response.getCandidate().isCountsAsIncome()).isFalse();
+        assertThat(response.getCandidate().isCountsAsExpense()).isFalse();
+        assertThat(response.getCandidate().isCategoryRequired()).isFalse();
+        assertThat(response.getCandidate().getNeedsFields()).contains("debtId", "destinationWalletId");
+        assertThat(response.getDrafts().get(0).getWarnings()).extracting("code")
+                .contains("DEBT_NOT_EXPENSE", "DEBT_NOT_INCOME", "DEBT_WALLET_REQUIRED", "DEBT_NOT_FOUND", "DEBT_CONFIRM_NOT_SUPPORTED");
+    }
+
+    @Test
+    void debtMovementDraftsKeepDomainTypesAndNeverBecomeIncomeOrExpense() {
+        Fixture fixture = fixture("voice_review_debt_types");
+
+        VoiceReviewDraftResponse disbursement = voiceReviewService.parse(fixture.ctx().workspace().getId(), parse("cho Nam muon 500k"), fixture.ctx().user().getId());
+        VoiceReviewDraftResponse collection = voiceReviewService.parse(fixture.ctx().workspace().getId(), parse("Nam tra toi 200k"), fixture.ctx().user().getId());
+        VoiceReviewDraftResponse borrowing = voiceReviewService.parse(fixture.ctx().workspace().getId(), parse("toi muon Nam 1 trieu"), fixture.ctx().user().getId());
+        VoiceReviewDraftResponse repayment = voiceReviewService.parse(fixture.ctx().workspace().getId(), parse("toi tra no Nam 100k"), fixture.ctx().user().getId());
+
+        assertDebtDraft(disbursement, VoiceReviewDraftType.LOAN_DISBURSEMENT, "RECEIVABLE", "sourceWalletId", "counterpartyId");
+        assertDebtDraft(collection, VoiceReviewDraftType.LOAN_COLLECTION, "RECEIVABLE", "destinationWalletId", "debtId");
+        assertDebtDraft(borrowing, VoiceReviewDraftType.BORROWING_RECEIPT, "PAYABLE", "destinationWalletId", "counterpartyId");
+        assertDebtDraft(repayment, VoiceReviewDraftType.BORROWING_REPAYMENT, "PAYABLE", "sourceWalletId", "debtId");
+    }
+
+    @Test
+    void debtDraftConfirmIsUnsupportedAndCreatesNoTransaction() {
+        Fixture fixture = fixture("voice_review_debt_confirm");
+        VoiceReviewDraftResponse parsed = voiceReviewService.parse(fixture.ctx().workspace().getId(), parse("cho Nam muon 500k"), fixture.ctx().user().getId());
+        long before = transactionRepository.count();
+
+        assertBusinessCode(() -> voiceReviewService.confirmDraft(fixture.ctx().workspace().getId(), parsed.getVoiceRecordId(), parsed.getDrafts().get(0).getDraftId(), null, fixture.ctx().user().getId()),
+                "DEBT_CONFIRM_NOT_SUPPORTED");
+        assertThat(transactionRepository.count()).isEqualTo(before);
+    }
+
+    @Test
+    void mixedExpenseAndDebtMovementsReturnSeparateDraftTypes() {
+        Fixture fixture = fixture("voice_review_debt_multi");
+
+        VoiceReviewDraftResponse response = voiceReviewService.parse(fixture.ctx().workspace().getId(),
+                parse("hom nay an 50k, cho Nam muon 500k, Nam tra toi 200k"), fixture.ctx().user().getId());
+
+        assertThat(response.getMode()).isEqualTo("MULTI");
+        assertThat(response.getDrafts()).extracting(draft -> draft.getCandidate().getType())
+                .containsExactly(VoiceReviewDraftType.EXPENSE, VoiceReviewDraftType.LOAN_DISBURSEMENT, VoiceReviewDraftType.LOAN_COLLECTION);
+        assertThat(response.getDrafts().get(1).getCandidate().isCountsAsExpense()).isFalse();
+        assertThat(response.getDrafts().get(2).getCandidate().isCountsAsIncome()).isFalse();
     }
 
     @Test
@@ -505,6 +550,18 @@ class VoiceReviewIntegrationTests {
                 .isInstanceOf(BusinessException.class)
                 .extracting("code")
                 .isEqualTo(code);
+    }
+
+    private void assertDebtDraft(VoiceReviewDraftResponse response, VoiceReviewDraftType type, String direction, String walletField, String referenceField) {
+        assertThat(response.getCandidate().getType()).isEqualTo(type);
+        assertThat(response.getCandidate().getDebtDirection()).isEqualTo(direction);
+        assertThat(response.getCandidate().isAffectsWalletBalance()).isTrue();
+        assertThat(response.getCandidate().isCountsAsIncome()).isFalse();
+        assertThat(response.getCandidate().isCountsAsExpense()).isFalse();
+        assertThat(response.getCandidate().isCategoryRequired()).isFalse();
+        assertThat(response.getCandidate().isCanConfirm()).isFalse();
+        assertThat(response.getCandidate().getNeedsFields()).contains(walletField, referenceField);
+        assertThat(response.getDrafts().get(0).getWarnings()).extracting("code").contains("DEBT_CONFIRM_NOT_SUPPORTED");
     }
 
     @FunctionalInterface

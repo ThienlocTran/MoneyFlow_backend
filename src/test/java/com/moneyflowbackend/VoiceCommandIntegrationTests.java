@@ -185,6 +185,49 @@ class VoiceCommandIntegrationTests {
     }
 
     @Test
+    void debtMovementRoutesToDebtDraftWithoutPosting() throws Exception {
+        TestUser owner = registerAndLogin("voice_command_debt");
+        long txBefore = transactionRepository.count();
+        long voiceBefore = voiceRecordRepository.count();
+
+        mockMvc.perform(post("/api/workspaces/{workspaceId}/voice-command/interpret", owner.workspace().getId())
+                        .header("Authorization", bearer(owner.token()))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("text", "toi muon Nam 1 trieu"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.mode").value("DEBT_DRAFT"))
+                .andExpect(jsonPath("$.data.status").value("NEEDS_REVIEW"))
+                .andExpect(jsonPath("$.data.commandType").value("LEDGER_DRAFT"))
+                .andExpect(jsonPath("$.data.review.candidate.type").value("BORROWING_RECEIPT"))
+                .andExpect(jsonPath("$.data.review.candidate.debtDirection").value("PAYABLE"))
+                .andExpect(jsonPath("$.data.review.candidate.countsAsIncome").value(false))
+                .andExpect(jsonPath("$.data.review.candidate.countsAsExpense").value(false))
+                .andExpect(jsonPath("$.data.review.candidate.categoryRequired").value(false));
+
+        assertThat(transactionRepository.count()).isEqualTo(txBefore);
+        assertThat(voiceRecordRepository.count()).isEqualTo(voiceBefore + 1);
+    }
+
+    @Test
+    void debtStatusQuestionRoutesToReadOnlyQuery() throws Exception {
+        TestUser owner = registerAndLogin("voice_command_debt_query");
+        long txBefore = transactionRepository.count();
+        long voiceBefore = voiceRecordRepository.count();
+
+        mockMvc.perform(post("/api/workspaces/{workspaceId}/voice-command/interpret", owner.workspace().getId())
+                        .header("Authorization", bearer(owner.token()))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("text", "Nam con no toi bao nhieu?"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.mode").value("READ_ONLY_QUERY"))
+                .andExpect(jsonPath("$.data.commandType").value("READ_ONLY_QUERY"))
+                .andExpect(jsonPath("$.data.query.intent").value("RECEIVABLE_SUMMARY"));
+
+        assertThat(transactionRepository.count()).isEqualTo(txBefore);
+        assertThat(voiceRecordRepository.count()).isEqualTo(voiceBefore);
+    }
+
+    @Test
     void mixedQueryAndDraftNeedsClarificationWithoutCreatingRows() throws Exception {
         TestUser owner = registerAndLogin("voice_command_mixed");
         long txBefore = transactionRepository.count();

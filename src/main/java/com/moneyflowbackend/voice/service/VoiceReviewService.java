@@ -204,6 +204,9 @@ public class VoiceReviewService {
         if (savingsLike(draftType)) {
             needsFields = savingsNeeds(needsFields);
         }
+        if (debtLike(draftType)) {
+            needsFields = debtNeeds(draftType, needsFields);
+        }
         VoiceReviewDraftResponse.Candidate candidate = VoiceReviewDraftResponse.Candidate.builder()
                 .type(draftType)
                 .amount(preview.getAmount())
@@ -217,12 +220,17 @@ public class VoiceReviewService {
                 .categoryName(preview.getCategoryName())
                 .incomeSourceId(preview.getIncomeSourceId())
                 .incomeSourceName(preview.getIncomeSourceName())
+                .debtDirection(debtDirection(draftType))
+                .counterpartyName(counterpartyName(draftType, preview.getRawInput()))
+                .destinationWalletId(preview.getDestinationWalletId())
+                .destinationWalletName(preview.getDestinationWalletName())
                 .targetFundNameCandidate(savingsTargetCandidate(draftType, preview.getRawInput()))
                 .note(preview.getDescription())
                 .scope(preview.getSpendingScope())
-                .affectsWalletBalance(!savingsLike(draftType) && preview.isAffectsWalletBalance())
+                .affectsWalletBalance(debtLike(draftType) || (!savingsLike(draftType) && preview.isAffectsWalletBalance()))
                 .countsAsExpense(draftType == VoiceReviewDraftType.EXPENSE)
-                .walletRequired(draftType == VoiceReviewDraftType.EXPENSE || draftType == VoiceReviewDraftType.INCOME || savingsLike(draftType))
+                .countsAsIncome(draftType == VoiceReviewDraftType.INCOME)
+                .walletRequired(draftType == VoiceReviewDraftType.EXPENSE || draftType == VoiceReviewDraftType.INCOME || savingsLike(draftType) || debtLike(draftType))
                 .categoryRequired(draftType == VoiceReviewDraftType.EXPENSE)
                 .needsFields(needsFields)
                 .build();
@@ -300,6 +308,9 @@ public class VoiceReviewService {
         if (savingsLike(candidate.getType())) {
             addSavingsWarnings(codes);
         }
+        if (debtLike(candidate.getType())) {
+            addDebtWarnings(codes, candidate.getType());
+        }
         if (!supported(candidate.getType()) && !codes.contains("DRAFT_UNSUPPORTED_TYPE")) {
             codes.add("DRAFT_UNSUPPORTED_TYPE");
         }
@@ -325,6 +336,9 @@ public class VoiceReviewService {
         if (savingsLike(draftType)) {
             needsFields = savingsNeeds(needsFields);
         }
+        if (debtLike(draftType)) {
+            needsFields = debtNeeds(draftType, needsFields);
+        }
         return VoiceReviewDraftResponse.Candidate.builder()
                 .type(draftType)
                 .amount(preview.getAmount())
@@ -338,12 +352,17 @@ public class VoiceReviewService {
                 .categoryName(preview.getCategoryName())
                 .incomeSourceId(preview.getIncomeSourceId())
                 .incomeSourceName(preview.getIncomeSourceName())
+                .debtDirection(debtDirection(draftType))
+                .counterpartyName(counterpartyName(draftType, preview.getRawInput()))
+                .destinationWalletId(preview.getDestinationWalletId())
+                .destinationWalletName(preview.getDestinationWalletName())
                 .targetFundNameCandidate(savingsTargetCandidate(draftType, preview.getRawInput()))
                 .note(preview.getDescription())
                 .scope(preview.getSpendingScope())
-                .affectsWalletBalance(!savingsLike(draftType) && preview.isAffectsWalletBalance())
+                .affectsWalletBalance(debtLike(draftType) || (!savingsLike(draftType) && preview.isAffectsWalletBalance()))
                 .countsAsExpense(draftType == VoiceReviewDraftType.EXPENSE)
-                .walletRequired(draftType == VoiceReviewDraftType.EXPENSE || draftType == VoiceReviewDraftType.INCOME || savingsLike(draftType))
+                .countsAsIncome(draftType == VoiceReviewDraftType.INCOME)
+                .walletRequired(draftType == VoiceReviewDraftType.EXPENSE || draftType == VoiceReviewDraftType.INCOME || savingsLike(draftType) || debtLike(draftType))
                 .categoryRequired(draftType == VoiceReviewDraftType.EXPENSE)
                 .canConfirm(false)
                 .needsFields(needsFields)
@@ -359,6 +378,9 @@ public class VoiceReviewService {
         if (savingsLike(draftType)) {
             needsFields = savingsNeeds(needsFields);
         }
+        if (debtLike(draftType)) {
+            needsFields = debtNeeds(draftType, needsFields);
+        }
         return VoiceReviewDraftResponse.Candidate.builder()
                 .type(draftType)
                 .amount(preview.getAmount())
@@ -372,12 +394,17 @@ public class VoiceReviewService {
                 .categoryName(preview.getCategoryName())
                 .incomeSourceId(preview.getIncomeSourceId())
                 .incomeSourceName(preview.getIncomeSourceName())
+                .debtDirection(debtDirection(draftType))
+                .counterpartyName(counterpartyName(draftType, preview.getOriginalText()))
+                .destinationWalletId(preview.getDestinationWalletId())
+                .destinationWalletName(preview.getDestinationWalletName())
                 .targetFundNameCandidate(savingsTargetCandidate(draftType, preview.getOriginalText()))
                 .note(preview.getDescription())
                 .scope(preview.getSpendingScope())
-                .affectsWalletBalance(!savingsLike(draftType) && preview.isAffectsWalletBalance())
+                .affectsWalletBalance(debtLike(draftType) || (!savingsLike(draftType) && preview.isAffectsWalletBalance()))
                 .countsAsExpense(draftType == VoiceReviewDraftType.EXPENSE)
-                .walletRequired(draftType == VoiceReviewDraftType.EXPENSE || draftType == VoiceReviewDraftType.INCOME || savingsLike(draftType))
+                .countsAsIncome(draftType == VoiceReviewDraftType.INCOME)
+                .walletRequired(draftType == VoiceReviewDraftType.EXPENSE || draftType == VoiceReviewDraftType.INCOME || savingsLike(draftType) || debtLike(draftType))
                 .categoryRequired(draftType == VoiceReviewDraftType.EXPENSE)
                 .canConfirm(false)
                 .needsFields(needsFields)
@@ -450,8 +477,20 @@ public class VoiceReviewService {
                 if (committing) throw new BusinessException("WALLET_SNAPSHOT_CONFIRM_NOT_SUPPORTED", "MoneyFlow đã hiểu đây là số dư ví, nhưng luồng lưu snapshot chưa bật.");
             }
             case DEBT -> {
-                warnings.add("VOICE_DEBT_CONFIRM_UNSUPPORTED");
-                if (committing) throw incomplete("debt");
+                addDebtWarnings(warnings, type);
+                if (committing) throw debtUnsupported();
+            }
+            case LOAN_DISBURSEMENT, BORROWING_RECEIPT -> {
+                needs.add("counterpartyId");
+                needs.add(type == VoiceReviewDraftType.LOAN_DISBURSEMENT ? "sourceWalletId" : "destinationWalletId");
+                addDebtWarnings(warnings, type);
+                if (committing) throw debtUnsupported();
+            }
+            case LOAN_COLLECTION, BORROWING_REPAYMENT -> {
+                needs.add("debtId");
+                needs.add(type == VoiceReviewDraftType.LOAN_COLLECTION ? "destinationWalletId" : "sourceWalletId");
+                addDebtWarnings(warnings, type);
+                if (committing) throw debtUnsupported();
             }
             case SAVINGS -> {
                 needs.add("sourceWalletId");
@@ -485,13 +524,19 @@ public class VoiceReviewService {
                 .categoryName(category == null ? null : category.getName())
                 .incomeSourceId(source == null ? null : source.getId())
                 .incomeSourceName(source == null ? null : source.getName())
+                .debtDirection(req.getDebtDirection() == null ? debtDirection(type) : req.getDebtDirection())
+                .counterpartyId(req.getCounterpartyId())
+                .counterpartyName(normalize(req.getCounterpartyName()))
+                .debtId(req.getDebtId())
                 .targetFundId(req.getTargetFundId())
+                .destinationWalletId(req.getDestinationWalletId())
                 .jarId(req.getJarId())
                 .note(normalize(req.getNote()))
                 .scope(req.getScope())
-                .affectsWalletBalance(wallet != null && (type == VoiceReviewDraftType.EXPENSE || type == VoiceReviewDraftType.INCOME))
+                .affectsWalletBalance(debtLike(type) || (wallet != null && (type == VoiceReviewDraftType.EXPENSE || type == VoiceReviewDraftType.INCOME)))
                 .countsAsExpense(type == VoiceReviewDraftType.EXPENSE)
-                .walletRequired(type == VoiceReviewDraftType.EXPENSE || type == VoiceReviewDraftType.INCOME || savingsLike(type))
+                .countsAsIncome(type == VoiceReviewDraftType.INCOME)
+                .walletRequired(type == VoiceReviewDraftType.EXPENSE || type == VoiceReviewDraftType.INCOME || savingsLike(type) || debtLike(type))
                 .categoryRequired(type == VoiceReviewDraftType.EXPENSE)
                 .needsFields(needs.stream().distinct().toList())
                 .build();
@@ -556,7 +601,11 @@ public class VoiceReviewService {
         if (transactionType == TransactionType.TRANSFER) return VoiceReviewDraftType.TRANSFER;
         if (intentType == null) return VoiceReviewDraftType.UNKNOWN;
         return switch (intentType) {
-            case DEBT_CREATE, DEBT_CREATE_PAYABLE, DEBT_CREATE_RECEIVABLE, DEBT_PAYMENT, LOAN_DISBURSEMENT, LOAN_COLLECTION, PAYABLE_REPAYMENT, INTEREST_EXPENSE -> VoiceReviewDraftType.DEBT;
+            case LOAN_DISBURSEMENT, DEBT_CREATE_RECEIVABLE -> VoiceReviewDraftType.LOAN_DISBURSEMENT;
+            case LOAN_COLLECTION -> VoiceReviewDraftType.LOAN_COLLECTION;
+            case BORROWING_RECEIPT, DEBT_CREATE_PAYABLE -> VoiceReviewDraftType.BORROWING_RECEIPT;
+            case DEBT_PAYMENT, PAYABLE_REPAYMENT -> VoiceReviewDraftType.BORROWING_REPAYMENT;
+            case DEBT_CREATE, INTEREST_EXPENSE -> VoiceReviewDraftType.DEBT;
             case SAVINGS_GOAL_CONTRIBUTION -> VoiceReviewDraftType.SAVINGS_ALLOCATION;
             case SINKING_FUND_CONTRIBUTION -> VoiceReviewDraftType.SINKING_FUND_CONTRIBUTION;
             case EMERGENCY_FUND_CONTRIBUTION -> VoiceReviewDraftType.EMERGENCY_FUND_CONTRIBUTION;
@@ -569,6 +618,74 @@ public class VoiceReviewService {
                 || type == VoiceReviewDraftType.SAVINGS_ALLOCATION
                 || type == VoiceReviewDraftType.SINKING_FUND_CONTRIBUTION
                 || type == VoiceReviewDraftType.EMERGENCY_FUND_CONTRIBUTION;
+    }
+
+    private boolean debtLike(VoiceReviewDraftType type) {
+        return type == VoiceReviewDraftType.DEBT
+                || type == VoiceReviewDraftType.LOAN_DISBURSEMENT
+                || type == VoiceReviewDraftType.LOAN_COLLECTION
+                || type == VoiceReviewDraftType.BORROWING_RECEIPT
+                || type == VoiceReviewDraftType.BORROWING_REPAYMENT;
+    }
+
+    private String debtDirection(VoiceReviewDraftType type) {
+        if (type == VoiceReviewDraftType.LOAN_DISBURSEMENT || type == VoiceReviewDraftType.LOAN_COLLECTION) return "RECEIVABLE";
+        if (type == VoiceReviewDraftType.BORROWING_RECEIPT || type == VoiceReviewDraftType.BORROWING_REPAYMENT) return "PAYABLE";
+        return null;
+    }
+
+    private List<String> debtNeeds(VoiceReviewDraftType type, List<String> fields) {
+        List<String> needs = new ArrayList<>(fields == null ? List.of() : fields);
+        needs.remove("categoryId");
+        needs.remove("counterpartyId");
+        needs.remove("debtId");
+        if (type == VoiceReviewDraftType.LOAN_DISBURSEMENT) {
+            needs.add("counterpartyId");
+            needs.add("sourceWalletId");
+        } else if (type == VoiceReviewDraftType.BORROWING_RECEIPT) {
+            needs.add("counterpartyId");
+            needs.add("destinationWalletId");
+        } else if (type == VoiceReviewDraftType.LOAN_COLLECTION) {
+            needs.add("debtId");
+            needs.add("destinationWalletId");
+        } else if (type == VoiceReviewDraftType.BORROWING_REPAYMENT) {
+            needs.add("debtId");
+            needs.add("sourceWalletId");
+        }
+        return needs.stream().distinct().toList();
+    }
+
+    private void addDebtWarnings(List<String> codes, VoiceReviewDraftType type) {
+        addCode(codes, "DEBT_NOT_EXPENSE");
+        addCode(codes, "DEBT_NOT_INCOME");
+        if (type == VoiceReviewDraftType.LOAN_COLLECTION || type == VoiceReviewDraftType.BORROWING_REPAYMENT) {
+            addCode(codes, "DEBT_NOT_FOUND");
+        } else {
+            addCode(codes, "DEBT_COUNTERPARTY_REQUIRED");
+        }
+        if (type != VoiceReviewDraftType.DEBT) {
+            addCode(codes, "DEBT_WALLET_REQUIRED");
+        }
+        addCode(codes, "DEBT_CONFIRM_NOT_SUPPORTED");
+    }
+
+    private BusinessException debtUnsupported() {
+        return new BusinessException("DEBT_CONFIRM_NOT_SUPPORTED", "MoneyFlow understood this debt draft, but automatic debt saving is not enabled yet.", HttpStatus.CONFLICT);
+    }
+
+    private String counterpartyName(VoiceReviewDraftType type, String text) {
+        if (!debtLike(type)) return null;
+        String normalized = normalize(text);
+        if (normalized == null) return null;
+        String[] words = normalized.split("\\s+");
+        for (String word : words) {
+            String lower = word.toLowerCase(Locale.ROOT);
+            if (!List.of("toi", "minh", "cho", "muon", "vay", "tra", "no", "thu", "thanh", "toan", "dong", "tien", "lai").contains(lower)
+                    && !lower.matches("\\d+.*|k|nghin|ngan|trieu|tr|dong|vnd")) {
+                return word;
+            }
+        }
+        return null;
     }
 
     private List<String> savingsNeeds(List<String> fields) {
@@ -645,6 +762,9 @@ public class VoiceReviewService {
             case "INCOME_WALLET_NOT_SELECTED", "MISSING_WALLET", "WALLET_SNAPSHOT_WALLET_NOT_MATCHED", "WALLET_MATCH_AMBIGUOUS", "WALLET_SNAPSHOT_NO_WALLET" -> "walletId";
             case "SAVINGS_SOURCE_WALLET_REQUIRED" -> "sourceWalletId";
             case "SAVINGS_TARGET_NOT_SELECTED" -> "targetFundId";
+            case "DEBT_WALLET_REQUIRED" -> "walletId";
+            case "DEBT_COUNTERPARTY_REQUIRED", "DEBT_COUNTERPARTY_AMBIGUOUS" -> "counterpartyId";
+            case "DEBT_NOT_FOUND", "DEBT_MATCH_AMBIGUOUS" -> "debtId";
             case "MISSING_CATEGORY", "CATEGORY_TYPE_MISMATCH", "UNKNOWN_CATEGORY" -> "categoryId";
             case "MISSING_INCOMESOURCE" -> "incomeSourceId";
             default -> null;
@@ -652,6 +772,15 @@ public class VoiceReviewService {
     }
 
     private String warningMessage(String code) {
+        if ("DEBT_NOT_EXPENSE".equals(code)) return "Debt movements are not normal expenses.";
+        if ("DEBT_NOT_INCOME".equals(code)) return "Debt movements are not normal income.";
+        if ("DEBT_COUNTERPARTY_REQUIRED".equals(code)) return "Choose the counterparty before saving this debt draft.";
+        if ("DEBT_COUNTERPARTY_AMBIGUOUS".equals(code)) return "Multiple counterparties match. Choose the correct one.";
+        if ("DEBT_WALLET_REQUIRED".equals(code)) return "Choose the source or destination wallet before saving this debt draft.";
+        if ("DEBT_MATCH_AMBIGUOUS".equals(code)) return "Multiple debts match. Choose the correct debt.";
+        if ("DEBT_NOT_FOUND".equals(code)) return "Choose an existing open debt before recording this payment.";
+        if ("DEBT_CONFIRM_NOT_SUPPORTED".equals(code)) return "MoneyFlow understood this debt draft, but automatic debt saving is not enabled yet.";
+        if ("DEBT_QUERY_USE_ASK_MODE".equals(code)) return "This is a debt question. MoneyFlow will answer read-only and will not create a transaction.";
         return switch (code) {
             case "MULTIPLE_AMOUNTS_DETECTED", "MULTIPLE_ITEMS_DETECTED" -> "Đã phát hiện nhiều khoản, hãy kiểm tra từng dòng trước khi lưu.";
             case "INCOME_WALLET_NOT_SELECTED", "MISSING_WALLET" -> "Chọn ví trước khi lưu khoản này.";
@@ -691,7 +820,12 @@ public class VoiceReviewService {
         req.setSourceWalletId(candidate.getSourceWalletId());
         req.setCategoryId(candidate.getCategoryId());
         req.setIncomeSourceId(candidate.getIncomeSourceId());
+        req.setDebtDirection(candidate.getDebtDirection());
+        req.setCounterpartyId(candidate.getCounterpartyId());
+        req.setCounterpartyName(candidate.getCounterpartyName());
+        req.setDebtId(candidate.getDebtId());
         req.setTargetFundId(candidate.getTargetFundId());
+        req.setDestinationWalletId(candidate.getDestinationWalletId());
         req.setJarId(candidate.getJarId());
         req.setNote(candidate.getNote());
         req.setScope(candidate.getScope());

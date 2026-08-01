@@ -17,7 +17,12 @@ public class VoiceReviewDraftRequest {
     private UUID sourceWalletId;
     private UUID categoryId;
     private UUID incomeSourceId;
+    private String debtDirection;
+    private UUID counterpartyId;
+    private String counterpartyName;
+    private UUID debtId;
     private UUID targetFundId;
+    private UUID destinationWalletId;
     private UUID jarId;
     private String note;
     private SpendingScope scope;
