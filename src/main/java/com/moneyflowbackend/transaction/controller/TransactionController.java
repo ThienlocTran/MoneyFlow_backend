@@ -186,6 +186,13 @@ public class TransactionController {
                 transactionAuditService.list(workspaceId, transactionId, currentUserId())));
     }
 
+    @GetMapping("/{transactionId}/history")
+    public ResponseEntity<ApiResponse<List<TransactionAuditResponse>>> history(
+            @PathVariable UUID workspaceId,
+            @PathVariable UUID transactionId) {
+        return audit(workspaceId, transactionId);
+    }
+
     @PostMapping
     public ResponseEntity<ApiResponse<TransactionResponse>> create(
             @PathVariable UUID workspaceId,

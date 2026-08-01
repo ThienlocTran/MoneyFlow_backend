@@ -1,12 +1,22 @@
 package com.moneyflowbackend.planning.service;
 
 import com.moneyflowbackend.common.exception.BusinessException;
+import com.moneyflowbackend.closing.model.DailyClosingStatus;
+import com.moneyflowbackend.closing.repository.DailyClosingRepository;
 import com.moneyflowbackend.emergencyfund.repository.EmergencyFundLedgerEntryRepository;
 import com.moneyflowbackend.obligation.model.ObligationOccurrence;
 import com.moneyflowbackend.obligation.repository.ObligationOccurrenceRepository;
 import com.moneyflowbackend.planning.dto.ActuallySpendableResponse;
 import com.moneyflowbackend.planning.dto.AdvisoryCommitmentsResponse;
 import com.moneyflowbackend.planning.dto.CommitmentBreakdownResponse;
+import com.moneyflowbackend.planning.dto.PlanningBreakdownGroupResponse;
+import com.moneyflowbackend.planning.dto.PlanningBreakdownItemResponse;
+import com.moneyflowbackend.planning.dto.PlanningBreakdownResponse;
+import com.moneyflowbackend.planning.dto.PlanningDataFreshnessResponse;
+import com.moneyflowbackend.planning.dto.PlanningFormulaComponentResponse;
+import com.moneyflowbackend.planning.dto.PlanningFormulaResponse;
+import com.moneyflowbackend.planning.dto.PlanningNoticeResponse;
+import com.moneyflowbackend.planning.dto.PlanningSimulationBreakdownResponse;
 import com.moneyflowbackend.planning.dto.ReserveBreakdownResponse;
 import com.moneyflowbackend.planning.dto.SelectedWalletResponse;
 import com.moneyflowbackend.planning.dto.StudentLoanAdvisoryResponse;
@@ -48,6 +58,7 @@ public class PlanningService {
     private final EmergencyFundLedgerEntryRepository emergencyFundLedgerEntryRepository;
     private final ObligationOccurrenceRepository obligationOccurrenceRepository;
     private final StudentLoanRepository studentLoanRepository;
+    private final DailyClosingRepository dailyClosingRepository;
     private final Clock clock;
 
     public PlanningService(
@@ -60,6 +71,7 @@ public class PlanningService {
             EmergencyFundLedgerEntryRepository emergencyFundLedgerEntryRepository,
             ObligationOccurrenceRepository obligationOccurrenceRepository,
             StudentLoanRepository studentLoanRepository,
+            DailyClosingRepository dailyClosingRepository,
             Clock clock) {
         this.workspaceService = workspaceService;
         this.workspaceRepository = workspaceRepository;
@@ -70,6 +82,7 @@ public class PlanningService {
         this.emergencyFundLedgerEntryRepository = emergencyFundLedgerEntryRepository;
         this.obligationOccurrenceRepository = obligationOccurrenceRepository;
         this.studentLoanRepository = studentLoanRepository;
+        this.dailyClosingRepository = dailyClosingRepository;
         this.clock = clock;
     }
 
@@ -95,21 +108,52 @@ public class PlanningService {
         List<String> warnings = new ArrayList<>();
         warnings.add("Reserve ledgers may overlap with each other because planning does not infer money movement between wallets or reserve modules.");
         ReserveBreakdownResponse reserveBreakdown = reserveBreakdown(workspaceId, warnings);
-        CommitmentBreakdownResponse commitmentBreakdown = commitmentBreakdown(workspaceId, range, warnings);
+        List<PlanningNoticeResponse> warningDetails = new ArrayList<>();
+        warningDetails.add(new PlanningNoticeResponse(
+                "PLANNING_DATA_PARTIAL",
+                "Các quỹ giữ lại có thể chồng lấn vì hệ thống không tự suy luận dòng tiền giữa ví và các module dự trữ.",
+                "WARN"));
+        if (wallets.isEmpty()) {
+            warningDetails.add(new PlanningNoticeResponse("NO_WALLETS", "Chưa có ví để tính số tiền khả dụng.", "WARN"));
+        }
+        if (reserveBreakdown.total().signum() == 0) {
+            warningDetails.add(new PlanningNoticeResponse("NO_RESERVES_CONFIGURED", "Chưa có quỹ hoặc mục tiêu giữ lại nào được cấu hình.", "INFO"));
+        }
+        CommitmentBreakdownResponse commitmentBreakdown = commitmentBreakdown(workspaceId, range, warnings, warningDetails);
+        if (commitmentBreakdown.knownUpcomingObligations().signum() == 0 && commitmentBreakdown.variableUnknownCount() == 0) {
+            warningDetails.add(new PlanningNoticeResponse("NO_RECURRING_OBLIGATIONS_CONFIGURED", "Chưa có nghĩa vụ định kỳ nào trong kỳ kế hoạch.", "INFO"));
+        }
         AdvisoryCommitmentsResponse advisoryCommitments = advisoryCommitments(workspaceId);
         BigDecimal actuallySpendable = availableLedger.subtract(reserveBreakdown.total()).subtract(commitmentBreakdown.knownUpcomingObligations());
+        List<PlanningNoticeResponse> exclusions = exclusions(advisoryCommitments);
+        PlanningDataFreshnessResponse dataFreshness = dataFreshness(workspaceId, range, warningDetails);
+        PlanningBreakdownResponse breakdown = breakdown(selectedWallets, reserveBreakdown, commitmentBreakdown, advisoryCommitments);
+        PlanningFormulaResponse formula = formula(availableLedger, reserveBreakdown.total(), commitmentBreakdown.knownUpcomingObligations(), BigDecimal.ZERO, actuallySpendable);
         return new ActuallySpendableResponse(
                 workspaceId,
                 clock.instant(),
                 range.horizon(),
                 range.from(),
                 range.to(),
+                range.from(),
+                range.to(),
+                range.from() + " - " + range.to(),
+                "VND",
                 selectedWallets,
                 availableLedger,
+                availableLedger,
                 reserveBreakdown,
+                reserveBreakdown.total(),
                 commitmentBreakdown,
+                commitmentBreakdown.knownUpcomingObligations(),
                 advisoryCommitments,
+                BigDecimal.ZERO,
                 actuallySpendable,
+                breakdown,
+                formula,
+                dataFreshness,
+                warningDetails,
+                exclusions,
                 commitmentBreakdown.variableUnknownCount() > 0 || warnings.stream().anyMatch(warning -> warning.contains("negative")),
                 warnings,
                 assumptions);
@@ -164,13 +208,17 @@ public class PlanningService {
         return value;
     }
 
-    private CommitmentBreakdownResponse commitmentBreakdown(UUID workspaceId, Range range, List<String> warnings) {
+    private CommitmentBreakdownResponse commitmentBreakdown(UUID workspaceId, Range range, List<String> warnings, List<PlanningNoticeResponse> warningDetails) {
         BigDecimal known = BigDecimal.ZERO;
         long unknown = 0;
         for (ObligationOccurrence occurrence : obligationOccurrenceRepository.findPendingPayablePlanningOccurrences(workspaceId, range.from(), range.to())) {
             if (occurrence.getExpectedAmount() == null) {
                 unknown++;
                 warnings.add("Variable obligation occurrence " + occurrence.getId() + " due " + occurrence.getDueDate() + " has no expectedAmount and is excluded from knownUpcomingObligations.");
+                warningDetails.add(new PlanningNoticeResponse(
+                        "VARIABLE_OBLIGATION_AMOUNT_UNKNOWN",
+                        "Một nghĩa vụ định kỳ chưa có số tiền chắc chắn nên chưa được trừ vào số có thể chi.",
+                        "WARN"));
             } else {
                 known = known.add(occurrence.getExpectedAmount());
             }
@@ -186,6 +234,87 @@ public class PlanningService {
                 .map(StudentLoanAdvisoryResponse::advisoryTotal)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
         return new AdvisoryCommitmentsResponse(loans, total, false);
+    }
+
+    private PlanningBreakdownResponse breakdown(
+            List<SelectedWalletResponse> selectedWallets,
+            ReserveBreakdownResponse reserveBreakdown,
+            CommitmentBreakdownResponse commitmentBreakdown,
+            AdvisoryCommitmentsResponse advisoryCommitments) {
+        PlanningBreakdownGroupResponse wallets = new PlanningBreakdownGroupResponse(
+                selectedWallets.stream().map(SelectedWalletResponse::currentBalance).reduce(BigDecimal.ZERO, BigDecimal::add),
+                selectedWallets.stream()
+                        .map(wallet -> new PlanningBreakdownItemResponse("WALLET", wallet.id(), wallet.name(), wallet.currentBalance(), true, "Selected active wallet ledger balance.", null, null))
+                        .toList());
+        PlanningBreakdownGroupResponse reserves = new PlanningBreakdownGroupResponse(
+                reserveBreakdown.total(),
+                List.of(
+                        new PlanningBreakdownItemResponse("SINKING_FUND", null, "Active sinking funds", reserveBreakdown.sinkingFunds(), true, "Active sinking fund reserved ledger aggregate.", null, "ACTIVE"),
+                        new PlanningBreakdownItemResponse("SAVINGS_GOAL", null, "Active savings goals", reserveBreakdown.savingsGoals(), true, "Active savings goal reserved ledger aggregate.", null, "ACTIVE"),
+                        new PlanningBreakdownItemResponse("EMERGENCY_FUND", null, "Active emergency fund", reserveBreakdown.emergencyFund(), true, "Active emergency fund reserved ledger aggregate.", null, "ACTIVE")));
+        PlanningBreakdownGroupResponse obligations = new PlanningBreakdownGroupResponse(
+                commitmentBreakdown.knownUpcomingObligations(),
+                List.of(new PlanningBreakdownItemResponse("RECURRING_OBLIGATION", null, "Pending payable obligations in period", commitmentBreakdown.knownUpcomingObligations(), true, "Known pending payable occurrences in the planning period.", null, "PENDING")));
+        PlanningBreakdownGroupResponse payableDebts = new PlanningBreakdownGroupResponse(
+                BigDecimal.ZERO,
+                List.of(new PlanningBreakdownItemResponse("PAYABLE_DEBT", null, "Standalone debts", BigDecimal.ZERO, false, "Debt module is not linked into current planning formula; receivables are not counted as cash.", null, "EXCLUDED")));
+        PlanningSimulationBreakdownResponse simulations = new PlanningSimulationBreakdownResponse(
+                advisoryCommitments.includedInActuallySpendable(),
+                "Mô phỏng trả vay chỉ để tham khảo chiến lược, không tự động trừ vào số tiền có thể chi.");
+        return new PlanningBreakdownResponse(
+                wallets,
+                reserves,
+                reserveBreakdown.emergencyFund(),
+                reserveBreakdown.savingsGoals(),
+                reserveBreakdown.sinkingFunds(),
+                obligations,
+                payableDebts,
+                simulations);
+    }
+
+    private PlanningFormulaResponse formula(
+            BigDecimal availableLedger,
+            BigDecimal reservedTotal,
+            BigDecimal recurringObligationsTotal,
+            BigDecimal payableDebtsTotal,
+            BigDecimal actuallySpendable) {
+        return new PlanningFormulaResponse(
+                "Có thể chi còn lại",
+                "Ví khả dụng - Tiền giữ lại - Nghĩa vụ định kỳ - Công nợ phải trả = Còn được xài",
+                List.of(
+                        new PlanningFormulaComponentResponse("Ví khả dụng", availableLedger, "+"),
+                        new PlanningFormulaComponentResponse("Tiền giữ lại", reservedTotal, "-"),
+                        new PlanningFormulaComponentResponse("Nghĩa vụ định kỳ", recurringObligationsTotal, "-"),
+                        new PlanningFormulaComponentResponse("Công nợ phải trả", payableDebtsTotal, "-"),
+                        new PlanningFormulaComponentResponse("Còn được xài", actuallySpendable, "=")));
+    }
+
+    private List<PlanningNoticeResponse> exclusions(AdvisoryCommitmentsResponse advisoryCommitments) {
+        List<PlanningNoticeResponse> exclusions = new ArrayList<>();
+        exclusions.add(new PlanningNoticeResponse("STUDENT_LOAN_SIMULATION_EXCLUDED", "Mô phỏng trả vay không được tính vào số tiền còn được xài.", "INFO"));
+        exclusions.add(new PlanningNoticeResponse("PAYABLE_DEBTS_NOT_INCLUDED", "Công nợ phải trả chưa được tính vào kế hoạch hiện tại; dùng nghĩa vụ định kỳ cho khoản phải trả chắc chắn trong kỳ.", "WARN"));
+        exclusions.add(new PlanningNoticeResponse("RECEIVABLE_DEBTS_EXCLUDED", "Công nợ phải thu không được tính là tiền có thể chi cho tới khi đã thu về ví.", "INFO"));
+        exclusions.add(new PlanningNoticeResponse("UNSUPPORTED_DRAFTS_EXCLUDED", "Draft giọng nói và dữ liệu tham khảo không được tính vào kế hoạch.", "INFO"));
+        exclusions.add(new PlanningNoticeResponse("HISTORICAL_ANALYTICS_EXCLUDED", "Giao dịch lịch sử chỉ để phân tích không được phát lại vào số dư ví hiện tại.", "INFO"));
+        if (advisoryCommitments.total().signum() > 0) {
+            exclusions.add(new PlanningNoticeResponse("STUDENT_LOAN_ADVISORY_TOTAL_EXCLUDED", "Khoản vay sinh viên đang có số tham khảo nhưng không bị trừ tự động.", "INFO"));
+        }
+        return exclusions;
+    }
+
+    private PlanningDataFreshnessResponse dataFreshness(UUID workspaceId, Range range, List<PlanningNoticeResponse> warningDetails) {
+        LocalDate latest = dailyClosingRepository.findTopByWorkspaceIdAndStatusOrderByClosingDateDesc(workspaceId, DailyClosingStatus.COMPLETED)
+                .map(closing -> closing.getClosingDate())
+                .orElse(null);
+        if (latest == null) {
+            warningDetails.add(new PlanningNoticeResponse("NO_DAILY_CLOSING_RECENTLY", "Chưa có chốt sổ gần đây, số dư ví có thể lệch thực tế.", "WARN"));
+            return new PlanningDataFreshnessResponse(null, "NO_DAILY_CLOSING");
+        }
+        if (latest.isBefore(range.from())) {
+            warningDetails.add(new PlanningNoticeResponse("SNAPSHOT_STALE", "Chốt sổ gần nhất cũ hơn kỳ kế hoạch, số dư ví có thể lệch thực tế.", "WARN"));
+            return new PlanningDataFreshnessResponse(latest, "STALE");
+        }
+        return new PlanningDataFreshnessResponse(latest, "RECENT");
     }
 
     private StudentLoanAdvisoryResponse studentLoanAdvisory(StudentLoan loan) {

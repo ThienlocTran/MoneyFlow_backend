@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: moneyflow-voice-uat-postgres
+    environment:
+      POSTGRES_DB: moneyflow_voice_uat
+      POSTGRES_USER: moneyflow_local
+      POSTGRES_PASSWORD: moneyflow_local_password
+    ports:
+      - "127.0.0.1:${MONEYFLOW_VOICE_UAT_DB_PORT:-15432}:5432"
+    volumes:
+      - moneyflow_voice_uat_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U moneyflow_local -d moneyflow_voice_uat"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  moneyflow_voice_uat_pgdata:
+    name: moneyflow_voice_uat_pgdata

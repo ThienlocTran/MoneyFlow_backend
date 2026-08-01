@@ -60,7 +60,8 @@ class QuickEntryParserTests {
         assertThat(preview.getType()).isEqualTo(TransactionType.INCOME);
         assertThat(preview.getAmount()).isEqualByComparingTo("5000000");
         assertThat(preview.getWalletId()).isEqualTo(f.bank().getId());
-        assertThat(preview.getCategoryId()).isEqualTo(f.salary().getId());
+        assertThat(preview.getCategoryId()).isNull();
+        assertThat(preview.getMissingFields()).containsExactly("incomeSource");
     }
 
     @Test
@@ -135,11 +136,12 @@ class QuickEntryParserTests {
         assertThat(expense.getWalletId()).isEqualTo(f.cash().getId());
         assertThat(expense.getCategoryId()).isEqualTo(f.food().getId());
 
-        assertThat(income.isReadyToConfirm()).isTrue();
+        assertThat(income.isReadyToConfirm()).isFalse();
         assertThat(income.getType()).isEqualTo(TransactionType.INCOME);
         assertThat(income.getAmount()).isEqualByComparingTo("500000");
         assertThat(income.getWalletId()).isEqualTo(f.bank().getId());
-        assertThat(income.getCategoryId()).isEqualTo(f.salary().getId());
+        assertThat(income.getCategoryId()).isNull();
+        assertThat(income.getMissingFields()).containsExactly("incomeSource");
 
         assertThat(transfer.isReadyToConfirm()).isTrue();
         assertThat(transfer.getType()).isEqualTo(TransactionType.TRANSFER);

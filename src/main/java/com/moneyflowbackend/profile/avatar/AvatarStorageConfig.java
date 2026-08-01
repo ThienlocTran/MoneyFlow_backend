@@ -41,17 +41,13 @@ public class AvatarStorageConfig {
                 resolveBaseFolder(baseFolder, environment));
     }
 
-    static String resolveBaseFolder(String configured, Environment environment) {
+    public static String resolveBaseFolder(String configured, Environment environment) {
         if (!isBlank(configured)) {
             return configured;
         }
         boolean production = Arrays.stream(environment.getActiveProfiles())
-                .anyMatch("production"::equalsIgnoreCase);
-        boolean test = Arrays.stream(environment.getActiveProfiles())
-                .anyMatch("test"::equalsIgnoreCase);
-        if (production) return "moneyflow/prod";
-        if (test) return "moneyflow/test";
-        return "moneyflow/dev";
+                .anyMatch(profile -> "production".equalsIgnoreCase(profile) || "prod".equalsIgnoreCase(profile));
+        return production ? "production" : "dev";
     }
 
     private static boolean isBlank(String value) {

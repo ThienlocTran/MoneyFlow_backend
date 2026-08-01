@@ -81,8 +81,20 @@ class PlanningApiIntegrationTests {
                         .param("to", "2026-08-31"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.availableLedger").value(1000))
+                .andExpect(jsonPath("$.data.currencyCode").value("VND"))
+                .andExpect(jsonPath("$.data.periodStart").value("2026-08-01"))
+                .andExpect(jsonPath("$.data.periodEnd").value("2026-08-31"))
+                .andExpect(jsonPath("$.data.availableWalletBalance").value(1000))
                 .andExpect(jsonPath("$.data.commitmentBreakdown.knownUpcomingObligations").value(1500))
+                .andExpect(jsonPath("$.data.recurringObligationsTotal").value(1500))
+                .andExpect(jsonPath("$.data.payableDebtsTotal").value(0))
                 .andExpect(jsonPath("$.data.actuallySpendable").value(-500))
+                .andExpect(jsonPath("$.data.formula.label").value("Có thể chi còn lại"))
+                .andExpect(jsonPath("$.data.breakdown.walletAvailable.items[0].sourceType").value("WALLET"))
+                .andExpect(jsonPath("$.data.breakdown.obligations.items[0].sourceType").value("RECURRING_OBLIGATION"))
+                .andExpect(jsonPath("$.data.breakdown.payableDebts.items[0].includedInPlanning").value(false))
+                .andExpect(jsonPath("$.data.breakdown.simulations.studentLoansIncluded").value(false))
+                .andExpect(jsonPath("$.data.exclusions[0].code").value("STUDENT_LOAN_SIMULATION_EXCLUDED"))
                 .andExpect(jsonPath("$.data.incomplete").value(false));
 
         org.assertj.core.api.Assertions.assertThat(walletRepository.count()).isEqualTo(walletCount);

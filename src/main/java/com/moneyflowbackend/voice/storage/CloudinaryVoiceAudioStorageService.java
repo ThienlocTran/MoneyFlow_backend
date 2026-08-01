@@ -1,6 +1,9 @@
 package com.moneyflowbackend.voice.storage;
 
 import com.moneyflowbackend.common.exception.BusinessException;
+import com.moneyflowbackend.common.security.LogRedactor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -22,6 +25,7 @@ import java.util.UUID;
 
 public class CloudinaryVoiceAudioStorageService implements VoiceAudioStorageService {
     private static final String PROVIDER = "cloudinary";
+    private static final Logger log = LoggerFactory.getLogger(CloudinaryVoiceAudioStorageService.class);
 
     private final HttpClient httpClient;
     private final Clock clock;
@@ -42,7 +46,7 @@ public class CloudinaryVoiceAudioStorageService implements VoiceAudioStorageServ
         this.cloudName = cloudName;
         this.apiKey = apiKey;
         this.apiSecret = apiSecret;
-        this.folder = trimSlashes(folder == null || folder.isBlank() ? "moneyflow/voice" : folder);
+        this.folder = trimSlashes(folder == null || folder.isBlank() ? "dev/voice" : folder);
     }
 
     @Override
@@ -58,10 +62,14 @@ public class CloudinaryVoiceAudioStorageService implements VoiceAudioStorageServ
     @Override
     public StoredVoiceAudio upload(String objectKey, MultipartFile file) {
         try {
-            String publicId = folder + "/" + trimSlashes(objectKey);
+            String cleanKey = trimSlashes(objectKey);
+            String assetFolder = folder + parentFolder(cleanKey);
+            String publicId = stripExtension(leaf(cleanKey));
+            String fallbackPublicId = assetFolder + "/" + publicId;
             long timestamp = Instant.now(clock).getEpochSecond();
             Map<String, String> params = signedParams(Map.of(
                     "public_id", publicId,
+                    "asset_folder", assetFolder,
                     "timestamp", String.valueOf(timestamp),
                     "type", "authenticated",
                     "overwrite", "true"));
@@ -72,23 +80,29 @@ public class CloudinaryVoiceAudioStorageService implements VoiceAudioStorageServ
                     .build();
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                throw storageFailed("Cloudinary upload failed");
+                log.warn("Cloudinary voice upload failed: status={}, assetFolder={}, publicId={}, body={}",
+                        response.statusCode(), assetFolder, publicId, LogRedactor.redact(response.body()));
+                throw storageFailed("Cloudinary upload failed: status=" + response.statusCode());
             }
-            String storedPublicId = publicIdFrom(response.body(), publicId);
+            String storedPublicId = publicIdFrom(response.body(), fallbackPublicId);
             return new StoredVoiceAudio(PROVIDER, storedPublicId, "authenticated");
         } catch (BusinessException ex) {
             throw ex;
         } catch (Exception ex) {
+            log.warn("Cloudinary voice upload failed before response: exception={}", ex.getClass().getSimpleName());
             throw storageFailed("Cloudinary upload failed");
         }
     }
 
     @Override
     public VoiceAudioPlayback playbackUrl(String storagePublicId, String mimeType) {
-        Instant expiresAt = Instant.now(clock).plusSeconds(300);
+        long timestamp = Instant.now(clock).getEpochSecond();
+        Instant expiresAt = Instant.ofEpochSecond(timestamp).plusSeconds(300);
         Map<String, String> params = signedParams(Map.of(
                 "public_id", storagePublicId,
                 "type", "authenticated",
+                "format", format(mimeType, storagePublicId),
+                "timestamp", String.valueOf(timestamp),
                 "expires_at", String.valueOf(expiresAt.getEpochSecond())));
         String url = "https://api.cloudinary.com/v1_1/%s/video/download?%s".formatted(cloudName, query(params));
         return new VoiceAudioPlayback(url, expiresAt, mimeType);
@@ -101,13 +115,13 @@ public class CloudinaryVoiceAudioStorageService implements VoiceAudioStorageServ
             HttpRequest request = HttpRequest.newBuilder(URI.create(playback.playbackUrl())).GET().build();
             HttpResponse<byte[]> response = httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                throw storageFailed("Cloudinary playback failed");
+                throw playbackFailed(response.statusCode());
             }
             return new StoredVoiceAudioStream(response.body(), mimeType, response.body().length);
         } catch (BusinessException ex) {
             throw ex;
         } catch (Exception ex) {
-            throw storageFailed("Cloudinary playback failed");
+            throw storageUnavailable();
         }
     }
 
@@ -225,7 +239,45 @@ public class CloudinaryVoiceAudioStorageService implements VoiceAudioStorageServ
         return value.replaceAll("^/+", "").replaceAll("/+$", "");
     }
 
+    private String parentFolder(String value) {
+        int slash = value.lastIndexOf('/');
+        return slash < 0 ? "" : "/" + value.substring(0, slash);
+    }
+
+    private String leaf(String value) {
+        int slash = value.lastIndexOf('/');
+        return slash < 0 ? value : value.substring(slash + 1);
+    }
+
+    private String stripExtension(String value) {
+        int dot = value.lastIndexOf('.');
+        return dot <= 0 ? value : value.substring(0, dot);
+    }
+
+    private String format(String mimeType, String publicId) {
+        return switch (mimeType == null ? "" : mimeType) {
+            case "audio/mp4" -> "m4a";
+            case "audio/mpeg" -> "mp3";
+            case "audio/wav" -> "wav";
+            default -> {
+                int dot = publicId == null ? -1 : publicId.lastIndexOf('.');
+                yield dot >= 0 && dot < publicId.length() - 1 ? publicId.substring(dot + 1) : "webm";
+            }
+        };
+    }
+
     private BusinessException storageFailed(String message) {
-        return new BusinessException("AUDIO_STORAGE_FAILED", message, HttpStatus.BAD_GATEWAY);
+        return new BusinessException("AUDIO_UPLOAD_FAILED", message, HttpStatus.BAD_GATEWAY);
+    }
+
+    private BusinessException playbackFailed(int statusCode) {
+        if (statusCode == 404) {
+            return new BusinessException("AUDIO_OBJECT_MISSING", "Voice audio object is missing", HttpStatus.NOT_FOUND);
+        }
+        return storageUnavailable();
+    }
+
+    private BusinessException storageUnavailable() {
+        return new BusinessException("AUDIO_STORAGE_UNAVAILABLE", "Voice audio storage is temporarily unavailable", HttpStatus.SERVICE_UNAVAILABLE);
     }
 }

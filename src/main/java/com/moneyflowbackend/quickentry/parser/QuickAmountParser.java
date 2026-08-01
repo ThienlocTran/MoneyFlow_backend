@@ -16,6 +16,7 @@ public class QuickAmountParser {
     private static final Pattern COMPOSITE_MILLION = Pattern.compile("(?<![\\d])(-?\\d+(?:[.,]\\d+)?)\\s*(?:tr|trieu)\\s*(\\d{1,3})(?:\\s*(?:k|nghin|ngan))?\\b");
     private static final Pattern MILLION = Pattern.compile("(?<![\\d])(-?\\d+(?:[.,]\\d+)?)\\s*(?:tr|trieu)\\b");
     private static final Pattern THOUSAND = Pattern.compile("(?<![\\d])(-?\\d+(?:[.,]\\d+)?)\\s*(?:k|nghin|ngan)\\b");
+    private static final Pattern TENS_THOUSAND_NUMBER = Pattern.compile("\\b(-?\\d)\\s+chuc(?:\\s*(?:k|nghin|ngan))?\\b");
     private static final Pattern TENS_THOUSAND_WORDS = Pattern.compile("\\b(mot|hai|ba|bon|tu|nam|sau|bay|tam|chin)\\s+chuc(?:\\s*(?:k|nghin|ngan))?\\b");
     private static final Pattern GROUPED = Pattern.compile("(?<![\\d/:.-])-?\\d{1,3}(?:[.,\\s]\\d{3})+(?:\\s*(?:d|vnd))?\\b");
     private static final Pattern VND = Pattern.compile("(?<![\\d/:.-])-?\\d+(?:\\s*(?:d|vnd))\\b");
@@ -34,6 +35,7 @@ public class QuickAmountParser {
         addCompositeMatches(COMPOSITE_MILLION.matcher(normalized), display, blocked, candidates, zero);
         addUnitMatches(MILLION.matcher(normalized), display, blocked, candidates, zero, new BigDecimal("1000000"));
         addUnitMatches(THOUSAND.matcher(normalized), display, blocked, candidates, zero, new BigDecimal("1000"));
+        addUnitMatches(TENS_THOUSAND_NUMBER.matcher(normalized), display, blocked, candidates, zero, new BigDecimal("10000"));
         addTensThousandWordMatches(TENS_THOUSAND_WORDS.matcher(normalized), display, blocked, candidates, zero);
         addPlainMatches(GROUPED.matcher(normalized), display, blocked, candidates, zero, false, false);
         addPlainMatches(VND.matcher(normalized), display, blocked, candidates, zero, false, false);
@@ -61,7 +63,10 @@ public class QuickAmountParser {
                 continue;
             }
             BigDecimal millions = decimalNumber(matcher.group(1)).multiply(new BigDecimal("1000000"));
-            BigDecimal thousands = new BigDecimal(matcher.group(2)).multiply(new BigDecimal("1000"));
+            BigDecimal tail = new BigDecimal(matcher.group(2));
+            BigDecimal thousands = matcher.group(2).length() == 1
+                    ? tail.multiply(new BigDecimal("100000"))
+                    : tail.multiply(new BigDecimal("1000"));
             addCandidate(millions.add(thousands), matcher.start(), matcher.end(), display, candidates, zero, false, false);
         }
     }

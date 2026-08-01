@@ -127,6 +127,47 @@ class DailyClosingModuleIntegrationTests {
     }
 
     @Test
+    void unchangedSnapshotDefaultsActualToLedgerWithoutCreatingTransaction() {
+        TestContext owner = context("closing_unchanged", WorkspaceRole.OWNER);
+        LocalDate closingDate = LocalDate.of(2026, 7, 20);
+        Wallet cash = wallet(owner, "Cash", "100", closingDate.minusDays(1), true);
+        tx(owner, cash, "25", closingDate);
+        long transactionCount = transactionRepository.count();
+
+        DailyClosingResponse saved = dailyClosingService.saveWalletSnapshot(
+                owner.workspace().getId(), closingDate, cash.getId(), unchangedSnapshotReq(), owner.user().getId());
+
+        assertThat(transactionRepository.count()).isEqualTo(transactionCount);
+        assertThat(walletBalanceService.calculateBalanceAtEndOfDay(cash.getId(), closingDate)).isEqualByComparingTo("125");
+        assertThat(saved.getWallets()).filteredOn(w -> w.getWalletId().equals(cash.getId()))
+                .first()
+                .satisfies(w -> {
+                    assertThat(w.getLedgerBalance()).isEqualByComparingTo("125");
+                    assertThat(w.getActualBalance()).isEqualByComparingTo("125");
+                    assertThat(w.getDifference()).isEqualByComparingTo("0");
+                    assertThat(w.getReconciliationStatus()).isEqualTo("MATCHED");
+                    assertThat(w.getSourceType()).isEqualTo("MANUAL");
+                });
+    }
+
+    @Test
+    void actualEnteredSnapshotStillRequiresActualBalance() {
+        TestContext owner = context("closing_actual_required", WorkspaceRole.OWNER);
+        LocalDate closingDate = LocalDate.of(2026, 7, 20);
+        Wallet cash = wallet(owner, "Cash", "100", closingDate.minusDays(1), true);
+        WalletSnapshotRequest req = new WalletSnapshotRequest();
+        req.setBalanceMode("ACTUAL_ENTERED");
+        req.setRecordedAt(Instant.parse("2026-07-20T15:15:00Z"));
+        req.setSourceType("MANUAL");
+
+        assertThatThrownBy(() -> dailyClosingService.saveWalletSnapshot(
+                owner.workspace().getId(), closingDate, cash.getId(), req, owner.user().getId()))
+                .isInstanceOf(BusinessException.class)
+                .extracting("code")
+                .isEqualTo("INVALID_ACTUAL_BALANCE");
+    }
+
+    @Test
     void saveSnapshotRejectsInvalidWalletStateSourceTypeAndAdjustedSnapshot() {
         TestContext owner = context("closing_rules", WorkspaceRole.OWNER);
         TestContext other = context("closing_rules_other", WorkspaceRole.OWNER);
@@ -385,6 +426,14 @@ class DailyClosingModuleIntegrationTests {
         req.setActualBalance(new BigDecimal(actualBalance));
         req.setRecordedAt(Instant.parse("2026-07-20T15:15:00Z"));
         req.setSourceType(sourceType);
+        return req;
+    }
+
+    private WalletSnapshotRequest unchangedSnapshotReq() {
+        WalletSnapshotRequest req = new WalletSnapshotRequest();
+        req.setBalanceMode("UNCHANGED");
+        req.setRecordedAt(Instant.parse("2026-07-20T15:15:00Z"));
+        req.setSourceType("MANUAL");
         return req;
     }
 

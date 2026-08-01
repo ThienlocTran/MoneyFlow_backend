@@ -8,12 +8,12 @@ import java.time.Instant;
 
 @Data
 public class WalletSnapshotRequest {
-    @NotNull
     private BigDecimal actualBalance;
 
     @NotNull
     private Instant recordedAt;
 
+    private String balanceMode;
     private String sourceType;
     private String note;
 }

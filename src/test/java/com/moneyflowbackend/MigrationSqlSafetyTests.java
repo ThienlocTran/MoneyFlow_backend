@@ -88,7 +88,8 @@ class MigrationSqlSafetyTests {
                 "V20__planning_preferences.sql",
                 "V21__voice_confirm_idempotency.sql",
                 "V22__voice_audio_storage_metadata.sql",
-                "V23__voice_audio_audio_alias_columns.sql");
+                "V23__voice_audio_audio_alias_columns.sql",
+                "V24__user_preferences.sql");
 
         for (String migrationName : migrationNames) {
             String sql = Files.readString(Path.of("src/main/resources/db/migration", migrationName));
@@ -151,6 +152,25 @@ class MigrationSqlSafetyTests {
         assertThat(normalized).contains("version bigint not null default 0");
         assertThat(normalized).doesNotContain("snapshot");
         assertThat(normalized).doesNotContain("actually_spendable");
+        assertThat(normalized).doesNotContain("insert ");
+        assertThat(normalized).doesNotContain("update ");
+        assertThat(normalized).doesNotContain("drop ");
+        assertThat(normalized).doesNotContain("truncate ");
+    }
+
+    @Test
+    void v24CreatesUserPreferencesOnly() throws Exception {
+        String sql = Files.readString(Path.of("src/main/resources/db/migration/V24__user_preferences.sql"));
+        String normalized = sql.toLowerCase();
+
+        assertThat(normalized).contains("create table user_preferences");
+        assertThat(Pattern.compile("create\\s+table", Pattern.CASE_INSENSITIVE).matcher(sql).results()).hasSize(1);
+        assertThat(normalized).contains("user_id uuid primary key references users(id) on delete cascade");
+        assertThat(normalized).contains("locale in ('vi-vn', 'en-us')");
+        assertThat(normalized).contains("onboarding_welcome_seen boolean not null default false");
+        assertThat(normalized).contains("onboarding_main_tour_completed boolean not null default false");
+        assertThat(normalized).contains("onboarding_main_tour_skipped boolean not null default false");
+        assertThat(normalized).contains("onboarding_version varchar(32) not null default '2026-07'");
         assertThat(normalized).doesNotContain("insert ");
         assertThat(normalized).doesNotContain("update ");
         assertThat(normalized).doesNotContain("drop ");

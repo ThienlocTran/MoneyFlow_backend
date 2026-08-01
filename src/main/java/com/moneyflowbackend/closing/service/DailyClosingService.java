@@ -46,6 +46,8 @@ import java.util.UUID;
 @Service
 public class DailyClosingService {
     private static final int MAX_NOTE_LENGTH = 1000;
+    private static final String BALANCE_MODE_ACTUAL_ENTERED = "ACTUAL_ENTERED";
+    private static final String BALANCE_MODE_UNCHANGED = "UNCHANGED";
 
     private final DailyClosingRepository dailyClosingRepository;
     private final WalletBalanceSnapshotRepository snapshotRepository;
@@ -83,7 +85,8 @@ public class DailyClosingService {
     @Transactional
     public DailyClosingResponse saveWalletSnapshot(UUID workspaceId, LocalDate closingDate, UUID walletId, WalletSnapshotRequest req, UUID userId) {
         WorkspaceMember member = workspaceService.requireWritableMember(workspaceId, userId);
-        validateSnapshotRequest(req);
+        String balanceMode = parseBalanceMode(req);
+        validateSnapshotRequest(req, balanceMode);
         Wallet wallet = walletRepository.findByIdAndWorkspaceId(walletId, workspaceId)
                 .orElseThrow(() -> new BusinessException("WALLET_NOT_FOUND", "Khong tim thay vi", HttpStatus.NOT_FOUND));
         validateWritableWallet(wallet, closingDate);
@@ -94,7 +97,8 @@ public class DailyClosingService {
         }
 
         BigDecimal ledgerBalance = walletBalanceService.calculateBalanceAtEndOfDay(walletId, closingDate);
-        BigDecimal difference = req.getActualBalance().subtract(ledgerBalance);
+        BigDecimal actualBalance = BALANCE_MODE_UNCHANGED.equals(balanceMode) ? ledgerBalance : req.getActualBalance();
+        BigDecimal difference = actualBalance.subtract(ledgerBalance);
         Instant now = clock.instant();
         WalletBalanceSnapshot snapshot = snapshotRepository.findByDailyClosingIdAndWalletId(closing.getId(), walletId)
                 .orElseGet(() -> WalletBalanceSnapshot.builder()
@@ -109,7 +113,7 @@ public class DailyClosingService {
             throw new BusinessException("SNAPSHOT_ALREADY_ADJUSTED", "Snapshot da duoc dieu chinh", HttpStatus.CONFLICT);
         }
 
-        snapshot.setBalance(req.getActualBalance());
+        snapshot.setBalance(actualBalance);
         snapshot.setLedgerBalance(ledgerBalance);
         snapshot.setDifference(difference);
         snapshot.setReconciliationStatus(difference.compareTo(BigDecimal.ZERO) == 0
@@ -298,11 +302,14 @@ public class DailyClosingService {
         };
     }
 
-    private void validateSnapshotRequest(WalletSnapshotRequest req) {
-        if (req == null || req.getActualBalance() == null) {
+    private void validateSnapshotRequest(WalletSnapshotRequest req, String balanceMode) {
+        if (req == null) {
             throw new BusinessException("INVALID_ACTUAL_BALANCE", "Actual balance is required");
         }
-        if (req.getActualBalance().compareTo(BigDecimal.ZERO) < 0) {
+        if (!BALANCE_MODE_UNCHANGED.equals(balanceMode) && req.getActualBalance() == null) {
+            throw new BusinessException("INVALID_ACTUAL_BALANCE", "Actual balance is required");
+        }
+        if (req.getActualBalance() != null && req.getActualBalance().compareTo(BigDecimal.ZERO) < 0) {
             throw new BusinessException("INVALID_ACTUAL_BALANCE", "Actual balance must not be negative");
         }
         if (req.getRecordedAt() == null) {
@@ -313,6 +320,17 @@ public class DailyClosingService {
             throw new BusinessException("VALIDATION_ERROR", "Only MANUAL snapshots are accepted");
         }
         normalizeNote(req.getNote());
+    }
+
+    private String parseBalanceMode(WalletSnapshotRequest req) {
+        if (req == null || req.getBalanceMode() == null || req.getBalanceMode().isBlank()) {
+            return BALANCE_MODE_ACTUAL_ENTERED;
+        }
+        String normalized = req.getBalanceMode().trim().toUpperCase(Locale.ROOT);
+        if (BALANCE_MODE_ACTUAL_ENTERED.equals(normalized) || BALANCE_MODE_UNCHANGED.equals(normalized)) {
+            return normalized;
+        }
+        throw new BusinessException("VALIDATION_ERROR", "Invalid balance mode");
     }
 
     private BalanceSourceType parseSourceType(String raw) {

@@ -39,6 +39,6 @@ public class DisabledVoiceAudioStorageService implements VoiceAudioStorageServic
         return new BusinessException(
                 "STORAGE_NOT_CONFIGURED",
                 "Voice audio storage is not configured",
-                HttpStatus.NOT_IMPLEMENTED);
+                HttpStatus.SERVICE_UNAVAILABLE);
     }
 }

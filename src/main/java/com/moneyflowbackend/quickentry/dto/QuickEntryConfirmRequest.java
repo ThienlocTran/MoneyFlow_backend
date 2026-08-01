@@ -18,12 +18,13 @@ public class QuickEntryConfirmRequest {
     private VoiceIntentType intentType;
     private String idempotencyKey;
     private String rawInput;
-    private String idempotencyKey;
     private TransactionType type;
     private TransactionStatus status;
     private BigDecimal amount;
     private UUID walletId;
     private UUID categoryId;
+    private UUID incomeSourceId;
+    private UUID relatedIncomeSourceId;
     private UUID sourceWalletId;
     private UUID destinationWalletId;
     private LocalDate transactionDate;

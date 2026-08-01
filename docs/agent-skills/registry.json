@@ -1,0 +1,18 @@
+{
+  "items": [
+    {"name": "Taste Skill", "url": "https://github.com/Leonxlnx/taste-skill", "category": "design/frontend agent skill", "status": "Playbook reference", "useNow": true, "runtimeDependency": false},
+    {"name": "Taste Skill Docs", "url": "https://www.tasteskill.dev/", "category": "design reference", "status": "Design reference", "useNow": true, "runtimeDependency": false},
+    {"name": "GSAP Skills", "url": "https://github.com/greensock/gsap-skills.git", "category": "animation agent skill", "status": "Playbook reference", "useNow": true, "runtimeDependency": false},
+    {"name": "OriginKit", "url": "https://www.originkit.dev/", "category": "UI interaction reference", "status": "Design reference", "useNow": true, "runtimeDependency": false},
+    {"name": "Pretext", "url": "https://github.com/chenglou/pretext.git", "category": "prompt/spec workflow reference", "status": "Research only", "useNow": false, "runtimeDependency": false},
+    {"name": "Repo Recon Skill", "url": "https://github.com/marpla78/repo-recon-skill.git", "category": "repo reconnaissance agent skill", "status": "Playbook reference", "useNow": true, "runtimeDependency": false},
+    {"name": "AgentFlow", "url": "https://github.com/lupantech/AgentFlow.git", "category": "agent workflow/orchestration reference", "status": "Research only", "useNow": false, "runtimeDependency": false},
+    {"name": "Chatwoot", "url": "https://github.com/chatwoot/chatwoot.git", "category": "product/support tool", "status": "Research only", "useNow": false, "runtimeDependency": false},
+    {"name": "img2threejs", "url": "https://github.com/img2threejs/img2threejs.git", "category": "visual experiment reference", "status": "Research only", "useNow": false, "runtimeDependency": false},
+    {"name": "TruffleHog", "url": "https://github.com/trufflesecurity/trufflehog.git", "category": "security/DevSecOps", "status": "CI candidate", "useNow": false, "runtimeDependency": false},
+    {"name": "Dockerscan", "url": "https://github.com/cr0hn/dockerscan.git", "category": "security research", "status": "Not for runtime", "useNow": false, "runtimeDependency": false},
+    {"name": "GhidraGPT", "url": "https://github.com/weirdmachine64/GhidraGPT.git", "category": "reverse-engineering research", "status": "Not for runtime", "useNow": false, "runtimeDependency": false},
+    {"name": "Raccoon", "url": "https://github.com/evyatarmeged/Raccoon.git", "category": "security research", "status": "Not for runtime", "useNow": false, "runtimeDependency": false},
+    {"name": "Jenkins", "url": "https://www.jenkins.io/", "category": "CI/CD", "status": "Research only", "useNow": false, "runtimeDependency": false}
+  ]
+}

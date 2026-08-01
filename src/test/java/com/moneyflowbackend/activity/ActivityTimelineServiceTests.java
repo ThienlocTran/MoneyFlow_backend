@@ -3,6 +3,7 @@ package com.moneyflowbackend.activity;
 import com.moneyflowbackend.activity.domain.ActivityAction;
 import com.moneyflowbackend.activity.domain.ActivityEntityType;
 import com.moneyflowbackend.activity.domain.ActivitySource;
+import com.moneyflowbackend.activity.domain.NavigationTargetType;
 import com.moneyflowbackend.activity.dto.ActivityActorSummary;
 import com.moneyflowbackend.activity.dto.ActivityNavigationTarget;
 import com.moneyflowbackend.activity.dto.ActivityTimelinePageResponse;
@@ -65,7 +66,7 @@ class ActivityTimelineServiceTests {
         assertThat(firstPage.isHasMore()).isTrue();
         assertThat(firstPage.getNextCursor()).isNotBlank();
         assertThat(firstPage.getItems()).allSatisfy(item -> assertThat(item).hasNoNullFieldsOrPropertiesExcept(
-                "amount", "direction", "businessDate"));
+                "amount", "direction", "businessDate", "relatedRecordType", "relatedRecordId"));
 
         ActivityTimelinePageResponse secondPage = service.getTimeline(
                 WORKSPACE_ID, Set.of(), Set.of(), null, null, null, firstPage.getNextCursor(), 3, USER_ID);
@@ -108,6 +109,34 @@ class ActivityTimelineServiceTests {
         assertThat(page.getItems()).singleElement()
                 .extracting("id")
                 .isEqualTo("TRANSACTION_AUDIT:00000000-0000-0000-0000-000000000001");
+    }
+
+    @Test
+    void responseMapperAddsTransactionDeepLinkMetadata() {
+        UUID transactionId = UUID.fromString("00000000-0000-0000-0000-000000000022");
+        ActivityCandidate candidate = new ActivityCandidate(
+                "TRANSACTION_AUDIT:00000000-0000-0000-0000-000000000023",
+                WORKSPACE_ID,
+                Instant.parse("2026-07-20T10:15:30Z"),
+                ActivitySource.TRANSACTION_AUDIT.rank(),
+                ActivitySource.TRANSACTION_AUDIT,
+                ActivityActorSummary.unknown(),
+                ActivityAction.TRANSACTION_UPDATED,
+                ActivityEntityType.TRANSACTION,
+                transactionId,
+                BigDecimal.TEN,
+                "EXPENSE",
+                LocalDate.of(2026, 7, 20),
+                new ActivityNavigationTarget(NavigationTargetType.TRANSACTION, transactionId),
+                Map.of());
+
+        var response = new ActivityTimelineResponseMapper().toResponse(candidate);
+
+        assertThat(response.getRelatedRecordType()).isEqualTo("TRANSACTION");
+        assertThat(response.getRelatedRecordId()).isEqualTo(transactionId);
+        assertThat(response.isCanOpenDetail()).isTrue();
+        assertThat(response.getSourceLabel()).isEqualTo("Lịch sử giao dịch");
+        assertThat(response.getActionLabel()).isEqualTo("Cập nhật giao dịch");
     }
 
     @Test

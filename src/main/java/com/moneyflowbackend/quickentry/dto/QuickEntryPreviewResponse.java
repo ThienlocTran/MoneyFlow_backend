@@ -24,6 +24,7 @@ public class QuickEntryPreviewResponse {
     private String clientCandidateId;
     private VoiceIntentType intentType;
     private VoiceCandidateStatus candidateStatus;
+    private VoiceLedgerEffect ledgerEffect;
     private String rawInput;
     private String normalizedInput;
     private TransactionType type;
@@ -33,6 +34,8 @@ public class QuickEntryPreviewResponse {
     private String walletName;
     private UUID categoryId;
     private String categoryName;
+    private UUID incomeSourceId;
+    private String incomeSourceName;
     private UUID sourceWalletId;
     private String sourceWalletName;
     private UUID destinationWalletId;
@@ -44,8 +47,11 @@ public class QuickEntryPreviewResponse {
     private SpendingScope spendingScope;
     private double confidence;
     private boolean readyToConfirm;
+    private boolean commitSupported;
+    private boolean affectsWalletBalance;
     private String unsupportedReason;
     private String suggestedManualRoute;
+    private String targetModule;
     private String suggestedManualActionLabel;
     @Builder.Default
     private List<String> missingFields = new ArrayList<>();
@@ -67,6 +73,7 @@ public class QuickEntryPreviewResponse {
         private String clientCandidateId;
         private VoiceIntentType intentType;
         private VoiceCandidateStatus candidateStatus;
+        private VoiceLedgerEffect ledgerEffect;
         private String description;
         private BigDecimal amount;
         private TransactionType type;
@@ -75,6 +82,8 @@ public class QuickEntryPreviewResponse {
         private String walletName;
         private UUID categoryId;
         private String categoryName;
+        private UUID incomeSourceId;
+        private String incomeSourceName;
         private UUID sourceWalletId;
         private String sourceWalletName;
         private UUID destinationWalletId;
@@ -85,11 +94,14 @@ public class QuickEntryPreviewResponse {
         private SpendingScope spendingScope;
         private double confidence;
         private boolean readyToConfirm;
+        private boolean commitSupported;
+        private boolean affectsWalletBalance;
         private String validationStatus;
         @Builder.Default
         private List<String> missingFields = new ArrayList<>();
         private String unsupportedReason;
         private String suggestedManualRoute;
+        private String targetModule;
         private String suggestedManualActionLabel;
         private List<String> warnings;
     }

@@ -77,6 +77,10 @@ class PlanningCommitmentIntegrationTests {
                 null);
 
         assertThat(response.commitmentBreakdown().knownUpcomingObligations()).isEqualByComparingTo("300");
+        assertThat(response.recurringObligationsTotal()).isEqualByComparingTo("300");
+        assertThat(response.payableDebtsTotal()).isEqualByComparingTo("0");
+        assertThat(response.breakdown().obligations().total()).isEqualByComparingTo("300");
+        assertThat(response.exclusions()).anyMatch(exclusion -> exclusion.code().equals("PAYABLE_DEBTS_NOT_INCLUDED"));
         assertThat(response.commitmentBreakdown().variableUnknownCount()).isZero();
         assertThat(response.actuallySpendable()).isEqualByComparingTo("200");
     }
@@ -101,6 +105,7 @@ class PlanningCommitmentIntegrationTests {
         assertThat(response.commitmentBreakdown().variableUnknownCount()).isEqualTo(1);
         assertThat(response.incomplete()).isTrue();
         assertThat(response.warnings()).anyMatch(text -> text.contains(variable.getId().toString()) && text.contains("2026-08-05"));
+        assertThat(response.warningDetails()).anyMatch(warning -> warning.code().equals("VARIABLE_OBLIGATION_AMOUNT_UNKNOWN"));
     }
 
     @Test
@@ -113,6 +118,7 @@ class PlanningCommitmentIntegrationTests {
         ActuallySpendableResponse response = planningService.actuallySpendable(ctx.workspace().getId(), ctx.user().getId(), null, null, null, null);
 
         assertThat(response.advisoryCommitments().includedInActuallySpendable()).isFalse();
+        assertThat(response.breakdown().simulations().studentLoansIncluded()).isFalse();
         assertThat(response.advisoryCommitments().total()).isEqualByComparingTo("150");
         assertThat(response.advisoryCommitments().studentLoans()).singleElement().satisfies(loan -> {
             assertThat(loan.loanId()).isEqualTo(active.getId());
@@ -123,6 +129,7 @@ class PlanningCommitmentIntegrationTests {
         });
         assertThat(response.actuallySpendable()).isEqualByComparingTo("1000");
         assertThat(response.assumptions()).anyMatch(text -> text.contains("Student loan advisory commitments are not included"));
+        assertThat(response.exclusions()).anyMatch(exclusion -> exclusion.code().equals("STUDENT_LOAN_ADVISORY_TOTAL_EXCLUDED"));
     }
 
     private TestContext createContext(String prefix) {

@@ -43,6 +43,7 @@ public class TransactionRequest {
     private String note;
     private UUID sourceWalletId;
     private UUID destinationWalletId;
+    private Boolean affectsWalletBalance;
 
     public void setIncomeSourceId(UUID incomeSourceId) {
         this.incomeSourceId = incomeSourceId;

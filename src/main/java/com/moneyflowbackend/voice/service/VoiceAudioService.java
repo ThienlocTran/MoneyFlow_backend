@@ -27,7 +27,6 @@ import org.springframework.web.multipart.MultipartFile;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.YearMonth;
 import java.util.Arrays;
 import java.util.Locale;
 import java.util.Set;
@@ -112,7 +111,7 @@ public class VoiceAudioService {
             voiceRecord.setAudioStorageKey(null);
             voiceRecord.setVoiceStatus(VoiceRecordStatus.STORAGE_FAILED);
             voiceRecordRepository.save(voiceRecord);
-            throw new BusinessException("AUDIO_STORAGE_FAILED", "Voice audio storage failed", HttpStatus.BAD_GATEWAY);
+            throw new BusinessException("AUDIO_UPLOAD_FAILED", "Voice audio upload failed", HttpStatus.BAD_GATEWAY);
         }
     }
 
@@ -120,9 +119,7 @@ public class VoiceAudioService {
     public VoiceAudioPlaybackResponse playbackUrl(UUID voiceRecordId, UUID userId) {
         VoiceRecord voiceRecord = findVoiceRecord(voiceRecordId);
         requireActiveMember(voiceRecord, userId);
-        if (storageKey(voiceRecord) == null || storageKey(voiceRecord).isBlank()) {
-            throw new BusinessException("AUDIO_NOT_AVAILABLE", "Voice audio is not available", HttpStatus.NOT_FOUND);
-        }
+        requirePlayableAudio(voiceRecord);
         return VoiceAudioPlaybackResponse.builder()
                 .voiceRecordId(voiceRecord.getId())
                 .playbackUrl("/api/voice-records/" + voiceRecord.getId() + "/audio")
@@ -135,10 +132,19 @@ public class VoiceAudioService {
     public StoredVoiceAudioStream streamAudio(UUID voiceRecordId, UUID userId) {
         VoiceRecord voiceRecord = findVoiceRecord(voiceRecordId);
         requireActiveMember(voiceRecord, userId);
-        if (storageKey(voiceRecord) == null || storageKey(voiceRecord).isBlank()) {
-            throw new BusinessException("AUDIO_NOT_AVAILABLE", "Voice audio is not available", HttpStatus.NOT_FOUND);
+        String key = requirePlayableAudio(voiceRecord);
+        try {
+            return storageService.open(key, voiceRecord.getMimeType());
+        } catch (BusinessException ex) {
+            if ("AUDIO_NOT_UPLOADED".equals(ex.getCode()) || "AUDIO_OBJECT_MISSING".equals(ex.getCode()) || "AUDIO_DELETED".equals(ex.getCode())) {
+                log.debug("Voice audio playback unavailable: voiceRecordId={}, provider={}, reason={}",
+                        voiceRecord.getId(), storageService.provider(), ex.getCode());
+            } else {
+                log.warn("Voice audio playback unavailable: voiceRecordId={}, provider={}, reason={}",
+                        voiceRecord.getId(), storageService.provider(), ex.getCode());
+            }
+            throw ex;
         }
-        return storageService.open(storageKey(voiceRecord), voiceRecord.getMimeType());
     }
 
     @Transactional(readOnly = true)
@@ -276,9 +282,12 @@ public class VoiceAudioService {
 
     private String objectKey(VoiceRecord voiceRecord) {
         LocalDate today = LocalDate.now(clock);
-        return "%s/%s/%s.%s".formatted(
-                YearMonth.from(today),
-                today,
+        return "%02d-%d/%02d-%02d-%d/%s.%s".formatted(
+                today.getMonthValue(),
+                today.getYear(),
+                today.getDayOfMonth(),
+                today.getMonthValue(),
+                today.getYear(),
                 UUID.randomUUID(),
                 extension(voiceRecord.getMimeType()));
     }
@@ -291,6 +300,23 @@ public class VoiceAudioService {
             return voiceRecord.getStorageKey();
         }
         return voiceRecord.getStoragePublicId();
+    }
+
+    private String requirePlayableAudio(VoiceRecord voiceRecord) {
+        if (!storageService.isEnabled()) {
+            throw new BusinessException("STORAGE_NOT_CONFIGURED", "Voice audio storage is not configured", HttpStatus.SERVICE_UNAVAILABLE);
+        }
+        if (voiceRecord.getVoiceStatus() == VoiceRecordStatus.STORAGE_FAILED) {
+            throw new BusinessException("AUDIO_UPLOAD_FAILED", "Voice audio upload failed", HttpStatus.CONFLICT);
+        }
+        if (voiceRecord.getVoiceStatus() == VoiceRecordStatus.AUDIO_DELETED) {
+            throw new BusinessException("AUDIO_DELETED", "Voice audio was deleted", HttpStatus.GONE);
+        }
+        String key = storageKey(voiceRecord);
+        if (key == null || key.isBlank()) {
+            throw new BusinessException("AUDIO_NOT_UPLOADED", "Voice audio was not uploaded", HttpStatus.NOT_FOUND);
+        }
+        return key;
     }
 
     private String extension(String mimeType) {
@@ -306,6 +332,7 @@ public class VoiceAudioService {
         return VoiceAudioUploadResponse.builder()
                 .voiceRecordId(voiceRecord.getId())
                 .voiceAudioAvailable(voiceRecord.getStoragePublicId() != null)
+                .audioStatus(voiceRecord.getVoiceStatus().name())
                 .voiceAudioStatus(voiceRecord.getVoiceStatus().name())
                 .mimeType(voiceRecord.getMimeType())
                 .fileSizeBytes(voiceRecord.getFileSizeBytes())

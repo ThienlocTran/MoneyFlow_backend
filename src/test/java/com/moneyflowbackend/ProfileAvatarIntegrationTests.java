@@ -160,7 +160,7 @@ class ProfileAvatarIntegrationTests {
                         .header("Authorization", bearer(token)))
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.code").value("STORAGE_NOT_CONFIGURED"))
-                .andExpect(jsonPath("$.message").value("Dịch vụ tải ảnh chưa được cấu hình. Vui lòng kiểm tra cấu hình máy chủ."));
+                .andExpect(jsonPath("$.message").value("Dịch vụ lưu trữ chưa được cấu hình. Vui lòng kiểm tra cấu hình máy chủ."));
     }
 
     @Test

@@ -19,8 +19,13 @@ public class ActivityTimelineItemResponse {
     private Instant occurredAt;
     private ActivityActorSummary actor;
     private ActivityAction action;
+    private String actionLabel;
     private ActivityEntityType entityType;
     private UUID entityId;
+    private String relatedRecordType;
+    private UUID relatedRecordId;
+    private boolean canOpenDetail;
+    private String sourceLabel;
     private BigDecimal amount;
     private String direction;
     private LocalDate businessDate;

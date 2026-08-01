@@ -7,6 +7,8 @@ import com.moneyflowbackend.auth.repository.UserRepository;
 import com.moneyflowbackend.common.exception.BusinessException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -17,6 +19,7 @@ import java.util.UUID;
 
 @Service
 public class ProfileAvatarService {
+    private static final Logger log = LoggerFactory.getLogger(ProfileAvatarService.class);
     private static final Set<String> ALLOWED_TYPES = Set.of("image/jpeg", "image/png", "image/webp");
 
     private final UserRepository userRepository;
@@ -47,10 +50,39 @@ public class ProfileAvatarService {
             throw new BusinessException("UNAUTHORIZED", "Chưa xác thực", HttpStatus.UNAUTHORIZED);
         }
 
+        String previousAvatarUrl = user.getAvatarUrl();
         String avatarUrl = storageService.upload("avatars/" + user.getId() + "/" + UUID.randomUUID(), file);
         user.setAvatarUrl(avatarUrl);
         user.setUpdatedAt(Instant.now());
-        return map(userRepository.save(user));
+        User saved = userRepository.save(user);
+        deleteBestEffort(previousAvatarUrl, userId);
+        return map(saved);
+    }
+
+    @Transactional
+    public UserResponse delete(UUID userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new BusinessException("UNAUTHORIZED", "Chưa xác thực", HttpStatus.UNAUTHORIZED));
+        if (user.getDeletedAt() != null || user.getStatus() != UserStatus.ACTIVE) {
+            throw new BusinessException("UNAUTHORIZED", "Chưa xác thực", HttpStatus.UNAUTHORIZED);
+        }
+        String previousAvatarUrl = user.getAvatarUrl();
+        user.setAvatarUrl(null);
+        user.setUpdatedAt(Instant.now());
+        User saved = userRepository.save(user);
+        deleteBestEffort(previousAvatarUrl, userId);
+        return map(saved);
+    }
+
+    private void deleteBestEffort(String avatarUrl, UUID userId) {
+        if (avatarUrl == null || avatarUrl.isBlank()) {
+            return;
+        }
+        try {
+            storageService.delete(avatarUrl);
+        } catch (RuntimeException ex) {
+            log.warn("Avatar cleanup skipped: userId={}, reason=delete_failed", userId);
+        }
     }
 
     private void validate(MultipartFile file) {

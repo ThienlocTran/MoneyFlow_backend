@@ -1,0 +1,220 @@
+package com.moneyflowbackend;
+
+import com.moneyflowbackend.auth.model.User;
+import com.moneyflowbackend.auth.repository.UserRepository;
+import com.moneyflowbackend.category.model.Category;
+import com.moneyflowbackend.category.model.CategoryKeyword;
+import com.moneyflowbackend.category.model.CategoryType;
+import com.moneyflowbackend.category.repository.CategoryKeywordRepository;
+import com.moneyflowbackend.category.repository.CategoryRepository;
+import com.moneyflowbackend.common.exception.BusinessException;
+import com.moneyflowbackend.receipt.dto.ReceiptReviewParseRequest;
+import com.moneyflowbackend.receipt.dto.ReceiptReviewParseResponse;
+import com.moneyflowbackend.receipt.dto.ReceiptReviewSource;
+import com.moneyflowbackend.receipt.service.ReceiptReviewService;
+import com.moneyflowbackend.transaction.model.TransactionType;
+import com.moneyflowbackend.transaction.repository.TransactionRepository;
+import com.moneyflowbackend.wallet.model.Wallet;
+import com.moneyflowbackend.wallet.model.WalletType;
+import com.moneyflowbackend.wallet.repository.WalletRepository;
+import com.moneyflowbackend.workspace.model.Workspace;
+import com.moneyflowbackend.workspace.model.WorkspaceMember;
+import com.moneyflowbackend.workspace.model.WorkspaceRole;
+import com.moneyflowbackend.workspace.repository.WorkspaceMemberRepository;
+import com.moneyflowbackend.workspace.repository.WorkspaceRepository;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.math.BigDecimal;
+import java.time.OffsetDateTime;
+import java.util.UUID;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+@SpringBootTest
+@ActiveProfiles("test")
+@Transactional
+class ReceiptReviewIntegrationTests {
+    @Autowired ReceiptReviewService receiptReviewService;
+    @Autowired UserRepository userRepository;
+    @Autowired WorkspaceRepository workspaceRepository;
+    @Autowired WorkspaceMemberRepository workspaceMemberRepository;
+    @Autowired WalletRepository walletRepository;
+    @Autowired CategoryRepository categoryRepository;
+    @Autowired CategoryKeywordRepository categoryKeywordRepository;
+    @Autowired TransactionRepository transactionRepository;
+
+    @Test
+    void parseReceiptReturnsReviewDraftWithoutCommitting() {
+        TestContext ctx = context("receipt_review_parse", WorkspaceRole.OWNER);
+        Wallet cash = wallet(ctx, "Cash");
+        Category food = category(ctx, "An uong");
+        keyword(ctx, food, "cafe");
+        long before = transactionRepository.count();
+
+        ReceiptReviewParseResponse response = receiptReviewService.parse(ctx.workspace().getId(), request("""
+                Highlands Coffee
+                Ngay 01/08/2026
+                Cafe sua da 40.000
+                Tong cong 40.000
+                """, cash.getId()), ctx.user().getId());
+
+        assertThat(response.getMode()).isEqualTo("RECEIPT_REVIEW");
+        assertThat(response.getStatus()).isEqualTo("NEEDS_REVIEW");
+        assertThat(response.getSource()).isEqualTo(ReceiptReviewSource.MANUAL_TEXT);
+        assertThat(response.getCandidate().getType()).isEqualTo(TransactionType.EXPENSE);
+        assertThat(response.getCandidate().getAmount()).isEqualByComparingTo("40000");
+        assertThat(response.getCandidate().getCurrency()).isEqualTo("VND");
+        assertThat(response.getCandidate().getWalletId()).isEqualTo(cash.getId());
+        assertThat(response.getCandidate().getCategoryId()).isEqualTo(food.getId());
+        assertThat(response.getCandidate().getMerchantName()).isEqualTo("Highlands Coffee");
+        assertThat(response.getCandidate().getOccurredAt().toLocalDate()).hasToString("2026-08-01");
+        assertThat(response.getCandidate().getNeedsFields()).isEmpty();
+        assertThat(response.getExtracted().getLineAmounts()).contains(new BigDecimal("40000"));
+        assertThat(transactionRepository.count()).isEqualTo(before);
+    }
+
+    @Test
+    void amountFormatsAndInferredTotalAreSupported() {
+        TestContext ctx = context("receipt_review_amounts", WorkspaceRole.OWNER);
+
+        ReceiptReviewParseResponse comma = receiptReviewService.parse(ctx.workspace().getId(), request("Shop\nTotal 1,250,000", null), ctx.user().getId());
+        ReceiptReviewParseResponse kilo = receiptReviewService.parse(ctx.workspace().getId(), request("Cafe\nTra sua 40k", null), ctx.user().getId());
+
+        assertThat(comma.getCandidate().getAmount()).isEqualByComparingTo("1250000");
+        assertThat(kilo.getCandidate().getAmount()).isEqualByComparingTo("40000");
+        assertThat(kilo.getWarnings()).extracting("code").contains("RECEIPT_TOTAL_INFERRED");
+    }
+
+    @Test
+    void shortTextIsUnsupportedDraft() {
+        TestContext ctx = context("receipt_review_short", WorkspaceRole.OWNER);
+
+        ReceiptReviewParseResponse response = receiptReviewService.parse(ctx.workspace().getId(), request("  ", null), ctx.user().getId());
+
+        assertThat(response.getStatus()).isEqualTo("UNSUPPORTED");
+        assertThat(response.getCandidate()).isNull();
+        assertThat(response.getWarnings()).extracting("code").contains("RECEIPT_TEXT_TOO_SHORT", "RECEIPT_UNSUPPORTED_TEXT");
+    }
+
+    @Test
+    void missingWalletAndCategoryAreNeedsFieldsNotFakeData() {
+        TestContext ctx = context("receipt_review_needs", WorkspaceRole.OWNER);
+
+        ReceiptReviewParseResponse response = receiptReviewService.parse(ctx.workspace().getId(), request("Unknown Merchant\nTotal 40000", null), ctx.user().getId());
+
+        assertThat(response.getCandidate().getWalletId()).isNull();
+        assertThat(response.getCandidate().getCategoryId()).isNull();
+        assertThat(response.getCandidate().getNeedsFields()).contains("walletId", "categoryId");
+        assertThat(response.getWarnings()).extracting("code").contains("RECEIPT_WALLET_NOT_SELECTED", "RECEIPT_CATEGORY_NOT_SELECTED");
+    }
+
+    @Test
+    void occurredAtHintIsUsedWhenReceiptDateMissing() {
+        TestContext ctx = context("receipt_review_hint", WorkspaceRole.OWNER);
+        ReceiptReviewParseRequest req = request("Cafe\nTotal 40000", null);
+        req.setOccurredAtHint(OffsetDateTime.parse("2026-07-30T12:00:00+07:00"));
+
+        ReceiptReviewParseResponse response = receiptReviewService.parse(ctx.workspace().getId(), req, ctx.user().getId());
+
+        assertThat(response.getCandidate().getOccurredAt().toLocalDate()).hasToString("2026-07-30");
+        assertThat(response.getWarnings()).extracting("code").doesNotContain("RECEIPT_DATE_INFERRED");
+    }
+
+    @Test
+    void crossWorkspaceWalletIsRejected() {
+        TestContext ctx = context("receipt_review_refs", WorkspaceRole.OWNER);
+        TestContext other = context("receipt_review_refs_other", WorkspaceRole.OWNER);
+        Wallet otherCash = wallet(other, "Cash");
+
+        assertBusinessCode(() -> receiptReviewService.parse(ctx.workspace().getId(), request("Cafe\nTotal 40000", otherCash.getId()), ctx.user().getId()),
+                "WALLET_NOT_FOUND");
+    }
+
+    @Test
+    void nonMemberCannotParseWorkspaceReceipt() {
+        TestContext ctx = context("receipt_review_auth", WorkspaceRole.OWNER);
+        TestContext other = context("receipt_review_auth_other", WorkspaceRole.OWNER);
+
+        assertBusinessCode(() -> receiptReviewService.parse(ctx.workspace().getId(), request("Cafe\nTotal 40000", null), other.user().getId()),
+                "WORKSPACE_ACCESS_DENIED");
+    }
+
+    private ReceiptReviewParseRequest request(String rawText, UUID walletId) {
+        ReceiptReviewParseRequest req = new ReceiptReviewParseRequest();
+        req.setRawText(rawText);
+        req.setWalletId(walletId);
+        return req;
+    }
+
+    private TestContext context(String prefix, WorkspaceRole role) {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        User user = userRepository.save(User.builder()
+                .username(prefix + "_" + suffix)
+                .email(prefix + "_" + suffix + "@example.com")
+                .fullName("Receipt Review Test User")
+                .build());
+        Workspace workspace = workspaceRepository.save(Workspace.builder()
+                .name(prefix + " workspace")
+                .createdByUser(user)
+                .timezone("Asia/Ho_Chi_Minh")
+                .quickAmountUnit("THOUSAND")
+                .currency("VND")
+                .build());
+        workspaceMemberRepository.save(WorkspaceMember.builder()
+                .workspace(workspace)
+                .user(user)
+                .role(role)
+                .build());
+        return new TestContext(user, workspace);
+    }
+
+    private Wallet wallet(TestContext ctx, String name) {
+        return walletRepository.saveAndFlush(Wallet.builder()
+                .workspace(ctx.workspace())
+                .name(name)
+                .walletType(WalletType.CASH)
+                .openingBalance(BigDecimal.ZERO)
+                .isActive(true)
+                .includeInTotal(true)
+                .build());
+    }
+
+    private Category category(TestContext ctx, String name) {
+        return categoryRepository.saveAndFlush(Category.builder()
+                .workspace(ctx.workspace())
+                .name(name)
+                .categoryType(CategoryType.EXPENSE)
+                .isActive(true)
+                .isArchived(false)
+                .build());
+    }
+
+    private void keyword(TestContext ctx, Category category, String value) {
+        categoryKeywordRepository.saveAndFlush(CategoryKeyword.builder()
+                .workspace(ctx.workspace())
+                .category(category)
+                .keyword(value)
+                .priority(10)
+                .isUserLearned(true)
+                .build());
+    }
+
+    private void assertBusinessCode(ThrowingRunnable runnable, String code) {
+        assertThatThrownBy(runnable::run)
+                .isInstanceOf(BusinessException.class)
+                .extracting("code")
+                .isEqualTo(code);
+    }
+
+    @FunctionalInterface
+    private interface ThrowingRunnable {
+        void run();
+    }
+
+    private record TestContext(User user, Workspace workspace) {}
+}

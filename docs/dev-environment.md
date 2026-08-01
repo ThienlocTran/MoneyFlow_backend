@@ -53,6 +53,35 @@ MONEYFLOW_DB_PASSWORD=<password>
 
 Do not paste credentials into docs or committed files. Keep real values in local `.env` or the IDE run configuration.
 
+## Local voice UAT database
+
+Voice command browser UAT must not run against Neon or any shared remote database. Use only:
+
+```text
+host=localhost
+port=15432
+database=moneyflow_voice_uat
+```
+
+Windows PowerShell:
+
+```powershell
+.\scripts\start-voice-uat-db.ps1
+.\scripts\run-local-voice-uat.ps1
+```
+
+The DB script starts `postgres:16` with local-only placeholder credentials on `127.0.0.1:15432` by default. Override with `MONEYFLOW_VOICE_UAT_DB_PORT` if needed. The backend script sets `MONEYFLOW_DB_URL` to `jdbc:postgresql://localhost:15432/moneyflow_voice_uat`, removes generic fallback DB variables for that process, prints only the host/database, and starts the backend with the `local` profile.
+
+To clone rich data for local-only UAT, load source DB env vars in the shell and run:
+
+```powershell
+.\scripts\clone-voice-uat-db.ps1
+```
+
+The clone script prints masked source metadata only, writes dumps under `D:\MindMirror\MoneyFlow\_local_db_backups`, and restores into `localhost:15432/moneyflow_voice_uat` by default.
+
+If the current shell resolves to `neondb`, do not run browser UAT or disposable write checks from that shell. Start a fresh shell with the command above.
+
 ## Neon cost controls
 
 When using free Neon or any dev database that should sleep, set:

@@ -6,4 +6,7 @@ public interface AvatarStorageService {
     boolean isEnabled();
 
     String upload(String objectKey, MultipartFile file);
+
+    default void delete(String avatarUrl) {
+    }
 }

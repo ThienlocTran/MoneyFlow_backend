@@ -27,11 +27,15 @@ public class QuickEntryBatchConfirmRequest {
         private String clientCandidateId;
         private Boolean selected;
         private VoiceIntentType intentType;
+        private VoiceCandidateStatus candidateStatus;
+        private List<String> missingFields = new ArrayList<>();
         private TransactionType type;
         private TransactionStatus status;
         private BigDecimal amount;
         private UUID walletId;
         private UUID categoryId;
+        private UUID incomeSourceId;
+        private UUID relatedIncomeSourceId;
         private UUID sourceWalletId;
         private UUID destinationWalletId;
         private LocalDate transactionDate;

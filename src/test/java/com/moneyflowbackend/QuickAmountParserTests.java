@@ -26,6 +26,7 @@ class QuickAmountParserTests {
         assertAmount("2tr500", "2500000");
         assertAmount("2 tri\u1EC7u 500", "2500000");
         assertAmount("2 tri\u1EC7u 500 ngh\u00ECn", "2500000");
+        assertAmount("5 chục", "50000");
         assertAmount("500\u0111", "500");
         assertAmount("500 vnd", "500");
     }

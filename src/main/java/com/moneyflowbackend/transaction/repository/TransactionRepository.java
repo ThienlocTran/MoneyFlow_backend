@@ -27,6 +27,17 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID>,
         UUID getCategoryId();
     }
 
+    /**
+     * Read-only history row used by the quick entry suggestion engine.
+     */
+    interface SuggestionHistoryRow {
+        UUID getCategoryId();
+        UUID getWalletId();
+        UUID getIncomeSourceId();
+        String getDescription();
+        String getRawInput();
+    }
+
     long countByWorkspaceIdAndCategoryId(UUID workspaceId, UUID categoryId);
     boolean existsByWorkspaceIdAndVoiceRecordIdAndSourceType(UUID workspaceId, UUID voiceRecordId, TransactionSourceType sourceType);
     Optional<Transaction> findByWorkspaceIdAndVoiceRecordIdAndSourceType(UUID workspaceId, UUID voiceRecordId, TransactionSourceType sourceType);
@@ -36,11 +47,6 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID>,
             TransactionSourceType sourceType);
     Optional<Transaction> findByIdAndWorkspaceId(UUID transactionId, UUID workspaceId);
     Optional<Transaction> findByWorkspaceIdAndMigrationKey(UUID workspaceId, String migrationKey);
-    Optional<Transaction> findByWorkspaceIdAndVoiceRecordIdAndSourceType(UUID workspaceId, UUID voiceRecordId, TransactionSourceType sourceType);
-    List<Transaction> findAllByWorkspaceIdAndVoiceRecordIdAndSourceTypeOrderByCreatedAtAsc(
-            UUID workspaceId,
-            UUID voiceRecordId,
-            TransactionSourceType sourceType);
     List<Transaction> findAllByWorkspaceIdAndSourceTypeAndSourceReferenceStartingWithOrderByCreatedAtAsc(
             UUID workspaceId,
             TransactionSourceType sourceType,
@@ -95,6 +101,28 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID>,
             @Param("workspaceId") UUID workspaceId,
             @Param("userId") UUID userId,
             @Param("transactionType") com.moneyflowbackend.transaction.model.TransactionType transactionType);
+
+    @Query("""
+            SELECT c.id AS categoryId,
+                   w.id AS walletId,
+                   s.id AS incomeSourceId,
+                   t.description AS description,
+                   t.rawInput AS rawInput
+            FROM Transaction t
+            LEFT JOIN t.category c
+            LEFT JOIN t.wallet w
+            LEFT JOIN t.incomeSource s
+            WHERE t.workspace.id = :workspaceId
+              AND t.transactionType = :transactionType
+              AND t.transactionStatus = com.moneyflowbackend.transaction.model.TransactionStatus.POSTED
+              AND t.deletedAt IS NULL
+              AND t.sourceType <> com.moneyflowbackend.transaction.model.TransactionSourceType.EXCEL_MIGRATION
+            ORDER BY t.transactionDate DESC, t.createdAt DESC
+            """)
+    List<SuggestionHistoryRow> findSuggestionHistory(
+            @Param("workspaceId") UUID workspaceId,
+            @Param("transactionType") com.moneyflowbackend.transaction.model.TransactionType transactionType,
+            Pageable pageable);
 
     @Query("""
             SELECT COUNT(t) FROM Transaction t
@@ -260,4 +288,92 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID>,
             @Param("startDate") LocalDate startDate,
             @Param("endDate") LocalDate endDate,
             Pageable pageable);
+
+    @Query("""
+            SELECT COALESCE(SUM(t.amount), 0) FROM Transaction t
+            WHERE t.workspace.id = :workspaceId
+              AND t.transactionType = com.moneyflowbackend.transaction.model.TransactionType.EXPENSE
+              AND t.transactionStatus = com.moneyflowbackend.transaction.model.TransactionStatus.POSTED
+              AND t.deletedAt IS NULL
+              AND t.historical = false
+              AND t.affectsWalletBalance = true
+              AND t.transactionDate >= :startDate
+              AND t.transactionDate <= :endDate
+            """)
+    BigDecimal sumPostedExpenseInPeriod(
+            @Param("workspaceId") UUID workspaceId,
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate);
+
+    @Query("""
+            SELECT COUNT(t) FROM Transaction t
+            WHERE t.workspace.id = :workspaceId
+              AND t.transactionType = com.moneyflowbackend.transaction.model.TransactionType.EXPENSE
+              AND t.transactionStatus = com.moneyflowbackend.transaction.model.TransactionStatus.POSTED
+              AND t.deletedAt IS NULL
+              AND t.historical = false
+              AND t.affectsWalletBalance = true
+              AND t.transactionDate >= :startDate
+              AND t.transactionDate <= :endDate
+            """)
+    long countPostedExpenseInPeriod(
+            @Param("workspaceId") UUID workspaceId,
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate);
+
+    @Query("""
+            SELECT COALESCE(SUM(t.amount), 0) FROM Transaction t
+            WHERE t.workspace.id = :workspaceId
+              AND t.transactionType = com.moneyflowbackend.transaction.model.TransactionType.INCOME
+              AND t.transactionStatus = com.moneyflowbackend.transaction.model.TransactionStatus.POSTED
+              AND t.deletedAt IS NULL
+              AND t.historical = false
+              AND t.affectsWalletBalance = true
+              AND t.transactionDate >= :startDate
+              AND t.transactionDate <= :endDate
+            """)
+    BigDecimal sumPostedIncomeInPeriod(
+            @Param("workspaceId") UUID workspaceId,
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate);
+
+    @Query("""
+            SELECT c.name, COALESCE(SUM(t.amount), 0), COUNT(t)
+            FROM Transaction t
+            JOIN t.category c
+            WHERE t.workspace.id = :workspaceId
+              AND t.transactionType = com.moneyflowbackend.transaction.model.TransactionType.EXPENSE
+              AND t.transactionStatus = com.moneyflowbackend.transaction.model.TransactionStatus.POSTED
+              AND t.deletedAt IS NULL
+              AND t.historical = false
+              AND t.affectsWalletBalance = true
+              AND t.transactionDate >= :startDate
+              AND t.transactionDate <= :endDate
+            GROUP BY c.id, c.name
+            ORDER BY COALESCE(SUM(t.amount), 0) DESC, c.name ASC
+            """)
+    List<Object[]> sumPostedExpenseByCategoryInPeriod(
+            @Param("workspaceId") UUID workspaceId,
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate);
+
+    @Query("""
+            SELECT t FROM Transaction t
+            LEFT JOIN FETCH t.category c
+            WHERE t.workspace.id = :workspaceId
+              AND t.transactionType = com.moneyflowbackend.transaction.model.TransactionType.EXPENSE
+              AND t.transactionStatus = com.moneyflowbackend.transaction.model.TransactionStatus.POSTED
+              AND t.deletedAt IS NULL
+              AND t.historical = false
+              AND t.affectsWalletBalance = true
+              AND t.transactionDate >= :startDate
+              AND t.transactionDate <= :endDate
+            ORDER BY t.amount DESC, t.transactionDate DESC, t.id DESC
+            """)
+    List<Transaction> findLargestPostedExpenseInPeriod(
+            @Param("workspaceId") UUID workspaceId,
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate,
+            Pageable pageable);
 }
+

@@ -33,7 +33,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class CloudinaryAvatarStorageServiceTests {
     @Test
-    void uploadUsesConfiguredBaseFolderInPublicId() {
+    void uploadUsesUserAssetFolderAndLeafPublicId() {
         CapturingHttpClient client = new CapturingHttpClient();
         CloudinaryAvatarStorageService service = new CloudinaryAvatarStorageService(
                 client,
@@ -41,7 +41,7 @@ class CloudinaryAvatarStorageServiceTests {
                 "demo-cloud",
                 "api-key",
                 "api-secret",
-                "moneyflow/dev");
+                "dev");
 
         String url = service.upload(
                 "avatars/11111111-1111-1111-1111-111111111111/22222222-2222-2222-2222-222222222222",
@@ -50,18 +50,45 @@ class CloudinaryAvatarStorageServiceTests {
         assertThat(url).isEqualTo("https://cdn.example/avatar.png");
         assertThat(client.uri).isEqualTo(URI.create("https://api.cloudinary.com/v1_1/demo-cloud/image/upload"));
         assertThat(client.body).contains("name=\"public_id\"");
-        assertThat(client.body).contains("moneyflow/dev/avatars/11111111-1111-1111-1111-111111111111/22222222-2222-2222-2222-222222222222");
+        assertThat(client.body).contains("22222222-2222-2222-2222-222222222222");
+        assertThat(client.body).doesNotContain("22222222-2222-2222-2222-222222222222.png");
+        assertThat(client.body).contains("name=\"asset_folder\"");
+        assertThat(client.body).contains("dev/avatars/11111111-1111-1111-1111-111111111111");
+        assertThat(client.body).doesNotContain("name=\"use_asset_folder_as_public_id_prefix\"");
+        assertThat(client.body).doesNotContain("api-secret");
+    }
+
+    @Test
+    void deleteDestroysPublicIdFromCloudinaryUrl() {
+        CapturingHttpClient client = new CapturingHttpClient();
+        CloudinaryAvatarStorageService service = new CloudinaryAvatarStorageService(
+                client,
+                Clock.fixed(Instant.ofEpochSecond(123), ZoneOffset.UTC),
+                "demo-cloud",
+                "api-key",
+                "api-secret",
+                "dev");
+
+        service.delete("https://res.cloudinary.com/demo-cloud/image/upload/v1781485500/dev/avatars/user-id/avatar-id.png");
+
+        assertThat(client.uri).isEqualTo(URI.create("https://api.cloudinary.com/v1_1/demo-cloud/image/destroy"));
+        assertThat(client.body).contains("name=\"public_id\"");
+        assertThat(client.body).contains("dev/avatars/user-id/avatar-id");
         assertThat(client.body).doesNotContain("api-secret");
     }
 
     @Test
     void resolvesProfileDefaultsAndOverride() {
+        assertThat(AvatarStorageConfig.resolveBaseFolder("", env("dev")))
+                .isEqualTo("dev");
         assertThat(AvatarStorageConfig.resolveBaseFolder("", env("local")))
-                .isEqualTo("moneyflow/dev");
+                .isEqualTo("dev");
         assertThat(AvatarStorageConfig.resolveBaseFolder("", env("production")))
-                .isEqualTo("moneyflow/prod");
+                .isEqualTo("production");
+        assertThat(AvatarStorageConfig.resolveBaseFolder("", env("prod")))
+                .isEqualTo("production");
         assertThat(AvatarStorageConfig.resolveBaseFolder("", env("test")))
-                .isEqualTo("moneyflow/test");
+                .isEqualTo("dev");
         assertThat(AvatarStorageConfig.resolveBaseFolder("custom/folder", env("production")))
                 .isEqualTo("custom/folder");
     }
