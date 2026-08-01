@@ -98,7 +98,7 @@ class VoiceReviewIntegrationTests {
     }
 
     @Test
-    void multiTranscriptReturnsSeparateDraftsWithUnsupportedSavings() {
+    void multiTranscriptReturnsSeparateDraftsWithSafeSavings() {
         TestContext ctx = context("voice_review_multi", WorkspaceRole.OWNER);
         Category gas = category(ctx, "Xăng xe", CategoryType.EXPENSE);
         keyword(ctx, gas, "xăng");
@@ -109,13 +109,17 @@ class VoiceReviewIntegrationTests {
         assertThat(response.getWarnings()).contains("MULTIPLE_AMOUNTS_DETECTED");
         assertThat(response.getDrafts()).hasSize(4);
         assertThat(response.getDrafts()).extracting(draft -> draft.getCandidate().getType())
-                .containsExactly(VoiceReviewDraftType.INCOME_FACT, VoiceReviewDraftType.EXPENSE, VoiceReviewDraftType.EXPENSE, VoiceReviewDraftType.SAVINGS);
+                .containsExactly(VoiceReviewDraftType.INCOME_FACT, VoiceReviewDraftType.EXPENSE, VoiceReviewDraftType.EXPENSE, VoiceReviewDraftType.SAVINGS_ALLOCATION);
         assertThat(response.getDrafts()).extracting(draft -> draft.getCandidate().getAmount())
                 .containsExactly(new BigDecimal("800000"), new BigDecimal("60000"), new BigDecimal("50000"), new BigDecimal("85000"));
         assertThat(response.getDrafts().get(0).getCandidate().getWalletId()).isNull();
         assertThat(response.getDrafts().get(1).getCandidate().getCategoryId()).isEqualTo(gas.getId());
         assertThat(response.getDrafts().get(3).isCanConfirm()).isFalse();
-        assertThat(response.getDrafts().get(3).getWarnings()).extracting("code").contains("DRAFT_UNSUPPORTED_TYPE");
+        assertThat(response.getDrafts().get(3).getWarnings()).extracting("code")
+                .contains("SAVINGS_NOT_EXPENSE", "SAVINGS_SOURCE_WALLET_REQUIRED", "SAVINGS_TARGET_NOT_SELECTED", "SAVINGS_CONFIRM_NOT_SUPPORTED");
+        assertThat(response.getDrafts().get(3).getCandidate().isCountsAsExpense()).isFalse();
+        assertThat(response.getDrafts().get(3).getCandidate().isCategoryRequired()).isFalse();
+        assertThat(response.getDrafts().get(3).getCandidate().getNeedsFields()).contains("sourceWalletId", "targetFundId");
     }
 
     @Test
@@ -313,9 +317,34 @@ class VoiceReviewIntegrationTests {
         Fixture fixture = fixture("voice_review_savings");
         VoiceReviewDraftResponse parsed = voiceReviewService.parse(fixture.ctx().workspace().getId(), parse("tôi gửi tiết kiệm 85"), fixture.ctx().user().getId());
 
-        assertThat(parsed.getCandidate().getType()).isEqualTo(VoiceReviewDraftType.SAVINGS);
+        long before = transactionRepository.count();
+
+        assertThat(parsed.getCandidate().getType()).isEqualTo(VoiceReviewDraftType.SAVINGS_ALLOCATION);
+        assertThat(parsed.getCandidate().isAffectsWalletBalance()).isFalse();
+        assertThat(parsed.getCandidate().isCountsAsExpense()).isFalse();
+        assertThat(parsed.getCandidate().isCategoryRequired()).isFalse();
+        assertThat(parsed.getCandidate().getNeedsFields()).contains("sourceWalletId", "targetFundId");
+        assertThat(parsed.getDrafts().get(0).getWarnings()).extracting("code")
+                .contains("SAVINGS_NOT_EXPENSE", "SAVINGS_SOURCE_WALLET_REQUIRED", "SAVINGS_TARGET_NOT_SELECTED", "SAVINGS_CONFIRM_NOT_SUPPORTED");
         assertBusinessCode(() -> voiceReviewService.confirmDraft(fixture.ctx().workspace().getId(), parsed.getVoiceRecordId(), parsed.getDrafts().get(0).getDraftId(), null, fixture.ctx().user().getId()),
-                "VOICE_DRAFT_INCOMPLETE");
+                "SAVINGS_CONFIRM_NOT_SUPPORTED");
+        assertThat(transactionRepository.count()).isEqualTo(before);
+    }
+
+    @Test
+    void fundDraftsKeepSpecificTypesAndNeverNeedCategory() {
+        Fixture fixture = fixture("voice_review_funds");
+
+        VoiceReviewDraftResponse sinking = voiceReviewService.parse(fixture.ctx().workspace().getId(), parse("bo vao quy laptop 200k"), fixture.ctx().user().getId());
+        VoiceReviewDraftResponse emergency = voiceReviewService.parse(fixture.ctx().workspace().getId(), parse("quy khan cap 100k"), fixture.ctx().user().getId());
+
+        assertThat(sinking.getCandidate().getType()).isEqualTo(VoiceReviewDraftType.SINKING_FUND_CONTRIBUTION);
+        assertThat(sinking.getCandidate().isAffectsWalletBalance()).isFalse();
+        assertThat(sinking.getCandidate().isCategoryRequired()).isFalse();
+        assertThat(sinking.getCandidate().getNeedsFields()).contains("sourceWalletId", "targetFundId");
+        assertThat(emergency.getCandidate().getType()).isEqualTo(VoiceReviewDraftType.EMERGENCY_FUND_CONTRIBUTION);
+        assertThat(emergency.getCandidate().isCountsAsExpense()).isFalse();
+        assertThat(emergency.getCandidate().getNeedsFields()).contains("sourceWalletId", "targetFundId");
     }
 
     @Test

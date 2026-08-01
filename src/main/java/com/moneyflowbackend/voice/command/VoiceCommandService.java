@@ -98,7 +98,7 @@ public class VoiceCommandService {
         if (type == VoiceReviewDraftType.WALLET_SNAPSHOT) {
             return VoiceCommandMode.WALLET_SNAPSHOT_REVIEW;
         }
-        if (type == VoiceReviewDraftType.SAVINGS || type == VoiceReviewDraftType.DEBT || type == VoiceReviewDraftType.UNKNOWN || type == null) {
+        if (type == VoiceReviewDraftType.DEBT || type == VoiceReviewDraftType.UNKNOWN || type == null) {
             return VoiceCommandMode.UNSUPPORTED;
         }
         return VoiceCommandMode.TRANSACTION_REVIEW;

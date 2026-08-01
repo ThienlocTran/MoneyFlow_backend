@@ -14,8 +14,11 @@ public class VoiceReviewDraftRequest {
     private BigDecimal amount;
     private OffsetDateTime occurredAt;
     private UUID walletId;
+    private UUID sourceWalletId;
     private UUID categoryId;
     private UUID incomeSourceId;
+    private UUID targetFundId;
+    private UUID jarId;
     private String note;
     private SpendingScope scope;
 }

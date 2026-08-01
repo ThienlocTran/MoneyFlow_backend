@@ -44,13 +44,24 @@ public class VoiceReviewDraftResponse {
         private OffsetDateTime occurredAt;
         private UUID walletId;
         private String walletName;
+        private UUID sourceWalletId;
+        private String sourceWalletName;
         private UUID categoryId;
         private String categoryName;
         private UUID incomeSourceId;
         private String incomeSourceName;
+        private UUID targetFundId;
+        private String targetFundName;
+        private String targetFundNameCandidate;
+        private UUID jarId;
+        private String jarName;
         private String note;
         private SpendingScope scope;
         private boolean affectsWalletBalance;
+        private boolean countsAsExpense;
+        private boolean walletRequired;
+        private boolean categoryRequired;
+        private boolean canConfirm;
         @Builder.Default
         private List<String> needsFields = new ArrayList<>();
     }

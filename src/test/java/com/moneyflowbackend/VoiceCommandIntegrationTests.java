@@ -173,10 +173,13 @@ class VoiceCommandIntegrationTests {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(Map.of("text", "toi gui tiet kiem 72k"))))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.mode").value("UNSUPPORTED"))
-                .andExpect(jsonPath("$.data.status").value("UNSUPPORTED"))
-                .andExpect(jsonPath("$.data.review.candidate.type").value("SAVINGS"))
-                .andExpect(jsonPath("$.data.warnings[0].code").value("VOICE_COMMAND_UNSUPPORTED"));
+                .andExpect(jsonPath("$.data.mode").value("TRANSACTION_REVIEW"))
+                .andExpect(jsonPath("$.data.status").value("NEEDS_REVIEW"))
+                .andExpect(jsonPath("$.data.commandType").value("LEDGER_DRAFT"))
+                .andExpect(jsonPath("$.data.review.candidate.type").value("SAVINGS_ALLOCATION"))
+                .andExpect(jsonPath("$.data.review.candidate.countsAsExpense").value(false))
+                .andExpect(jsonPath("$.data.review.candidate.categoryRequired").value(false))
+                .andExpect(jsonPath("$.data.warnings[0].code").value("VOICE_COMMAND_ROUTED_TO_REVIEW"));
 
         assertThat(transactionRepository.count()).isEqualTo(txBefore);
     }
