@@ -44,8 +44,15 @@ public class ReceiptTextParser {
         for (String keyword : TOTAL_KEYWORDS) {
             int keywordIndex = normalized.lastIndexOf(keyword);
             if (keywordIndex < 0) continue;
+            Optional<AmountHit> afterKeyword = amounts.stream()
+                    .filter(hit -> hit.start() >= keywordIndex)
+                    .min(Comparator.comparingInt(hit -> hit.start() - keywordIndex));
+            if (afterKeyword.isPresent()) {
+                AmountHit hit = afterKeyword.get();
+                return Optional.of(new AmountHit(hit.amount(), hit.start(), true));
+            }
             Optional<AmountHit> nearby = amounts.stream()
-                    .filter(hit -> hit.start() >= keywordIndex || Math.abs(hit.start() - keywordIndex) <= 40)
+                    .filter(hit -> Math.abs(hit.start() - keywordIndex) <= 40)
                     .min(Comparator.comparingInt(hit -> Math.abs(hit.start() - keywordIndex)));
             if (nearby.isPresent()) {
                 AmountHit hit = nearby.get();
