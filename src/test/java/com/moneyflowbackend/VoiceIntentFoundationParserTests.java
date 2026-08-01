@@ -167,12 +167,16 @@ class VoiceIntentFoundationParserTests {
 
     private void assertDraft(QuickEntryPreviewResponse preview, VoiceIntentType intentType) {
         assertThat(preview.getIntentType()).isEqualTo(intentType);
-        assertThat(preview.getCandidateStatus()).isEqualTo(VoiceCandidateStatus.MANUAL);
+        assertThat(preview.getCandidateStatus()).isEqualTo(intentType == VoiceIntentType.WALLET_BALANCE_SNAPSHOT
+                ? VoiceCandidateStatus.NEEDS_REVIEW
+                : VoiceCandidateStatus.MANUAL);
         assertThat(preview.getLedgerEffect()).isIn(VoiceLedgerEffect.MANUAL_UNSUPPORTED, VoiceLedgerEffect.DOES_NOT_AFFECT_WALLET);
         assertThat(preview.isReadyToConfirm()).isFalse();
         assertThat(preview.getType()).isNull();
         assertThat(preview.getSuggestedManualRoute()).isNotBlank();
-        assertThat(preview.getWarnings()).contains("VOICE_INTENT_NOT_COMMITTABLE");
+        assertThat(preview.getWarnings()).contains(intentType == VoiceIntentType.WALLET_BALANCE_SNAPSHOT
+                ? "WALLET_SNAPSHOT_CONFIRM_NOT_SUPPORTED"
+                : "VOICE_INTENT_NOT_COMMITTABLE");
     }
 
     private void assertCandidate(QuickEntryPreviewResponse.Candidate candidate, VoiceIntentType intentType, String amount) {

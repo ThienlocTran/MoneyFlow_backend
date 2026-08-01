@@ -48,6 +48,7 @@ public class QuickEntryPreviewResponse {
     private double confidence;
     private boolean readyToConfirm;
     private boolean commitSupported;
+    private boolean affectsWalletBalance;
     private String unsupportedReason;
     private String suggestedManualRoute;
     private String targetModule;
@@ -94,6 +95,7 @@ public class QuickEntryPreviewResponse {
         private double confidence;
         private boolean readyToConfirm;
         private boolean commitSupported;
+        private boolean affectsWalletBalance;
         private String validationStatus;
         @Builder.Default
         private List<String> missingFields = new ArrayList<>();

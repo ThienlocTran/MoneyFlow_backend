@@ -141,6 +141,10 @@ public class QuickEntryParser {
         if (amountCandidates.size() > 1) {
             explicitIntent = null;
         }
+        WalletMatch snapshotWallet = detectWalletSnapshot(normalized, display, wallets).orElse(null);
+        if (snapshotWallet != null && amount != null && amountCandidates.size() == 1) {
+            return walletSnapshotDraft(rawInput, display, amount, transactionDate, dateResult.time(), snapshotWallet);
+        }
         if (explicitIntent != null) {
             return unsupportedDraft(rawInput, display, explicitIntent, amount, transactionDate, dateResult.time(),
                     confidence(false, missing, warnings), missing, warnings);
@@ -264,6 +268,7 @@ public class QuickEntryParser {
                 .confidence(confidence)
                 .readyToConfirm(ready)
                 .commitSupported(type != null)
+                .affectsWalletBalance(type != TransactionType.INCOME || wallet != null)
                 .unsupportedReason(type == null ? "UNKNOWN_UNSUPPORTED" : null)
                 .targetModule(targetModule(intentType(type)))
                 .missingFields(new ArrayList<>(missing))
@@ -340,6 +345,47 @@ public class QuickEntryParser {
                         .targetModule(targetModule(intentType))
                         .suggestedManualActionLabel(label)
                         .build()))
+                .build();
+    }
+
+    private QuickEntryPreviewResponse walletSnapshotDraft(
+            String rawInput,
+            String display,
+            BigDecimal amount,
+            LocalDate date,
+            LocalTime time,
+            WalletMatch walletMatch) {
+        String candidateId = candidateId(display, 0, display, amount);
+        boolean ambiguous = walletMatch.ambiguous();
+        Wallet wallet = ambiguous ? null : walletMatch.wallet();
+        List<String> missing = ambiguous ? List.of("walletId") : List.of();
+        List<String> warnings = ambiguous
+                ? List.of("WALLET_MATCH_AMBIGUOUS")
+                : List.of("WALLET_SNAPSHOT_CONFIRM_NOT_SUPPORTED");
+        return QuickEntryPreviewResponse.builder()
+                .candidateId(candidateId)
+                .intentType(VoiceIntentType.WALLET_BALANCE_SNAPSHOT)
+                .candidateStatus(VoiceCandidateStatus.NEEDS_REVIEW)
+                .ledgerEffect(VoiceLedgerEffect.DOES_NOT_AFFECT_WALLET)
+                .rawInput(rawInput)
+                .normalizedInput(display)
+                .amount(amount)
+                .walletId(wallet == null ? null : wallet.getId())
+                .walletName(wallet == null ? null : wallet.getName())
+                .transactionDate(date)
+                .transactionTime(time)
+                .description(VietnameseTextNormalizer.capitalize(display))
+                .confidence(wallet == null ? 0.65 : 0.85)
+                .readyToConfirm(false)
+                .commitSupported(false)
+                .affectsWalletBalance(false)
+                .missingFields(new ArrayList<>(missing))
+                .warnings(new ArrayList<>(warnings))
+                .unsupportedReason("WALLET_SNAPSHOT_CONFIRM_NOT_SUPPORTED")
+                .suggestedManualRoute("/wallets")
+                .targetModule("WALLET_SNAPSHOT")
+                .suggestedManualActionLabel("Mở ví")
+                .candidates(List.of(walletSnapshotCandidate(display, display, 0, amount, date, time, walletMatch)))
                 .build();
     }
 
@@ -442,6 +488,9 @@ public class QuickEntryParser {
 
     private VoiceLedgerEffect ledgerEffect(TransactionType type, Wallet wallet, Wallet sourceWallet, Wallet destinationWallet) {
         if (type == TransactionType.EXPENSE || type == TransactionType.INCOME) {
+            if (type == TransactionType.INCOME && wallet == null) {
+                return VoiceLedgerEffect.DOES_NOT_AFFECT_WALLET;
+            }
             return wallet == null ? VoiceLedgerEffect.NEEDS_WALLET_REVIEW : VoiceLedgerEffect.AFFECTS_WALLET_NOW;
         }
         if (type == TransactionType.TRANSFER) {
@@ -450,6 +499,16 @@ public class QuickEntryParser {
                     : VoiceLedgerEffect.AFFECTS_WALLET_NOW;
         }
         return VoiceLedgerEffect.MANUAL_UNSUPPORTED;
+    }
+
+    private Optional<WalletMatch> detectWalletSnapshot(String normalized, String display, List<Wallet> wallets) {
+        if (normalized == null || !hasAny(normalized, "con", "hien con", "dang co", "so du")) {
+            return Optional.empty();
+        }
+        if (hasAny(normalized, "con no", "con thieu", "toi con no", "minh con no")) {
+            return Optional.empty();
+        }
+        return matchWallet(normalized, display, wallets);
     }
 
     private String targetModule(VoiceIntentType intentType) {
@@ -657,6 +716,11 @@ public class QuickEntryParser {
             String segment = amountSegment(display, amountCandidates, i);
             String normalizedSegment = VietnameseTextNormalizer.comparable(segment);
             VoiceIntentType segmentIntent = detectNonTransactionIntent(normalizedSegment);
+            WalletMatch segmentSnapshotWallet = detectWalletSnapshot(normalizedSegment, segment, wallets).orElse(null);
+            if (segmentSnapshotWallet != null) {
+                candidates.add(walletSnapshotCandidate(display, segment, i, amountCandidate.amount(), transactionDate, transactionTime, segmentSnapshotWallet));
+                continue;
+            }
             if (segmentIntent == null && !hasTransactionWord(normalizedSegment)) {
                 segmentIntent = detectPostAmountIntent(trailingContext(display, amountCandidates, i));
             }
@@ -717,7 +781,7 @@ public class QuickEntryParser {
                 warnings.add("UNKNOWN_CATEGORY");
             }
             if (segmentType == TransactionType.INCOME || segmentType == TransactionType.EXPENSE) {
-                if (segmentWallet == null) {
+                if (segmentWallet == null && segmentType == TransactionType.EXPENSE) {
                     missingFields.add("walletId");
                 }
             } else if (segmentType == TransactionType.TRANSFER) {
@@ -732,6 +796,7 @@ public class QuickEntryParser {
                 missingFields.add("DATE");
             }
             boolean ready = missingFields.isEmpty();
+            boolean affectsWalletBalance = segmentType != TransactionType.INCOME || segmentWallet != null;
             candidates.add(QuickEntryPreviewResponse.Candidate.builder()
                     .candidateId(candidateId(display, i, segment, amountCandidate.amount()))
                     .clientCandidateId(candidateId(display, i, segment, amountCandidate.amount()))
@@ -757,6 +822,7 @@ public class QuickEntryParser {
                     .confidence(ready ? 0.95 : 0.65)
                     .readyToConfirm(ready)
                     .commitSupported(segmentType != null)
+                    .affectsWalletBalance(affectsWalletBalance)
                     .validationStatus(ready ? "READY" : "NEEDS_REVIEW")
                     .missingFields(missingFields)
                     .warnings(warnings)
@@ -764,6 +830,48 @@ public class QuickEntryParser {
         }
         addTrailingIntentCandidate(display, amountCandidates, transactionDate, transactionTime, candidates);
         return candidates;
+    }
+
+    private QuickEntryPreviewResponse.Candidate walletSnapshotCandidate(
+            String display,
+            String segment,
+            int index,
+            BigDecimal amount,
+            LocalDate transactionDate,
+            LocalTime transactionTime,
+            WalletMatch walletMatch) {
+        String candidateId = candidateId(display, index, segment, amount);
+        boolean ambiguous = walletMatch.ambiguous();
+        Wallet wallet = ambiguous ? null : walletMatch.wallet();
+        List<String> missing = ambiguous ? List.of("walletId") : List.of();
+        List<String> warnings = ambiguous
+                ? List.of("WALLET_MATCH_AMBIGUOUS")
+                : List.of("WALLET_SNAPSHOT_CONFIRM_NOT_SUPPORTED");
+        return QuickEntryPreviewResponse.Candidate.builder()
+                .candidateId(candidateId)
+                .clientCandidateId(candidateId)
+                .intentType(VoiceIntentType.WALLET_BALANCE_SNAPSHOT)
+                .candidateStatus(VoiceCandidateStatus.NEEDS_REVIEW)
+                .ledgerEffect(VoiceLedgerEffect.DOES_NOT_AFFECT_WALLET)
+                .originalText(segment)
+                .description(candidateDescription(segment, null))
+                .amount(amount)
+                .walletId(wallet == null ? null : wallet.getId())
+                .walletName(wallet == null ? null : wallet.getName())
+                .transactionDate(transactionDate)
+                .transactionTime(transactionTime)
+                .confidence(wallet == null ? 0.65 : 0.85)
+                .readyToConfirm(false)
+                .commitSupported(false)
+                .affectsWalletBalance(false)
+                .validationStatus("NEEDS_REVIEW")
+                .missingFields(new ArrayList<>(missing))
+                .warnings(new ArrayList<>(warnings))
+                .unsupportedReason("WALLET_SNAPSHOT_CONFIRM_NOT_SUPPORTED")
+                .suggestedManualRoute("/wallets")
+                .targetModule("WALLET_SNAPSHOT")
+                .suggestedManualActionLabel("Mở ví")
+                .build();
     }
 
     private void addTrailingIntentCandidate(
