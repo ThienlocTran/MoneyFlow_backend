@@ -101,6 +101,17 @@ public class VoiceReviewService {
         return fromPreview(member.getWorkspace(), record, preview);
     }
 
+    @Transactional(readOnly = true)
+    public VoiceReviewDraftResponse preview(UUID workspaceId, String transcript, UUID userId) {
+        WorkspaceMember member = requireActiveMember(workspaceId, userId);
+        String normalized = normalize(transcript);
+        if (normalized == null) {
+            throw new BusinessException("VOICE_TRANSCRIPT_REQUIRED", "Voice transcript is required");
+        }
+        QuickEntryPreviewResponse preview = quickEntryService.parse(workspaceId, normalized, userId);
+        return fromPreview(member.getWorkspace(), null, preview);
+    }
+
     @Transactional
     public VoiceReviewDraftResponse patchDraft(UUID workspaceId, UUID voiceRecordId, VoiceReviewDraftRequest req, UUID userId) {
         Workspace workspace = requireWritableMember(workspaceId, userId).getWorkspace();
@@ -236,7 +247,7 @@ public class VoiceReviewService {
                 .build();
         candidate.setCanConfirm(canConfirm(candidate));
         return VoiceReviewDraftResponse.builder()
-                .voiceRecordId(record.getId())
+                .voiceRecordId(record == null ? null : record.getId())
                 .transcript(preview.getRawInput())
                 .mode(drafts(workspace, preview).size() > 1 ? "MULTI" : "SINGLE")
                 .status("NEEDS_REVIEW")

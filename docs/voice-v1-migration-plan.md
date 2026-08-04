@@ -25,14 +25,15 @@ Goal: introduce session lifecycle while keeping legacy endpoints.
 
 Backend work:
 
-- Add `VoiceSession` model or evolve `VoiceRecord` into session semantics.
+- Add `VoiceSession` and `VoiceSessionDraft` models.
 - Add endpoints:
   - `POST /api/workspaces/{workspaceId}/voice-sessions`
-  - `POST /api/workspaces/{workspaceId}/voice-sessions/{sessionId}/audio`
+  - `PATCH /api/workspaces/{workspaceId}/voice-sessions/{sessionId}/transcript`
+  - `POST /api/workspaces/{workspaceId}/voice-sessions/{sessionId}/interpret`
   - `GET /api/workspaces/{workspaceId}/voice-sessions/{sessionId}`
-  - `DELETE /api/workspaces/{workspaceId}/voice-sessions/{sessionId}/audio`
 - Add draft response shape with `sessionId`, `voiceRecordId` compatibility alias, `audioStatus`, `asrStatus`, `commandStatus`.
-- Allow audio upload before transaction confirmation.
+- Persist draft snapshots from the existing text interpreter.
+- Keep `asrStatus=NOT_REQUESTED` for manual transcript sessions.
 - Keep existing endpoints:
   - `/api/workspaces/{workspaceId}/voice-review/parse`
   - `/api/workspaces/{workspaceId}/voice-command/interpret`
@@ -41,8 +42,30 @@ Backend work:
 Acceptance:
 
 - Legacy voice review still works.
-- New session can store audio without creating a transaction.
-- Transaction response still exposes `voiceRecordId`, `voiceTranscript`, `playbackAvailable`, and `audioStatus`.
+- New text session can store transcript and draft snapshots without creating a transaction.
+- Re-interpreting a session replaces old unconfirmed draft snapshots instead of duplicating them.
+- Transaction response still exposes `voiceRecordId`, `voiceTranscript`, `playbackAvailable`, and `audioStatus` through legacy flows.
+
+P2 implementation notes:
+
+- Adds tables `voice_sessions` and `voice_session_drafts`.
+- Adds `POST /api/workspaces/{workspaceId}/voice-sessions`.
+- Adds `PATCH /api/workspaces/{workspaceId}/voice-sessions/{sessionId}/transcript`.
+- Adds `POST /api/workspaces/{workspaceId}/voice-sessions/{sessionId}/interpret`.
+- Adds `GET /api/workspaces/{workspaceId}/voice-sessions/{sessionId}`.
+- Does not add audio upload, ASR, PhoWhisper, or confirm routes.
+- Session interpret uses the existing voice command rules through a preview-only path so legacy `/voice-command/interpret` behavior remains unchanged.
+- Manual transcript sessions prepare for PhoWhisper by proving session status, transcript normalization, command interpretation, and persisted draft queue behavior before audio transcription exists.
+
+Text-based session test flow:
+
+1. Create a `TEXT` session.
+2. Patch transcript.
+3. Post interpret.
+4. Check `asrStatus=NOT_REQUESTED`.
+5. Check `commandStatus=NEEDS_REVIEW` for draft modes or `INTERPRETED` for read-only query.
+6. Check persisted draft count/types.
+7. Check transaction count and wallet balance are unchanged.
 
 ## Phase 3: Add `moneyflow-asr-service`
 
