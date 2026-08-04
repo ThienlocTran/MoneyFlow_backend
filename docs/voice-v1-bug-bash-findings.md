@@ -253,4 +253,35 @@ Blocking release?
 
 Status:
 
-- OPEN.
+- RESOLVED in P9A.
+
+### P9A - VOICE-P8F-RERUN-001 Fix
+
+Before fix:
+
+- Direct ASR mock multipart request to `/asr/transcribe` returned HTTP 200 with provider `MOCK`, mode `mock`, transcript data, and warning `ASR_MOCK_TRANSCRIPT`.
+- Backend external_http audio transcribe returned a successful API wrapper but persisted `asrStatus=FAILED`; no transcript was stored.
+- ASR/Uvicorn logged HTTP 400 and `Unsupported upgrade request` before request handling.
+
+Root cause:
+
+- Java `HttpClient` attempted HTTP/2 cleartext upgrade (`h2c`) by default.
+- Uvicorn rejected the upgrade request before the multipart contract could be processed.
+
+Fix:
+
+- Backend ASR client now forces `HttpClient.Version.HTTP_1_1` for `/asr/transcribe`.
+- ASR service code was unchanged.
+
+Validation:
+
+- `VoiceAsrClientTests` now asserts HTTP/1.1 plus multipart field shape: `audio`, filename `clip.webm`, `audio/webm`, `language`, `sessionId`, `returnSegments=false`, and `normalize=true`.
+- ASR pytest passed: 18 passed, 1 skipped.
+- Backend targeted Voice tests passed: 102 tests.
+- User-approved Neon.tech current DB live UAT: backend transcribe returned HTTP 200, `asrStatus=SUCCEEDED`, transcript and normalized transcript stored, warning `ASR_MOCK_TRANSCRIPT`, and `commandStatus=NOT_REQUESTED`.
+- Interpret after transcribe returned 1 `EXPENSE` draft.
+- Transaction count stayed 0 before transcribe, after transcribe, and after interpret.
+
+Blocking release?
+
+- No for this bug. Browser recording UAT still remains to rerun.

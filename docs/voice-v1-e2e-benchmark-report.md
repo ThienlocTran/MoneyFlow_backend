@@ -289,3 +289,41 @@ Not tested. Mock audio path failed first, so real PhoWhisper was deferred.
 ### Follow-up Result
 
 `VOICE-P8F-001` remains resolved. Live text VoiceSession E2E, confirm-one, traceability, and browser text fallback pass. Release readiness remains blocked by live audio mock ASR failure `VOICE-P8F-RERUN-001` and unrun browser recording scenarios.
+
+## P9A - VOICE-P8F-RERUN-001 Fix
+
+Date: 2026-08-04
+
+### Environment
+
+| Area | Value |
+| --- | --- |
+| DB target | User-approved Neon.tech current DB live UAT, secrets redacted |
+| Workspace | `Voice V1 UAT Workspace`, id `28b7e55a...` |
+| ASR mode | `mock` |
+| Backend ASR provider | `external_http`, local ASR URL |
+
+### Root Cause And Fix
+
+| Item | Evidence |
+| --- | --- |
+| Before fix | Direct ASR multipart returned HTTP 200; backend external_http returned `asrStatus=FAILED`; ASR/Uvicorn logged HTTP 400 and `Unsupported upgrade request`. |
+| Root cause | Java `HttpClient` default attempted HTTP/2 cleartext upgrade (`h2c`) against Uvicorn, so ASR rejected the request before multipart handling. |
+| Fix | Backend ASR request now forces `HttpClient.Version.HTTP_1_1`. |
+| ASR service change | None. Contract already accepted the direct multipart request. |
+
+### Validation Results
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Backend client unit | PASS | `VoiceAsrClientTests` asserts HTTP/1.1 and multipart field shape: `audio`, filename, content type, `language`, `sessionId`, `returnSegments=false`, `normalize=true`. |
+| ASR pytest | PASS | 18 passed, 1 skipped. |
+| Backend targeted tests | PASS | 102 tests. |
+| Direct ASR mock after fix | PASS | HTTP 200, provider `MOCK`, mode `mock`, transcript present, warning `ASR_MOCK_TRANSCRIPT`. |
+| Backend transcribe after fix | PASS | HTTP 200, `asrStatus=SUCCEEDED`, transcript and normalized transcript stored, `commandStatus=NOT_REQUESTED`. |
+| Interpret after transcribe | PASS | 1 `EXPENSE` draft returned from mock transcript. |
+| Transaction safety | PASS | Transaction count stayed 0 before transcribe, after transcribe, and after interpret. |
+
+### Follow-up Result
+
+`VOICE-P8F-RERUN-001` is resolved. Browser recording UAT still remains to rerun before beta sign-off. Real PhoWhisper smoke remains deferred until mock browser recording UAT is green.

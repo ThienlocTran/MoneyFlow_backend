@@ -43,7 +43,17 @@ class VoiceAsrClientTests {
         assertThat(result.transcript()).isEqualTo("Hôm nay tôi ăn sáng hết 35 nghìn");
         assertThat(result.model()).isEqualTo("vinai/PhoWhisper-small");
         assertThat(client.uri).isEqualTo(URI.create("https://asr.example/asr/transcribe"));
-        assertThat(client.body).contains("name=\"audio\"", "name=\"language\"", "vi", "name=\"sessionId\"");
+        assertThat(client.version).isEqualTo(HttpClient.Version.HTTP_1_1);
+        assertThat(client.body).contains(
+                "name=\"audio\"; filename=\"clip.webm\"",
+                "Content-Type: audio/webm",
+                "name=\"language\"",
+                "vi",
+                "name=\"sessionId\"",
+                "name=\"returnSegments\"",
+                "false",
+                "name=\"normalize\"",
+                "true");
     }
 
     @Test
@@ -82,6 +92,7 @@ class VoiceAsrClientTests {
         private final int status;
         private final String responseBody;
         private URI uri;
+        private HttpClient.Version version;
         private String body;
 
         private CapturingHttpClient(int status, String responseBody) {
@@ -92,6 +103,7 @@ class VoiceAsrClientTests {
         @Override
         public <T> HttpResponse<T> send(HttpRequest request, HttpResponse.BodyHandler<T> responseBodyHandler) {
             uri = request.uri();
+            version = request.version().orElse(null);
             body = readBody(request);
             return new FixedResponse<>(request, status, (T) responseBody);
         }

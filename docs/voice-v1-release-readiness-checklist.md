@@ -49,4 +49,17 @@
 | Browser UAT | PARTIAL | `/financial-inbox` text fallback rendered 4 cards and used VoiceSession endpoints; recording scenarios not run because audio mock API path failed |
 | Real PhoWhisper smoke | NOT RUN | Deferred until mock live E2E can run |
 
-Beta readiness: NO. `VOICE-P8F-001` is resolved, but `VOICE-P8F-RERUN-001` blocks Voice V1 audio beta.
+Beta readiness: NO. `VOICE-P8F-001` and `VOICE-P8F-RERUN-001` are resolved, but browser recording UAT and real PhoWhisper smoke still remain.
+
+## P9A Status
+
+| Gate | Status | Evidence |
+| --- | --- | --- |
+| Direct ASR mock multipart | PASS | HTTP 200, provider `MOCK`, transcript present, warning `ASR_MOCK_TRANSCRIPT` |
+| Backend external_http audio transcribe | PASS | User-approved Neon.tech current DB live UAT returned `asrStatus=SUCCEEDED`, transcript stored, normalized transcript stored |
+| Interpret after transcribe | PASS | 1 `EXPENSE` draft returned |
+| Transaction safety | PASS | No transaction before confirm: count stayed 0 before transcribe, after transcribe, and after interpret |
+| Browser recording UAT | NOT RUN | Rerun still required after P9A fix |
+| Real PhoWhisper smoke | NOT RUN | Still deferred |
+
+P9A root cause: Java `HttpClient` attempted HTTP/2 cleartext upgrade (`h2c`) against Uvicorn, which returned HTTP 400 before multipart handling. Backend ASR requests now force HTTP/1.1.

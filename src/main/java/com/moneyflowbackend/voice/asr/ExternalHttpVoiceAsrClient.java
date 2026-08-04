@@ -40,6 +40,7 @@ public class ExternalHttpVoiceAsrClient implements VoiceAsrClient {
         try {
             String boundary = "MoneyFlowAsr" + UUID.randomUUID();
             HttpRequest httpRequest = HttpRequest.newBuilder(asrUri())
+                    .version(HttpClient.Version.HTTP_1_1)
                     .timeout(Duration.ofSeconds(properties.timeoutSeconds()))
                     .header("Content-Type", "multipart/form-data; boundary=" + boundary)
                     .POST(HttpRequest.BodyPublishers.ofByteArray(multipart(boundary, request)))
