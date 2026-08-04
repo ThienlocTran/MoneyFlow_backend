@@ -3,6 +3,13 @@ package com.moneyflowbackend.voice.session;
 import com.moneyflowbackend.auth.model.User;
 import com.moneyflowbackend.auth.repository.UserRepository;
 import com.moneyflowbackend.common.exception.BusinessException;
+import com.moneyflowbackend.transaction.dto.TransactionRequest;
+import com.moneyflowbackend.transaction.dto.TransactionResponse;
+import com.moneyflowbackend.transaction.model.TransactionSourceType;
+import com.moneyflowbackend.transaction.model.TransactionStatus;
+import com.moneyflowbackend.transaction.model.TransactionType;
+import com.moneyflowbackend.transaction.repository.TransactionRepository;
+import com.moneyflowbackend.transaction.service.TransactionService;
 import com.moneyflowbackend.voice.asr.VoiceAsrClient;
 import com.moneyflowbackend.voice.asr.VoiceAsrMessages;
 import com.moneyflowbackend.voice.asr.VoiceAsrProperties;
@@ -26,8 +33,11 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.text.Normalizer;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalTime;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.UUID;
 
 @Service
@@ -41,6 +51,8 @@ public class VoiceSessionService {
     private final VoiceSessionDraftMapper draftMapper;
     private final VoiceAsrProperties asrProperties;
     private final VoiceAsrClient asrClient;
+    private final TransactionService transactionService;
+    private final TransactionRepository transactionRepository;
 
     public VoiceSessionService(
             VoiceSessionRepository voiceSessionRepository,
@@ -51,7 +63,9 @@ public class VoiceSessionService {
             VoiceCommandService voiceCommandService,
             VoiceSessionDraftMapper draftMapper,
             VoiceAsrProperties asrProperties,
-            VoiceAsrClient asrClient) {
+            VoiceAsrClient asrClient,
+            TransactionService transactionService,
+            TransactionRepository transactionRepository) {
         this.voiceSessionRepository = voiceSessionRepository;
         this.voiceSessionDraftRepository = voiceSessionDraftRepository;
         this.workspaceRepository = workspaceRepository;
@@ -61,6 +75,8 @@ public class VoiceSessionService {
         this.draftMapper = draftMapper;
         this.asrProperties = asrProperties;
         this.asrClient = asrClient;
+        this.transactionService = transactionService;
+        this.transactionRepository = transactionRepository;
     }
 
     @Transactional
@@ -109,6 +125,10 @@ public class VoiceSessionService {
         String transcript = normalize(session.getNormalizedTranscript());
         if (transcript == null) {
             throw new BusinessException("VOICE_SESSION_TRANSCRIPT_REQUIRED", "Voice session transcript is required", HttpStatus.BAD_REQUEST);
+        }
+        if (voiceSessionDraftRepository.existsByVoiceSessionIdAndStatus(session.getId(), VoiceSessionDraftStatus.CONFIRMED)) {
+            throw new BusinessException("VOICE_SESSION_ALREADY_HAS_CONFIRMED_DRAFTS",
+                    VoiceSessionConfirmMessages.message("VOICE_SESSION_ALREADY_HAS_CONFIRMED_DRAFTS"), HttpStatus.CONFLICT);
         }
         VoiceCommandInterpretRequest commandReq = new VoiceCommandInterpretRequest();
         commandReq.setText(transcript);
@@ -170,6 +190,84 @@ public class VoiceSessionService {
         return detail(voiceSessionRepository.save(session));
     }
 
+    @Transactional
+    public VoiceSessionConfirmDraftResponse confirmDraft(UUID workspaceId, UUID sessionId, UUID draftId,
+                                                         VoiceSessionConfirmDraftRequest req, UUID userId) {
+        requireActiveMember(workspaceId, userId);
+        VoiceSession session = session(workspaceId, sessionId);
+        VoiceSessionDraft draft = draft(session, draftId);
+        VoiceSessionConfirmDraftResponse replay = replayIfConfirmed(session, draft);
+        if (replay != null) return replay;
+        if (draft.getStatus() == VoiceSessionDraftStatus.SKIPPED) {
+            return confirmWarning(session, draft, "VOICE_DRAFT_CONFIRM_UNSUPPORTED", VoiceSessionDraftStatus.SKIPPED);
+        }
+        if (!supportedTransactionDraft(draft)) {
+            draft.setStatus(VoiceSessionDraftStatus.UNSUPPORTED);
+            draft.setUpdatedAt(Instant.now());
+            voiceSessionDraftRepository.save(draft);
+            updateConfirmStatus(session);
+            return confirmWarning(session, draft, "VOICE_DRAFT_CONFIRM_UNSUPPORTED", VoiceSessionDraftStatus.UNSUPPORTED);
+        }
+        String validationCode = validationCode(draft, req);
+        if (validationCode != null) {
+            draft.setStatus(VoiceSessionDraftStatus.NEEDS_REVIEW);
+            draft.setWarningsJson(validationCode);
+            draft.setUpdatedAt(Instant.now());
+            voiceSessionDraftRepository.save(draft);
+            updateConfirmStatus(session);
+            return confirmWarning(session, draft, validationCode, VoiceSessionDraftStatus.NEEDS_REVIEW);
+        }
+        TransactionResponse tx = createTransaction(workspaceId, session, draft, req, userId);
+        draft.setStatus(VoiceSessionDraftStatus.CONFIRMED);
+        draft.setConfirmedEntityType("TRANSACTION");
+        draft.setConfirmedEntityId(tx.getId());
+        draft.setConfirmedAt(Instant.now());
+        draft.setUpdatedAt(Instant.now());
+        voiceSessionDraftRepository.save(draft);
+        updateConfirmStatus(session);
+        return confirmResponse(session, draft, false, List.of(), tx);
+    }
+
+    @Transactional
+    public VoiceSessionConfirmEligibleResponse confirmEligible(UUID workspaceId, UUID sessionId,
+                                                               VoiceSessionConfirmEligibleRequest req, UUID userId) {
+        requireActiveMember(workspaceId, userId);
+        VoiceSession session = session(workspaceId, sessionId);
+        List<VoiceSessionDraft> drafts = voiceSessionDraftRepository.findAllByVoiceSessionIdOrderByDraftIndexAsc(session.getId());
+        List<VoiceSessionConfirmDraftResponse> results = drafts.stream()
+                .map(draft -> confirmDraft(workspaceId, sessionId, draft.getId(), null, userId))
+                .toList();
+        int confirmed = (int) results.stream().filter(result -> result.getDraftStatus() == VoiceSessionDraftStatus.CONFIRMED && !result.isIdempotentReplay()).count();
+        int skipped = results.size() - confirmed;
+        updateConfirmStatus(session);
+        List<VoiceSessionWarningResponse> warnings = confirmed == 0
+                ? List.of(warningResponse("VOICE_CONFIRM_ELIGIBLE_NONE"))
+                : List.of();
+        return VoiceSessionConfirmEligibleResponse.builder()
+                .sessionId(session.getId())
+                .confirmedCount(confirmed)
+                .skippedCount(skipped)
+                .results(results)
+                .sessionStatus(session.getStatus())
+                .confirmStatus(session.getConfirmStatus())
+                .warnings(warnings)
+                .build();
+    }
+
+    @Transactional
+    public VoiceSessionConfirmDraftResponse skipDraft(UUID workspaceId, UUID sessionId, UUID draftId, UUID userId) {
+        requireActiveMember(workspaceId, userId);
+        VoiceSession session = session(workspaceId, sessionId);
+        VoiceSessionDraft draft = draft(session, draftId);
+        if (draft.getStatus() != VoiceSessionDraftStatus.CONFIRMED) {
+            draft.setStatus(VoiceSessionDraftStatus.SKIPPED);
+            draft.setUpdatedAt(Instant.now());
+            voiceSessionDraftRepository.save(draft);
+        }
+        updateConfirmStatus(session);
+        return confirmResponse(session, draft, false, List.of(), null);
+    }
+
     @Transactional(readOnly = true)
     public VoiceSessionDetailResponse get(UUID workspaceId, UUID sessionId, UUID userId) {
         requireActiveMember(workspaceId, userId);
@@ -225,6 +323,13 @@ public class VoiceSessionService {
     private VoiceSession session(UUID workspaceId, UUID sessionId) {
         return voiceSessionRepository.findByIdAndWorkspaceId(sessionId, workspaceId)
                 .orElseThrow(() -> new BusinessException("VOICE_SESSION_NOT_FOUND", "Voice session not found", HttpStatus.NOT_FOUND));
+    }
+
+    private VoiceSessionDraft draft(VoiceSession session, UUID draftId) {
+        return voiceSessionDraftRepository.findById(draftId)
+                .filter(draft -> draft.getVoiceSession().getId().equals(session.getId()))
+                .orElseThrow(() -> new BusinessException("VOICE_DRAFT_NOT_FOUND",
+                        VoiceSessionConfirmMessages.message("VOICE_DRAFT_NOT_FOUND"), HttpStatus.NOT_FOUND));
     }
 
     private WorkspaceMember requireActiveMember(UUID workspaceId, UUID userId) {
@@ -300,6 +405,134 @@ public class VoiceSessionService {
         session.setStatus(result.status() == VoiceSessionAsrStatus.NOT_REQUESTED ? session.getStatus() : VoiceSessionStatus.FAILED);
         session.setTranscript(null);
         session.setNormalizedTranscript(null);
+    }
+
+    private VoiceSessionConfirmDraftResponse replayIfConfirmed(VoiceSession session, VoiceSessionDraft draft) {
+        if (draft.getStatus() != VoiceSessionDraftStatus.CONFIRMED || draft.getConfirmedEntityId() == null) {
+            return null;
+        }
+        TransactionResponse tx = transactionRepository.findByIdAndWorkspaceId(draft.getConfirmedEntityId(), session.getWorkspace().getId())
+                .map(transactionService::mapExistingToResponse)
+                .orElse(null);
+        return confirmResponse(session, draft, true, List.of(warningResponse("VOICE_DRAFT_ALREADY_CONFIRMED")), tx);
+    }
+
+    private boolean supportedTransactionDraft(VoiceSessionDraft draft) {
+        return "EXPENSE".equals(draft.getType()) || "INCOME".equals(draft.getType());
+    }
+
+    private String validationCode(VoiceSessionDraft draft, VoiceSessionConfirmDraftRequest req) {
+        if (amount(draft, req) == null || amount(draft, req).signum() <= 0) return "VOICE_DRAFT_AMOUNT_REQUIRED";
+        if (walletId(draft, req) == null) return "VOICE_DRAFT_WALLET_REQUIRED";
+        if ("EXPENSE".equals(draft.getType()) && categoryId(draft, req) == null) return "VOICE_DRAFT_CATEGORY_REQUIRED";
+        return null;
+    }
+
+    private TransactionResponse createTransaction(UUID workspaceId, VoiceSession session, VoiceSessionDraft draft,
+                                                  VoiceSessionConfirmDraftRequest req, UUID userId) {
+        var existing = transactionRepository.findByWorkspaceIdAndVoiceSessionDraftIdAndSourceType(
+                workspaceId, draft.getId(), TransactionSourceType.VOICE);
+        if (existing.isPresent()) {
+            return transactionService.mapExistingToResponse(existing.get());
+        }
+        TransactionRequest txReq = new TransactionRequest();
+        txReq.setType(TransactionType.valueOf(draft.getType()));
+        txReq.setStatus(TransactionStatus.POSTED);
+        txReq.setAmount(amount(draft, req));
+        txReq.setWalletId(walletId(draft, req));
+        txReq.setCategoryId(categoryId(draft, req));
+        txReq.setTransactionDate(occurredDate(req));
+        txReq.setTransactionTime(occurredTime(req));
+        txReq.setDescription(note(draft, req));
+        txReq.setNote(note(draft, req));
+        txReq.setAffectsWalletBalance(Boolean.TRUE.equals(draft.getAffectsWalletBalance()) || draft.getAffectsWalletBalance() == null);
+        return transactionService.createWithSource(
+                workspaceId,
+                txReq,
+                userId,
+                TransactionSourceType.VOICE,
+                sourceText(session, draft),
+                null,
+                sourceReference(session, draft),
+                session.getId(),
+                draft.getId());
+    }
+
+    private void updateConfirmStatus(VoiceSession session) {
+        List<VoiceSessionDraft> drafts = voiceSessionDraftRepository.findAllByVoiceSessionIdOrderByDraftIndexAsc(session.getId());
+        boolean anyConfirmed = drafts.stream().anyMatch(draft -> draft.getStatus() == VoiceSessionDraftStatus.CONFIRMED);
+        boolean allClosed = !drafts.isEmpty() && drafts.stream().allMatch(draft ->
+                draft.getStatus() == VoiceSessionDraftStatus.CONFIRMED
+                        || draft.getStatus() == VoiceSessionDraftStatus.SKIPPED
+                        || draft.getStatus() == VoiceSessionDraftStatus.UNSUPPORTED);
+        session.setConfirmStatus(!anyConfirmed ? VoiceSessionConfirmStatus.NOT_CONFIRMED
+                : allClosed ? VoiceSessionConfirmStatus.CONFIRMED : VoiceSessionConfirmStatus.PARTIALLY_CONFIRMED);
+        session.setStatus(!anyConfirmed ? session.getStatus()
+                : allClosed ? VoiceSessionStatus.CONFIRMED : VoiceSessionStatus.PARTIALLY_CONFIRMED);
+        session.setUpdatedAt(Instant.now());
+        voiceSessionRepository.save(session);
+    }
+
+    private VoiceSessionConfirmDraftResponse confirmWarning(VoiceSession session, VoiceSessionDraft draft, String code, VoiceSessionDraftStatus status) {
+        return confirmResponse(session, draft, false, List.of(warningResponse(code)), null);
+    }
+
+    private VoiceSessionConfirmDraftResponse confirmResponse(VoiceSession session, VoiceSessionDraft draft, boolean replay,
+                                                             List<VoiceSessionWarningResponse> warnings, TransactionResponse tx) {
+        return VoiceSessionConfirmDraftResponse.builder()
+                .sessionId(session.getId())
+                .draftId(draft.getId())
+                .draftStatus(draft.getStatus())
+                .confirmedEntityType(draft.getConfirmedEntityType())
+                .confirmedEntityId(draft.getConfirmedEntityId())
+                .idempotentReplay(replay)
+                .warnings(warnings)
+                .transaction(tx)
+                .session(VoiceSessionConfirmDraftResponse.SessionSummary.builder()
+                        .status(session.getStatus())
+                        .confirmStatus(session.getConfirmStatus())
+                        .build())
+                .build();
+    }
+
+    private VoiceSessionWarningResponse warningResponse(String code) {
+        return VoiceSessionWarningResponse.builder()
+                .code(code)
+                .message(VoiceSessionConfirmMessages.message(code))
+                .build();
+    }
+
+    private java.math.BigDecimal amount(VoiceSessionDraft draft, VoiceSessionConfirmDraftRequest req) {
+        return req != null && req.getAmount() != null ? req.getAmount() : draft.getAmount();
+    }
+
+    private UUID walletId(VoiceSessionDraft draft, VoiceSessionConfirmDraftRequest req) {
+        return req != null && req.getWalletId() != null ? req.getWalletId() : draft.getWalletId();
+    }
+
+    private UUID categoryId(VoiceSessionDraft draft, VoiceSessionConfirmDraftRequest req) {
+        return req != null && req.getCategoryId() != null ? req.getCategoryId() : draft.getCategoryId();
+    }
+
+    private LocalDate occurredDate(VoiceSessionConfirmDraftRequest req) {
+        return req == null || req.getOccurredAt() == null ? null : req.getOccurredAt().toLocalDate();
+    }
+
+    private LocalTime occurredTime(VoiceSessionConfirmDraftRequest req) {
+        return req == null || req.getOccurredAt() == null ? null : req.getOccurredAt().toLocalTime();
+    }
+
+    private String note(VoiceSessionDraft draft, VoiceSessionConfirmDraftRequest req) {
+        String requested = normalize(req == null ? null : req.getNote());
+        return requested == null ? normalize(draft.getSourceText()) : requested;
+    }
+
+    private String sourceText(VoiceSession session, VoiceSessionDraft draft) {
+        return Objects.requireNonNullElseGet(normalize(draft.getSourceText()), () -> normalize(session.getNormalizedTranscript()));
+    }
+
+    private String sourceReference(VoiceSession session, VoiceSessionDraft draft) {
+        return "voice-session:" + session.getId() + ":draft:" + draft.getId();
     }
 
     private byte[] audioBytes(MultipartFile audio) {

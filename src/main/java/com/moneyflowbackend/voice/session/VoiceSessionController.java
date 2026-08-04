@@ -61,6 +61,34 @@ public class VoiceSessionController {
                 voiceSessionService.transcribe(workspaceId, sessionId, audio, language, returnSegments, normalize, durationMs, currentUserId())));
     }
 
+    @PostMapping("/{sessionId}/drafts/{draftId}/confirm")
+    public ResponseEntity<ApiResponse<VoiceSessionConfirmDraftResponse>> confirmDraft(
+            @PathVariable UUID workspaceId,
+            @PathVariable UUID sessionId,
+            @PathVariable UUID draftId,
+            @RequestBody(required = false) VoiceSessionConfirmDraftRequest req) {
+        return ResponseEntity.ok(ApiResponse.ok("Voice session draft confirmed",
+                voiceSessionService.confirmDraft(workspaceId, sessionId, draftId, req, currentUserId())));
+    }
+
+    @PostMapping("/{sessionId}/confirm-eligible")
+    public ResponseEntity<ApiResponse<VoiceSessionConfirmEligibleResponse>> confirmEligible(
+            @PathVariable UUID workspaceId,
+            @PathVariable UUID sessionId,
+            @RequestBody(required = false) VoiceSessionConfirmEligibleRequest req) {
+        return ResponseEntity.ok(ApiResponse.ok("Voice session eligible drafts confirmed",
+                voiceSessionService.confirmEligible(workspaceId, sessionId, req, currentUserId())));
+    }
+
+    @PostMapping("/{sessionId}/drafts/{draftId}/skip")
+    public ResponseEntity<ApiResponse<VoiceSessionConfirmDraftResponse>> skipDraft(
+            @PathVariable UUID workspaceId,
+            @PathVariable UUID sessionId,
+            @PathVariable UUID draftId) {
+        return ResponseEntity.ok(ApiResponse.ok("Voice session draft skipped",
+                voiceSessionService.skipDraft(workspaceId, sessionId, draftId, currentUserId())));
+    }
+
     @GetMapping("/{sessionId}")
     public ResponseEntity<ApiResponse<VoiceSessionDetailResponse>> get(
             @PathVariable UUID workspaceId,

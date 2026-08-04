@@ -8,5 +8,7 @@ import java.util.UUID;
 public interface VoiceSessionDraftRepository extends JpaRepository<VoiceSessionDraft, UUID> {
     List<VoiceSessionDraft> findAllByVoiceSessionIdOrderByDraftIndexAsc(UUID voiceSessionId);
 
+    boolean existsByVoiceSessionIdAndStatus(UUID voiceSessionId, VoiceSessionDraftStatus status);
+
     void deleteByVoiceSessionId(UUID voiceSessionId);
 }

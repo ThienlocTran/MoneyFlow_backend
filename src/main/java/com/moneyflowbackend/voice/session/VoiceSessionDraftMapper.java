@@ -126,7 +126,7 @@ public class VoiceSessionDraftMapper {
 
     private VoiceSessionWarningResponse warningResponse(String raw) {
         if (!raw.contains("|")) {
-            return VoiceSessionWarningResponse.builder().code(raw).message(VoiceAsrMessages.message(raw)).build();
+            return VoiceSessionWarningResponse.builder().code(raw).message(message(raw)).build();
         }
         String[] parts = raw.split("\\|", 2);
         String message = null;
@@ -138,6 +138,13 @@ public class VoiceSessionDraftMapper {
                 .code(parts[0])
                 .message(message == null || message.isBlank() ? VoiceAsrMessages.message(parts[0]) : message)
                 .build();
+    }
+
+    private String message(String code) {
+        if (code != null && code.startsWith("VOICE_")) {
+            return VoiceSessionConfirmMessages.message(code);
+        }
+        return VoiceAsrMessages.message(code);
     }
 
     private VoiceSessionDraftStatus status(VoiceReviewDraftResponse.Candidate candidate, boolean confirmable) {

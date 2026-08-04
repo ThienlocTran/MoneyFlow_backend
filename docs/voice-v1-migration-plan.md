@@ -124,13 +124,40 @@ P4 implementation notes:
 - Does not create drafts or transactions during transcription.
 - Adds safe ASR runtime diagnostics without exposing service URL or secrets.
 
-Remaining after P4:
+Remaining after P5:
 
-- P5 frontend capture flow.
-- P6 confirm executor/linking if not implemented.
-- P7 UX quality gate and benchmarks.
+- P6 frontend session voice flow.
+- P7 frontend quality gate and waveform.
+- P8 benchmark/UAT suite.
+- Domain-specific confirm executors for unsupported draft types.
 
-## Phase 5: Update Frontend Capture Flow
+## Phase 5: Backend VoiceSession Confirm Executor
+
+Status: implemented.
+
+Goal: let users safely turn reviewed session draft snapshots into ledger/domain state while preserving traceability.
+
+Backend work:
+
+- Adds `POST /api/workspaces/{workspaceId}/voice-sessions/{sessionId}/drafts/{draftId}/confirm`.
+- Adds `POST /api/workspaces/{workspaceId}/voice-sessions/{sessionId}/confirm-eligible`.
+- Adds `POST /api/workspaces/{workspaceId}/voice-sessions/{sessionId}/drafts/{draftId}/skip`.
+- Adds nullable transaction trace columns `voice_session_id` and `voice_session_draft_id`.
+- Reuses `TransactionService.createWithSource(...)` so workspace, wallet, category, amount, audit, activity timeline, and wallet balance rules stay centralized.
+- Keeps interpret/transcribe preview-only. No transaction is created before confirm.
+- Rejects re-interpret after any confirmed draft with `VOICE_SESSION_ALREADY_HAS_CONFIRMED_DRAFTS`.
+
+Support in P5:
+
+- `EXPENSE`: confirmable when amount, wallet, and category are present.
+- `INCOME`: confirmable when amount and wallet are present.
+- `INCOME_FACT`, savings/fund contributions, wallet snapshots, debt movement types, and read-only queries: not automatically posted in P5.
+
+Contract:
+
+- See `docs/voice-v1-confirm-executor-contract.md`.
+
+## Phase 6: Update Frontend Capture Flow
 
 Goal: audio-first review-before-save UX.
 
@@ -162,7 +189,7 @@ Acceptance:
 - Empty/error states never show fake drafts.
 - Multi-draft queue uses backend `drafts[]`.
 
-## Phase 6: Deprecate Direct Text-Only Legacy Path
+## Phase 7: Frontend Quality Gate And Legacy Path Decision
 
 Goal: remove ambiguity only after browser UAT passes.
 
@@ -178,7 +205,7 @@ Acceptance:
 - No regression for users without ASR service enabled.
 - No loss of existing transaction audio playback.
 
-## Phase 7: Benchmarks And UAT Set
+## Phase 8: Benchmarks And UAT Set
 
 Benchmark cases:
 

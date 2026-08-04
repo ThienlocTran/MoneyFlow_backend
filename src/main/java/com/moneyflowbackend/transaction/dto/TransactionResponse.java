@@ -56,6 +56,8 @@ public class TransactionResponse {
     private String sourceLabel;
     private String sourceReference;
     private UUID voiceRecordId;
+    private UUID voiceSessionId;
+    private UUID voiceSessionDraftId;
     private String voiceTranscript;
     private boolean hasVoiceAudio;
     private boolean voiceAudioAvailable;

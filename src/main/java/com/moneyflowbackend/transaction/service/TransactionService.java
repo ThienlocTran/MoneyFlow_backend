@@ -508,6 +508,12 @@ public class TransactionService {
 
     @Transactional
     public TransactionResponse createWithSource(UUID workspaceId, TransactionRequest req, UUID userId, TransactionSourceType sourceType, String rawInput, UUID voiceRecordId, String sourceReference) {
+        return createWithSource(workspaceId, req, userId, sourceType, rawInput, voiceRecordId, sourceReference, null, null);
+    }
+
+    @Transactional
+    public TransactionResponse createWithSource(UUID workspaceId, TransactionRequest req, UUID userId, TransactionSourceType sourceType, String rawInput,
+                                                UUID voiceRecordId, String sourceReference, UUID voiceSessionId, UUID voiceSessionDraftId) {
         requireWritableMember(workspaceId, userId);
         Workspace workspace = findWorkspace(workspaceId);
         User user = userRepository.findById(userId)
@@ -536,6 +542,8 @@ public class TransactionService {
                 .sourceType(normalizedSourceType)
                 .rawInput(normalizeText(rawInput))
                 .sourceReference(normalizeText(sourceReference))
+                .voiceSessionId(voiceSessionId)
+                .voiceSessionDraftId(voiceSessionDraftId)
                 .walletUnknown(false)
                 .historical(false)
                 .affectsWalletBalance(req.getAffectsWalletBalance() == null ? true : req.getAffectsWalletBalance())
@@ -1112,6 +1120,8 @@ public class TransactionService {
                 .sourceLabel(sourceLabel(tx.getSourceType().name()))
                 .sourceReference(tx.getSourceReference())
                 .voiceRecordId(tx.getVoiceRecordId())
+                .voiceSessionId(tx.getVoiceSessionId())
+                .voiceSessionDraftId(tx.getVoiceSessionDraftId())
                 .hasVoiceAudio(false)
                 .voiceAudioAvailable(false)
                 .playbackAvailable(false)
