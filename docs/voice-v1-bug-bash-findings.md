@@ -285,3 +285,100 @@ Validation:
 Blocking release?
 
 - No for this bug. Browser recording UAT still remains to rerun.
+
+### VOICE-P9B-001
+
+Title: Browser recording UAT cannot proceed in available browser surface
+
+Severity: P0
+
+Layer classification: ASR_CAPTURE / UAT_BROWSER
+
+Steps to reproduce:
+
+1. Start ASR mock, backend external_http, and frontend dev server.
+2. Log into `Voice V1 UAT Workspace` in the Codex in-app browser.
+3. Open `/financial-inbox`.
+4. Start recording from the mic button.
+
+Expected:
+
+- Browser either allows mic and enters recording state, or denies mic and shows the friendly micro permission message.
+- Too-short, normal recording, ASR unavailable, audio confirm, and traceability scenarios can proceed.
+
+Actual:
+
+- The UI entered a permission-requesting/processing state.
+- No browser permission prompt appeared in the available Codex in-app browser.
+- No friendly denial message was shown.
+- Chrome connector was unavailable, so the run could not switch to a mic-capable external browser.
+- No browser audio blob, mimeType, duration, `/transcribe` call, or audio-created draft was produced.
+
+Evidence:
+
+- DB target: User-approved Neon.tech current configured DB, secrets redacted.
+- Workspace: `Voice V1 UAT Workspace`, id `29c6386d...`.
+- Screenshots: `target/voice-p9b-browser-uat/02-mic-denied-or-prompt.png`, `target/voice-p9b-browser-uat/02-mic-attempt-enter.png`.
+
+Suspected files:
+
+- `src/components/quick-entry/VoiceEntryCard.vue`
+- `src/components/voice/FastVoiceCaptureButton.vue`
+
+Recommended fix phase:
+
+- Rerun P9B in a real mic-capable Chrome/Edge session or add a documented browser fake-media UAT harness before claiming browser recording readiness.
+
+Blocking release?
+
+- Yes for Voice V1 browser audio beta evidence.
+
+Status:
+
+- OPEN.
+
+### VOICE-P9B-002
+
+Title: Text sanity review displays repeated ASR transcription failure text on non-ASR drafts
+
+Severity: P2
+
+Layer classification: FRONTEND_RENDER
+
+Steps to reproduce:
+
+1. Open `/financial-inbox`.
+2. Use text fallback with the multi-intent benchmark phrase.
+3. Interpret and inspect the review cards.
+
+Expected:
+
+- Text fallback renders draft-specific warnings only.
+- Non-ASR text sessions do not show ASR transcription failure copy.
+
+Actual:
+
+- Browser text sanity rendered 4 cards, but several cards displayed `Không thể chuyển giọng nói thành văn bản.`.
+- Savings/unsupported card showed repeated copies of the same ASR-oriented text.
+
+Evidence:
+
+- Screenshot: `target/voice-p9b-browser-uat/04-text-sanity-fresh-tab.png`.
+
+Suspected files:
+
+- `src/components/voice/VoiceReviewWarnings.vue`
+- `src/utils/voiceReviewContract.ts`
+- `src/components/quick-entry/VoiceEntryCard.vue`
+
+Recommended fix phase:
+
+- P9C frontend warning rendering triage after browser recording surface is available.
+
+Blocking release?
+
+- No for backend audio contract; yes for polished beta UX if reproduced outside the UAT tab.
+
+Status:
+
+- OPEN.

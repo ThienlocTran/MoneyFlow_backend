@@ -63,3 +63,24 @@ Beta readiness: NO. `VOICE-P8F-001` and `VOICE-P8F-RERUN-001` are resolved, but 
 | Real PhoWhisper smoke | NOT RUN | Still deferred |
 
 P9A root cause: Java `HttpClient` attempted HTTP/2 cleartext upgrade (`h2c`) against Uvicorn, which returned HTTP 400 before multipart handling. Backend ASR requests now force HTTP/1.1.
+
+## P9B Status
+
+| Gate | Status | Evidence |
+| --- | --- | --- |
+| Static backend Voice tests | PASS | 102 tests |
+| Static frontend checks | PASS | `type-check`, `scan:mojibake`, `build` |
+| ASR pytest | PASS | 18 passed, 1 skipped |
+| ASR/backend/frontend health | PASS | ASR ready UP, backend ready UP/database UP, frontend HTTP 200 |
+| Browser login/workspace | PASS | `Voice V1 UAT Workspace`, user `voicep9b_1785822974300`, tokens redacted |
+| Browser text sanity | PASS WITH LIMITATION | 4 cards rendered, but warning display issue found as `VOICE-P9B-002` |
+| Browser recording UAT | BLOCKED | `VOICE-P9B-001`: available in-app browser stayed pending on mic permission; Chrome connector unavailable |
+| Too-short recording | BLOCKED | Mic permission did not resolve |
+| Normal recording mock ASR | BLOCKED | No browser audio blob or `/transcribe` call collected |
+| ASR unavailable browser recovery | BLOCKED | Audio capture did not reach ASR |
+| Audio confirm one/eligible | BLOCKED | No audio-created draft available |
+| Audio transaction traceability | BLOCKED | No audio-created transaction |
+| Mobile 360px | PASS PARTIAL | `scrollWidth=360`, `clientWidth=360`; existing review state only |
+| Reduced motion | NOT RUN | Deferred after audio blocker |
+
+Beta readiness: NO. P9A backend audio contract is fixed, but P9B browser recording evidence is still blocked by `VOICE-P9B-001`; `VOICE-P9B-002` also needs frontend warning-rendering triage before a polished beta.

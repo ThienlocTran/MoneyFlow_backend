@@ -327,3 +327,109 @@ Date: 2026-08-04
 ### Follow-up Result
 
 `VOICE-P8F-RERUN-001` is resolved. Browser recording UAT still remains to rerun before beta sign-off. Real PhoWhisper smoke remains deferred until mock browser recording UAT is green.
+
+## P9B - Browser Recording UAT After P9A
+
+Date: 2026-08-04
+
+### Environment
+
+| Area | Value |
+| --- | --- |
+| Backend HEAD | `3f4e16e fix(voice): repair asr audio multipart contract` |
+| Frontend HEAD | `f3e7232 docs(voice): add vietnamese benchmark suite` |
+| ASR service HEAD/path | `98ffa9a`, `D:\MindMirror\MoneyFlow\moneyflow-asr-service` |
+| Browser | Codex in-app browser; Chrome connector unavailable |
+| DB target | User-approved Neon.tech current configured DB, secrets redacted |
+| DB safety note | Temporary user approval was given for live Voice V1 UAT on Neon.tech. UAT used only test workspace/test data. No destructive cleanup or broad data mutation was performed. |
+| ASR mode | `mock` |
+| Backend ASR provider | `external_http`, local ASR URL |
+| Auth/workspace | Public register/login with `voicep9b_1785822974300`; workspace `Voice V1 UAT Workspace`, id `29c6386d...`; tokens redacted |
+| Evidence folder | `target/voice-p9b-browser-uat` |
+
+### Docs And Playbooks Read
+
+- Backend docs: `voice-v1-e2e-benchmark-report.md`, `voice-v1-bug-bash-findings.md`, `voice-v1-release-readiness-checklist.md`, `voice-v1-backend-session-contract.md`, `voice-v1-backend-asr-client-contract.md`, `voice-v1-confirm-executor-contract.md`.
+- Frontend docs: `docs/voice-v1-vietnamese-benchmark.md`.
+- ASR docs: `moneyflow-asr-service/README.md`, `moneyflow-asr-service/docs/contract.md`.
+- Playbooks: `docs/agent-skills/frontend-ui-playbook.md`, `docs/agent-skills/backend-domain-playbook.md`, `AGENTS.md`.
+
+### Static Validation
+
+| Repo | Command | Result |
+| --- | --- | --- |
+| Backend | `.\mvnw.cmd clean "-Dtest=*VoiceAsr*Tests,*VoiceSession*Tests,*VoiceCommand*Tests,*VoiceReview*Tests,VoiceAudioServiceTests,VoiceTransactionAudioStatusIntegrationTests,TransactionModuleIntegrationTests" test` | PASS, 102 tests |
+| Frontend | `pnpm run type-check` | PASS |
+| Frontend | `pnpm run scan:mojibake` | PASS |
+| Frontend | `pnpm run build` | PASS |
+| ASR | `.\.venv\Scripts\python.exe -m pytest` | PASS, 18 passed, 1 skipped, 1 warning |
+
+### Service Health
+
+| Service | Result | Evidence |
+| --- | --- | --- |
+| ASR mock ready | PASS | `/health/ready` returned `UP`, mode `mock` |
+| Backend ready | PASS | `/api/public/health/ready` returned application `UP`, database `UP` |
+| Frontend | PASS | `http://127.0.0.1:5173/` returned HTTP 200 |
+
+### Browser UAT Result Table
+
+| Scenario | Expected | Actual | Pass/Fail | Evidence note |
+| --- | --- | --- | --- | --- |
+| Login/workspace | Authenticated browser session and selected UAT workspace | Login succeeded; `Voice V1 UAT Workspace` selected | PASS | Screenshot `01-baseline.png` |
+| Baseline text sanity | New VoiceSession flow still returns 4 cards | 4 cards rendered: `INCOME_FACT`, `EXPENSE`, `EXPENSE`, `SAVINGS_ALLOCATION` | PASS WITH LIMITATION | Screenshot `04-text-sanity-fresh-tab.png`; expense cards showed wallet/category selected but still disabled, and unsupported/savings warnings included repeated ASR text |
+| Mic permission denied | Friendly message, no crash, no transcribe | Codex in-app browser stayed in permission-request state; no browser permission prompt appeared and no friendly denial message was shown | BLOCKED | Screenshots `02-mic-denied-or-prompt.png`, `02-mic-attempt-enter.png` |
+| Too-short recording | Frontend blocks before ASR | Not runnable because mic permission never resolved | BLOCKED | Blocked by `VOICE-P9B-001` |
+| Normal browser recording mock ASR | Browser records audio, sends `/transcribe`, transcript shown | Not runnable because mic permission never resolved; Chrome connector was unavailable | BLOCKED | No `/transcribe` browser evidence collected |
+| Confirm one from audio session | Confirm creates exactly one transaction | Not run because audio-created draft was unavailable | BLOCKED | Audio blocker first |
+| Confirm eligible from audio session | Eligible complete drafts confirmed, unsupported remain visible | Not run because audio-created multi-draft session was unavailable | BLOCKED | Audio blocker first |
+| ASR unavailable recovery | Friendly unavailable state, no fake transcript | Not run because browser could not start recording before reaching ASR | BLOCKED | Audio capture blocker first |
+| Transactions traceability after audio confirm | Voice session/draft ids visible/preserved | Not run because audio confirm was unavailable | BLOCKED | Audio blocker first |
+| Mobile 360px | No horizontal overflow | `scrollWidth=360`, `clientWidth=360` | PASS PARTIAL | Screenshot `05-mobile-360-financial-inbox.png`; used existing review state, not audio capture |
+| Reduced motion | Recording/review usable with reduced motion | Not run | NOT RUN | Deferred after audio blocker |
+
+### Endpoint Evidence
+
+Expected audio path after P9A:
+
+- `POST /voice-sessions`
+- `POST /voice-sessions/{sessionId}/transcribe`
+- `POST /voice-sessions/{sessionId}/interpret`
+- No primary `/voice-command/interpret`
+
+Actual P9B browser audio path:
+
+- Browser did not reach audio blob creation.
+- Browser did not reach `/transcribe`.
+- No legacy `/voice-command/interpret` evidence was observed for the text sanity flow.
+
+### Audio Evidence
+
+| Field | Value |
+| --- | --- |
+| Actual browser mimeType | Not collected |
+| Duration | Not collected |
+| Blob size | Not collected |
+| Quality warning | Not collected |
+| ASR result | Not reached from browser |
+
+### Confirm And Traceability Evidence
+
+| Field | Value |
+| --- | --- |
+| Confirm one | Not run; audio-created draft unavailable |
+| Confirm eligible | Not run; audio-created drafts unavailable |
+| Duplicate confirm | Not run |
+| Transaction id | None created in P9B |
+| Traceability | Not run; no browser audio transaction created |
+
+### P9B Bugs
+
+| ID | Severity | Layer | Summary | Status |
+| --- | --- | --- | --- | --- |
+| VOICE-P9B-001 | P0 | ASR_CAPTURE / UAT_BROWSER | Codex in-app browser stays pending on `getUserMedia`; Chrome connector unavailable, so browser recording UAT cannot prove mic, too-short, normal recording, ASR unavailable recovery, or audio confirm. | OPEN |
+| VOICE-P9B-002 | P2 | FRONTEND_RENDER | Text sanity review displayed repeated `Không thể chuyển giọng nói thành văn bản.` warning text on non-ASR draft review, including unsupported/savings cards. | OPEN |
+
+### Release Result
+
+P9A backend audio contract remains fixed, but P9B does not close browser recording readiness. Voice beta is still not ready until a mic-capable browser UAT run completes and the text-review warning display issue is triaged.
