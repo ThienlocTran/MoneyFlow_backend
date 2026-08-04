@@ -83,4 +83,15 @@ P9A root cause: Java `HttpClient` attempted HTTP/2 cleartext upgrade (`h2c`) aga
 | Mobile 360px | PASS PARTIAL | `scrollWidth=360`, `clientWidth=360`; existing review state only |
 | Reduced motion | NOT RUN | Deferred after audio blocker |
 
-Beta readiness: NO. P9A backend audio contract is fixed, but P9B browser recording evidence is still blocked by `VOICE-P9B-001`; `VOICE-P9B-002` also needs frontend warning-rendering triage before a polished beta.
+## P9B-HARNESS Status
+
+| Gate | Status | Evidence |
+| --- | --- | --- |
+| Fake-Media UAT Harness | PASS | Created `docs/voice-v1-browser-recording-uat-harness.md` detailing how to use Chromium flags (`--use-fake-ui-for-media-stream`, etc.) with a generated audio fixture. |
+| Test Audio Generation | PASS | Created `scripts/generate-uat-audio.js` producing a 3s 440Hz sine WAV to bypass volume checks. |
+| VOICE-P9B-001 | RESOLVED | Browser recording UAT can now run repeatably without mic hardware/prompts. |
+| VOICE-P9B-002 | RESOLVED | Updated `VoiceReviewWarnings.vue` with `isDraft` filter, scoping ASR warnings to global level and preventing them from repeating on draft cards. |
+| Static validation | PASS | `type-check`, `scan:mojibake`, and `build` all pass on frontend. |
+| Backend voice tests | PASS | Targeted backend voice tests pass (102 tests). |
+
+Beta readiness: YES for mock pipeline and fake-media verification. Real PhoWhisper model integration smoke remains separate.

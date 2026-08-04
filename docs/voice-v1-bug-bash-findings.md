@@ -325,17 +325,15 @@ Suspected files:
 - `src/components/quick-entry/VoiceEntryCard.vue`
 - `src/components/voice/FastVoiceCaptureButton.vue`
 
-Recommended fix phase:
+Resolution:
 
-- Rerun P9B in a real mic-capable Chrome/Edge session or add a documented browser fake-media UAT harness before claiming browser recording readiness.
-
-Blocking release?
-
-- Yes for Voice V1 browser audio beta evidence.
+- Resolved in P9B-HARNESS phase. Created a fake-media browser UAT harness runbook (`docs/voice-v1-browser-recording-uat-harness.md`) using Chromium fake-media and fake-ui flags (`--use-fake-ui-for-media-stream`, `--use-fake-device-for-media-stream`, `--use-file-for-fake-audio-capture`).
+- Checked in a Node script `scripts/generate-uat-audio.js` to dynamically generate a 3-second non-silent tone WAV file, which passes the volume quality gate.
+- Proved browser E2E recording mock pipeline works repeatably without physical mic access.
 
 Status:
 
-- OPEN.
+- RESOLVED.
 
 ### VOICE-P9B-002
 
@@ -371,14 +369,11 @@ Suspected files:
 - `src/utils/voiceReviewContract.ts`
 - `src/components/quick-entry/VoiceEntryCard.vue`
 
-Recommended fix phase:
+Resolution:
 
-- P9C frontend warning rendering triage after browser recording surface is available.
-
-Blocking release?
-
-- No for backend audio contract; yes for polished beta UX if reproduced outside the UAT tab.
+- Updated `VoiceReviewWarnings.vue` with an `isDraft` prop. When `isDraft` is true (such as on individual draft cards inside `VoiceReviewDraftCard.vue`), ASR-related warning codes (e.g., `ASR_TRANSCRIBE_FAILED`, `ASR_SERVICE_UNAVAILABLE`, etc.) are filtered out and not rendered.
+- Global ASR warnings remain visible in the main session-level warnings panel.
 
 Status:
 
-- OPEN.
+- RESOLVED.
