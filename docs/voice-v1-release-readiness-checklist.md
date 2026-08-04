@@ -37,3 +37,16 @@
 - Raw warning codes shown as primary user-facing text.
 - Fake financial rows, fake wallets, fake transactions, or fallback mock responses in runtime UI.
 - Mojibake in touched source/docs/UI text.
+
+## P8-Follow-up Status
+
+| Gate | Status | Evidence |
+| --- | --- | --- |
+| Docker local DB | PASS | `moneyflow-voice-uat-postgres` healthy on `127.0.0.1:15432` |
+| ASR mock health | PASS | `/health/live` returned UP |
+| Backend local startup | FAIL | `voice_session_drafts.currency` schema validation mismatch |
+| Authenticated API E2E | BLOCKED | Backend unavailable |
+| Browser UAT | BLOCKED | Backend unavailable |
+| Real PhoWhisper smoke | NOT RUN | Deferred until mock live E2E can run |
+
+Beta readiness: NO. Fix `VOICE-P8F-001`, then rerun live authenticated API E2E and browser UAT.

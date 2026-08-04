@@ -150,3 +150,49 @@ None confirmed.
 - VOICE-P8-001
 - VOICE-P8-002
 - VOICE-P8-003
+
+### VOICE-P8F-001
+
+Title: Backend cannot start against local Voice UAT Postgres after VoiceSession migration
+
+Severity: P0
+
+Layer classification: BACKEND_SESSION
+
+Steps to reproduce:
+
+1. Start Docker Desktop.
+2. Run `docker compose -f docker-compose.voice-uat.yml up -d`.
+3. Start ASR service in mock mode on `127.0.0.1:8092`.
+4. Start backend with `SPRING_PROFILES_ACTIVE=local`, `MONEYFLOW_DB_URL=jdbc:postgresql://localhost:15432/moneyflow_voice_uat`, and `MONEYFLOW_ASR_PROVIDER=external_http`.
+
+Expected:
+
+- Backend starts.
+- `/api/public/health/live` and `/api/public/health/ready` are reachable.
+- Authenticated VoiceSession API E2E can run.
+
+Actual:
+
+- Backend fails during Hibernate schema validation.
+- No backend health endpoint is available.
+- Live API E2E and browser UAT are blocked.
+
+Evidence:
+
+```text
+Schema validation: wrong column type encountered in column [currency] in table [voice_session_drafts]; found [bpchar (Types#CHAR)], but expecting [varchar(3) (Types#VARCHAR)]
+```
+
+Suspected files:
+
+- `src/main/resources/db/migration/V25__voice_sessions.sql`
+- `src/main/java/com/moneyflowbackend/voice/session/VoiceSessionDraft.java`
+
+Recommended fix phase:
+
+- Immediate P8F blocker fix before rerunning live UAT.
+
+Blocking release?
+
+- Yes.

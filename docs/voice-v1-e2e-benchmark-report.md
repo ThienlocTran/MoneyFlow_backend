@@ -126,3 +126,75 @@ No frontend new-flow evidence showed primary use of `/voice-command/interpret`. 
 Backend/session safety is strong by tests. ASR mock service health and unit tests are green. Frontend compiles and has static wiring for VoiceSession, quality warnings, and confirm endpoints.
 
 Release is not ready for beta based on this P8 evidence because live authenticated API E2E and browser UAT were not run.
+
+## P8-Follow-up Live Authenticated UAT
+
+Date: 2026-08-04
+
+### Environment
+
+| Area | Value |
+| --- | --- |
+| Backend HEAD | `0fc6836 docs(voice): add e2e benchmark and bug bash report` |
+| Frontend HEAD | `f3e7232 docs(voice): add vietnamese benchmark suite` |
+| ASR service HEAD/path | `D:\MindMirror\MoneyFlow\moneyflow-asr-service`, repo root `D:\MindMirror\MoneyFlow`, HEAD `98ffa9a` |
+| Java | `24.0.2` intended for backend run |
+| Python | ASR `.venv` Python available |
+| Browser | Not reached |
+| DB mode | Local Docker Postgres, `moneyflow_voice_uat` on `127.0.0.1:15432` |
+| ASR mode | `mock` |
+| Backend ASR provider | `external_http`, service URL `http://localhost:8092` |
+| Auth method | Not reached; planned public register/login without exposing token |
+
+### Service Startup Evidence
+
+| Service | Expected | Actual | Pass/Fail | Evidence |
+| --- | --- | --- | --- | --- |
+| Docker | Daemon running | Docker Desktop started, server `29.3.1` | PASS | `docker info` returned server version |
+| UAT Postgres | Healthy local DB | `moneyflow-voice-uat-postgres` healthy on `127.0.0.1:15432` | PASS | `docker ps` health `healthy` |
+| ASR mock | Live/ready UP | Live endpoint returned `{"status":"UP","service":"moneyflow-asr-service"}` | PASS | ASR mock process started and was later stopped |
+| Backend | Live/ready UP | Startup failed before HTTP health was available | FAIL | Hibernate schema validation failed on `voice_session_drafts.currency` |
+| Frontend | Dev URL available | Not started because backend was blocked | NOT RUN | Avoided browser UAT without backend |
+
+### API E2E Result Table
+
+| Scenario | Endpoint sequence | Expected | Actual | Pass/Fail | Evidence note |
+| --- | --- | --- | --- | --- | --- |
+| Health | ASR live/ready, backend live/ready | ASR UP, backend UP | ASR UP; backend failed startup | FAIL | Backend error: `Schema validation: wrong column type encountered in column [currency] in table [voice_session_drafts]; found [bpchar (Types#CHAR)], but expecting [varchar(3) (Types#VARCHAR)]` |
+| Authenticated workspace/token | register/login, list workspaces | Token and workspace available | Not reached | BLOCKED | Backend unavailable |
+| Text-only multi-intent | create session, update transcript, interpret, get detail | 4 drafts and no auto-post | Not reached | BLOCKED | Backend unavailable |
+| Audio mock transcribe | create audio session, transcribe, interpret | `asrStatus=SUCCEEDED` | Not reached | BLOCKED | Backend unavailable |
+| Confirm one | confirm expense draft twice | One transaction, duplicate confirm idempotent | Not reached | BLOCKED | Backend unavailable |
+| Confirm eligible | batch confirm multi-intent session | Partial success, no duplicate | Not reached | BLOCKED | Backend unavailable |
+| Error paths | missing transcript/audio/fields/unsupported | Stable warning codes, no 500 | Not reached | BLOCKED | Backend unavailable |
+
+### Browser UAT Result Table
+
+| Scenario | Expected | Actual | Pass/Fail | Screenshot/network note |
+| --- | --- | --- | --- | --- |
+| `/financial-inbox` text multi-intent | VoiceSession endpoints, 4 cards | Not run | BLOCKED | Backend failed startup |
+| Mic permission denied | Friendly message, text fallback | Not run | BLOCKED | Backend failed startup |
+| Too short recording | Block before ASR | Not run | BLOCKED | Backend failed startup |
+| Normal recording mock ASR | Transcribe call and draft queue | Not run | BLOCKED | Backend failed startup |
+| ASR unavailable | Friendly recovery | Not run | BLOCKED | Backend failed startup |
+| Confirm one draft | Confirm endpoint, no duplicate | Not run | BLOCKED | Backend failed startup |
+| Confirm eligible | Honest partial success | Not run | BLOCKED | Backend failed startup |
+| Transactions traceability | Voice indicator/session trace | Not run | BLOCKED | Backend failed startup |
+| Mobile 360px | No horizontal overflow | Not run | BLOCKED | Backend failed startup |
+| Reduced motion | UI usable | Not run | BLOCKED | Backend failed startup |
+
+### Transaction Safety Evidence
+
+Live transaction safety evidence was not collected. Backend startup blocked before authentication and workspace setup. Existing test evidence from P8 remains valid but does not close the live UAT gap.
+
+### Traceability Evidence
+
+Live traceability evidence was not collected. Existing backend and frontend static/test evidence remains documented above.
+
+### Real PhoWhisper Smoke
+
+Not tested. Mock E2E could not proceed past backend startup, so real model smoke was deferred.
+
+### Follow-up Result
+
+Release readiness remains blocked. The first live blocker is backend startup against the local UAT Postgres schema.
