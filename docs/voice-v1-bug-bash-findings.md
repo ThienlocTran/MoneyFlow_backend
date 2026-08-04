@@ -174,9 +174,9 @@ Expected:
 
 Actual:
 
-- Backend fails during Hibernate schema validation.
-- No backend health endpoint is available.
-- Live API E2E and browser UAT are blocked.
+- Before fix: backend failed during Hibernate schema validation.
+- After `V27__fix_voice_session_draft_currency_type.sql`: backend started and health endpoints returned UP against the current DB. User explicitly allowed testing this DB because it has no users and will be deleted/reimported later.
+- Live API E2E and browser UAT still need rerun after this startup fix.
 
 Evidence:
 
@@ -188,11 +188,16 @@ Suspected files:
 
 - `src/main/resources/db/migration/V25__voice_sessions.sql`
 - `src/main/java/com/moneyflowbackend/voice/session/VoiceSessionDraft.java`
+- `src/main/resources/db/migration/V27__fix_voice_session_draft_currency_type.sql`
 
 Recommended fix phase:
 
-- Immediate P8F blocker fix before rerunning live UAT.
+- Fixed in P8F-BLOCKER-1 by adding a new Flyway migration. The pushed historical `V25__voice_sessions.sql` migration was not edited because Flyway migrations are immutable after sharing.
 
 Blocking release?
 
-- Yes.
+- No for backend startup. Authenticated API E2E and browser UAT remain not rerun in this task.
+
+Status:
+
+- RESOLVED.

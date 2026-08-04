@@ -44,9 +44,9 @@
 | --- | --- | --- |
 | Docker local DB | PASS | `moneyflow-voice-uat-postgres` healthy on `127.0.0.1:15432` |
 | ASR mock health | PASS | `/health/live` returned UP |
-| Backend local startup | FAIL | `voice_session_drafts.currency` schema validation mismatch |
-| Authenticated API E2E | BLOCKED | Backend unavailable |
-| Browser UAT | BLOCKED | Backend unavailable |
+| Backend startup | PASS | P8F-BLOCKER-1 added `V27__fix_voice_session_draft_currency_type.sql`; live/ready returned UP against current DB with user permission |
+| Authenticated API E2E | NOT RERUN | Backend startup blocker resolved; API E2E was outside this fix |
+| Browser UAT | NOT RERUN | Backend startup blocker resolved; browser UAT was outside this fix |
 | Real PhoWhisper smoke | NOT RUN | Deferred until mock live E2E can run |
 
-Beta readiness: NO. Fix `VOICE-P8F-001`, then rerun live authenticated API E2E and browser UAT.
+Beta readiness: NO. `VOICE-P8F-001` is resolved; rerun live authenticated API E2E and browser UAT next.

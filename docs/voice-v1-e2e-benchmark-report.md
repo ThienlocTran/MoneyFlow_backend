@@ -198,3 +198,19 @@ Not tested. Mock E2E could not proceed past backend startup, so real model smoke
 ### Follow-up Result
 
 Release readiness remains blocked. The first live blocker is backend startup against the local UAT Postgres schema.
+
+## P8F-BLOCKER-1 Fix Evidence
+
+Root cause: `V25__voice_sessions.sql` created `voice_session_drafts.currency` as `CHAR(3)`, while `VoiceSessionDraft.currency` maps a Java `String` with length 3, so Hibernate validates it as `varchar(3)`.
+
+Fix: added `V27__fix_voice_session_draft_currency_type.sql` to alter `voice_session_drafts.currency` to `VARCHAR(3)` with `TRIM(currency)::VARCHAR(3)`. The old Flyway migration was not edited because already-shared migrations are immutable.
+
+Startup proof: backend started with `SPRING_PROFILES_ACTIVE=local`, external HTTP ASR env, and the current DB authorized by the user for testing because it has no users and will be deleted/reimported later.
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Backend live health | PASS | `/api/public/health/live` returned `UP` |
+| Backend ready health | PASS | `/api/public/health/ready` returned application `UP` and database `UP` |
+| `VOICE-P8F-001` | RESOLVED | Original `bpchar` vs `varchar(3)` startup blocker no longer reproduced |
+
+Authenticated API E2E, browser UAT, and real PhoWhisper smoke were not rerun in this blocker fix.
