@@ -3,6 +3,7 @@ package com.moneyflowbackend;
 import com.moneyflowbackend.diagnostics.service.RuntimeDiagnosticsService;
 import com.moneyflowbackend.profile.avatar.DisabledAvatarStorageService;
 import com.moneyflowbackend.receipt.ocr.ReceiptOcrProperties;
+import com.moneyflowbackend.voice.asr.VoiceAsrProperties;
 import com.moneyflowbackend.voice.storage.DisabledVoiceAudioStorageService;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.env.MockEnvironment;
@@ -25,6 +26,8 @@ class RuntimeDiagnosticsServiceTests {
                 new DisabledVoiceAudioStorageService(),
                 new DisabledAvatarStorageService(),
                 new ReceiptOcrProperties("none", 5, 5242880, 30, ""),
+                new VoiceAsrProperties("external_http", "https://secret.example/asr?token=hidden", 60, 60, 0.8, 26214400, "vi", false,
+                        "audio/webm,audio/ogg,audio/wav,audio/mpeg,audio/mp4,audio/x-m4a"),
                 "cloudinary",
                 "cloudinary",
                 "",
@@ -47,6 +50,13 @@ class RuntimeDiagnosticsServiceTests {
         assertThat(response.storage().receiptOcr().timeoutSeconds()).isEqualTo(30);
         assertThat(response.storage().receiptOcr().language()).isEqualTo("vi");
         assertThat(response.storage().receiptOcr().serviceUrlConfigured()).isFalse();
+        assertThat(response.storage().voiceAsr().provider()).isEqualTo("EXTERNAL_HTTP");
+        assertThat(response.storage().voiceAsr().enabled()).isTrue();
+        assertThat(response.storage().voiceAsr().configured()).isTrue();
+        assertThat(response.storage().voiceAsr().serviceUrlConfigured()).isTrue();
+        assertThat(response.storage().voiceAsr().timeoutSeconds()).isEqualTo(60);
+        assertThat(response.storage().voiceAsr().language()).isEqualTo("vi");
+        assertThat(response.storage().voiceAsr().maxFileBytes()).isEqualTo(26214400);
     }
 
     private DataSource readyDataSource() throws Exception {

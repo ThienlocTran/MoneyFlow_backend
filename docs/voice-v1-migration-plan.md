@@ -112,6 +112,24 @@ Acceptance:
 - ASR timeout leaves session retryable.
 - Backend never calls ASR for invalid MIME, empty file, too-short, too-long, or too-large audio.
 
+P4 implementation notes:
+
+- Adds backend config `MONEYFLOW_ASR_PROVIDER=none|mock|external_http`.
+- Adds `POST /api/workspaces/{workspaceId}/voice-sessions/{sessionId}/transcribe`.
+- Adds backend audio validation before ASR call.
+- Adds `VoiceAsrClient` providers: noop, mock, and external HTTP.
+- Stores ASR transcript, normalized transcript, provider/model/language, duration, confidence, and warnings on `VoiceSession`.
+- Keeps `audioStatus=NONE` because P4 transcribes uploaded bytes without session audio persistence.
+- Keeps `commandStatus=NOT_REQUESTED` after transcription.
+- Does not create drafts or transactions during transcription.
+- Adds safe ASR runtime diagnostics without exposing service URL or secrets.
+
+Remaining after P4:
+
+- P5 frontend capture flow.
+- P6 confirm executor/linking if not implemented.
+- P7 UX quality gate and benchmarks.
+
 ## Phase 5: Update Frontend Capture Flow
 
 Goal: audio-first review-before-save UX.

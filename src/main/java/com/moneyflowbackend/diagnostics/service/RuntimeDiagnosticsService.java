@@ -4,6 +4,8 @@ import com.moneyflowbackend.diagnostics.dto.RuntimeDiagnosticsResponse;
 import com.moneyflowbackend.profile.avatar.AvatarStorageService;
 import com.moneyflowbackend.receipt.ocr.ReceiptOcrProperties;
 import com.moneyflowbackend.receipt.ocr.ReceiptOcrProviderType;
+import com.moneyflowbackend.voice.asr.VoiceAsrProperties;
+import com.moneyflowbackend.voice.asr.VoiceAsrProviderType;
 import com.moneyflowbackend.voice.storage.VoiceAudioStorageService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.env.Environment;
@@ -22,6 +24,7 @@ public class RuntimeDiagnosticsService {
     private final VoiceAudioStorageService voiceAudioStorageService;
     private final AvatarStorageService avatarStorageService;
     private final ReceiptOcrProperties receiptOcrProperties;
+    private final VoiceAsrProperties voiceAsrProperties;
     private final String voiceProvider;
     private final String avatarProvider;
     private final String cloudName;
@@ -37,6 +40,7 @@ public class RuntimeDiagnosticsService {
             VoiceAudioStorageService voiceAudioStorageService,
             AvatarStorageService avatarStorageService,
             ReceiptOcrProperties receiptOcrProperties,
+            VoiceAsrProperties voiceAsrProperties,
             @Value("${VOICE_AUDIO_STORAGE_PROVIDER:${MONEYFLOW_AUDIO_STORAGE_PROVIDER:disabled}}") String voiceProvider,
             @Value("${MONEYFLOW_AVATAR_STORAGE_PROVIDER:${MONEYFLOW_AUDIO_STORAGE_PROVIDER:disabled}}") String avatarProvider,
             @Value("${MONEYFLOW_CLOUDINARY_CLOUD_NAME:}") String cloudName,
@@ -50,6 +54,7 @@ public class RuntimeDiagnosticsService {
         this.voiceAudioStorageService = voiceAudioStorageService;
         this.avatarStorageService = avatarStorageService;
         this.receiptOcrProperties = receiptOcrProperties;
+        this.voiceAsrProperties = voiceAsrProperties;
         this.voiceProvider = cleanProvider(voiceProvider);
         this.avatarProvider = cleanProvider(avatarProvider);
         this.cloudName = cloudName;
@@ -79,6 +84,17 @@ public class RuntimeDiagnosticsService {
                                 apiSecretPresent,
                                 baseFolder(root),
                                 voiceMaxBytes),
+                        new RuntimeDiagnosticsResponse.VoiceAsr(
+                                voiceAsrProperties.provider().name(),
+                                voiceAsrProperties.provider() != VoiceAsrProviderType.NONE,
+                                voiceAsrProperties.provider() == VoiceAsrProviderType.MOCK
+                                        || (voiceAsrProperties.provider() == VoiceAsrProviderType.EXTERNAL_HTTP && voiceAsrProperties.externalServiceConfigured()),
+                                voiceAsrProperties.externalServiceConfigured(),
+                                voiceAsrProperties.timeoutSeconds(),
+                                voiceAsrProperties.language(),
+                                voiceAsrProperties.maxFileBytes(),
+                                voiceAsrProperties.minAudioSeconds(),
+                                voiceAsrProperties.maxAudioSeconds()),
                         new RuntimeDiagnosticsResponse.Avatar(
                                 avatarProvider,
                                 avatarStorageService.isEnabled(),

@@ -1,11 +1,14 @@
 package com.moneyflowbackend.voice.session;
 
 import com.moneyflowbackend.voice.command.VoiceCommandWarningDto;
+import com.moneyflowbackend.voice.asr.VoiceAsrMessages;
+import com.moneyflowbackend.voice.asr.VoiceAsrWarning;
 import com.moneyflowbackend.voice.dto.VoiceReviewDraftResponse;
 import org.springframework.stereotype.Component;
 
 import java.text.Normalizer;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
@@ -100,14 +103,41 @@ public class VoiceSessionDraftMapper {
                 .collect(Collectors.joining(","));
     }
 
+    String writeAsrWarnings(List<VoiceAsrWarning> warnings) {
+        if (warnings == null || warnings.isEmpty()) return null;
+        return warnings.stream()
+                .filter(Objects::nonNull)
+                .map(warning -> warning.code() + "|" + Base64.getEncoder().encodeToString(
+                        (warning.message() == null ? VoiceAsrMessages.message(warning.code()) : warning.message()).getBytes(java.nio.charset.StandardCharsets.UTF_8)))
+                .distinct()
+                .collect(Collectors.joining("\n"));
+    }
+
     List<VoiceSessionWarningResponse> readWarnings(String warningsJson) {
         if (warningsJson == null || warningsJson.isBlank()) return List.of();
-        return Arrays.stream(warningsJson.split(","))
+        String delimiter = warningsJson.contains("\n") || warningsJson.contains("|") ? "\n" : ",";
+        return Arrays.stream(warningsJson.split(delimiter))
                 .map(String::trim)
                 .filter(code -> !code.isBlank())
                 .distinct()
-                .map(code -> VoiceSessionWarningResponse.builder().code(code).build())
+                .map(this::warningResponse)
                 .toList();
+    }
+
+    private VoiceSessionWarningResponse warningResponse(String raw) {
+        if (!raw.contains("|")) {
+            return VoiceSessionWarningResponse.builder().code(raw).message(VoiceAsrMessages.message(raw)).build();
+        }
+        String[] parts = raw.split("\\|", 2);
+        String message = null;
+        try {
+            message = new String(Base64.getDecoder().decode(parts[1]), java.nio.charset.StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException ignored) {
+        }
+        return VoiceSessionWarningResponse.builder()
+                .code(parts[0])
+                .message(message == null || message.isBlank() ? VoiceAsrMessages.message(parts[0]) : message)
+                .build();
     }
 
     private VoiceSessionDraftStatus status(VoiceReviewDraftResponse.Candidate candidate, boolean confirmable) {

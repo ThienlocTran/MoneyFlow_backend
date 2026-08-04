@@ -32,6 +32,7 @@ public class VoiceSessionDetailResponse {
     private String asrModel;
     private String asrLanguage;
     private List<VoiceSessionWarningResponse> asrWarnings;
+    private VoiceSessionAsrResponse asr;
     private List<VoiceSessionWarningResponse> commandWarnings;
     private VoiceCommandMode mode;
     private VoiceQueryResponse query;

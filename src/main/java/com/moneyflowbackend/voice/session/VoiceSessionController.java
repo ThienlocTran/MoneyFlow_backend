@@ -10,7 +10,9 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.UUID;
 
@@ -44,6 +46,19 @@ public class VoiceSessionController {
             @PathVariable UUID sessionId,
             @RequestBody(required = false) VoiceSessionInterpretRequest req) {
         return ResponseEntity.ok(ApiResponse.ok("Voice session interpreted", voiceSessionService.interpret(workspaceId, sessionId, req, currentUserId())));
+    }
+
+    @PostMapping("/{sessionId}/transcribe")
+    public ResponseEntity<ApiResponse<VoiceSessionDetailResponse>> transcribe(
+            @PathVariable UUID workspaceId,
+            @PathVariable UUID sessionId,
+            @RequestParam(required = false) MultipartFile audio,
+            @RequestParam(required = false) String language,
+            @RequestParam(required = false) Boolean returnSegments,
+            @RequestParam(defaultValue = "true") boolean normalize,
+            @RequestParam(required = false) Long durationMs) {
+        return ResponseEntity.ok(ApiResponse.ok("Voice session transcribed",
+                voiceSessionService.transcribe(workspaceId, sessionId, audio, language, returnSegments, normalize, durationMs, currentUserId())));
     }
 
     @GetMapping("/{sessionId}")

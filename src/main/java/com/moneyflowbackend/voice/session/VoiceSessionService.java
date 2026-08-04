@@ -3,6 +3,13 @@ package com.moneyflowbackend.voice.session;
 import com.moneyflowbackend.auth.model.User;
 import com.moneyflowbackend.auth.repository.UserRepository;
 import com.moneyflowbackend.common.exception.BusinessException;
+import com.moneyflowbackend.voice.asr.VoiceAsrClient;
+import com.moneyflowbackend.voice.asr.VoiceAsrMessages;
+import com.moneyflowbackend.voice.asr.VoiceAsrProperties;
+import com.moneyflowbackend.voice.asr.VoiceAsrProviderType;
+import com.moneyflowbackend.voice.asr.VoiceAsrRequest;
+import com.moneyflowbackend.voice.asr.VoiceAsrTranscribeResult;
+import com.moneyflowbackend.voice.asr.VoiceAsrWarning;
 import com.moneyflowbackend.voice.command.VoiceCommandInterpretRequest;
 import com.moneyflowbackend.voice.command.VoiceCommandInterpretResponse;
 import com.moneyflowbackend.voice.command.VoiceCommandMode;
@@ -14,10 +21,13 @@ import com.moneyflowbackend.workspace.repository.WorkspaceRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.text.Normalizer;
 import java.time.Instant;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 
 @Service
@@ -29,6 +39,8 @@ public class VoiceSessionService {
     private final UserRepository userRepository;
     private final VoiceCommandService voiceCommandService;
     private final VoiceSessionDraftMapper draftMapper;
+    private final VoiceAsrProperties asrProperties;
+    private final VoiceAsrClient asrClient;
 
     public VoiceSessionService(
             VoiceSessionRepository voiceSessionRepository,
@@ -37,7 +49,9 @@ public class VoiceSessionService {
             WorkspaceMemberRepository workspaceMemberRepository,
             UserRepository userRepository,
             VoiceCommandService voiceCommandService,
-            VoiceSessionDraftMapper draftMapper) {
+            VoiceSessionDraftMapper draftMapper,
+            VoiceAsrProperties asrProperties,
+            VoiceAsrClient asrClient) {
         this.voiceSessionRepository = voiceSessionRepository;
         this.voiceSessionDraftRepository = voiceSessionDraftRepository;
         this.workspaceRepository = workspaceRepository;
@@ -45,6 +59,8 @@ public class VoiceSessionService {
         this.userRepository = userRepository;
         this.voiceCommandService = voiceCommandService;
         this.draftMapper = draftMapper;
+        this.asrProperties = asrProperties;
+        this.asrClient = asrClient;
     }
 
     @Transactional
@@ -116,6 +132,44 @@ public class VoiceSessionService {
         return detail(session, interpreted);
     }
 
+    @Transactional
+    public VoiceSessionDetailResponse transcribe(UUID workspaceId, UUID sessionId, MultipartFile audio, String language,
+                                                 Boolean returnSegments, boolean normalize, Long durationMs, UUID userId) {
+        requireActiveMember(workspaceId, userId);
+        VoiceSession session = session(workspaceId, sessionId);
+        if (asrProperties.provider() == VoiceAsrProviderType.NONE
+                || (asrProperties.provider() == VoiceAsrProviderType.EXTERNAL_HTTP && !asrProperties.externalServiceConfigured())) {
+            session.setAsrStatus(VoiceSessionAsrStatus.NOT_REQUESTED);
+            session.setAsrWarningsJson(draftMapper.writeAsrWarnings(List.of(warning("ASR_NOT_CONFIGURED"))));
+            session.setUpdatedAt(Instant.now());
+            return detail(voiceSessionRepository.save(session));
+        }
+
+        byte[] bytes = audioBytes(audio);
+        validateAudio(audio, bytes, durationMs);
+        session.setStatus(VoiceSessionStatus.TRANSCRIBING);
+        session.setAsrStatus(VoiceSessionAsrStatus.TRANSCRIBING);
+        session.setSourceType(VoiceSessionSourceType.AUDIO);
+        session.setOriginalMimeType(contentType(audio));
+        session.setSizeBytes((long) bytes.length);
+        session.setDurationMs(durationMs);
+        session.setAudioStatus(VoiceSessionAudioStatus.NONE);
+        session.setUpdatedAt(Instant.now());
+        voiceSessionRepository.saveAndFlush(session);
+
+        VoiceAsrTranscribeResult result = asrClient.transcribe(new VoiceAsrRequest(
+                session.getId(),
+                bytes,
+                audio.getOriginalFilename(),
+                contentType(audio),
+                language == null || language.isBlank() ? asrProperties.language() : language.trim(),
+                returnSegments == null ? asrProperties.returnSegments() : returnSegments,
+                normalize));
+
+        applyAsrResult(session, result);
+        return detail(voiceSessionRepository.save(session));
+    }
+
     @Transactional(readOnly = true)
     public VoiceSessionDetailResponse get(UUID workspaceId, UUID sessionId, UUID userId) {
         requireActiveMember(workspaceId, userId);
@@ -150,6 +204,14 @@ public class VoiceSessionService {
                 .asrModel(session.getAsrModel())
                 .asrLanguage(session.getAsrLanguage())
                 .asrWarnings(draftMapper.readWarnings(session.getAsrWarningsJson()))
+                .asr(VoiceSessionAsrResponse.builder()
+                        .provider(session.getAsrProvider())
+                        .model(session.getAsrModel())
+                        .language(session.getAsrLanguage())
+                        .durationMs(session.getDurationMs())
+                        .confidence(session.getTranscriptConfidence())
+                        .warnings(draftMapper.readWarnings(session.getAsrWarningsJson()))
+                        .build())
                 .commandWarnings(draftMapper.readWarnings(session.getCommandWarningsJson()))
                 .mode(interpreted == null ? null : interpreted.getMode())
                 .query(interpreted == null ? null : interpreted.getQuery())
@@ -207,6 +269,79 @@ public class VoiceSessionService {
         } catch (NumberFormatException ex) {
             return null;
         }
+    }
+
+    private void applyAsrResult(VoiceSession session, VoiceAsrTranscribeResult result) {
+        session.setAsrProvider(result.provider().name());
+        session.setAsrModel(result.model());
+        session.setAsrLanguage(result.language());
+        session.setDurationMs(result.durationMs() == null ? session.getDurationMs() : result.durationMs());
+        session.setTranscriptConfidence(result.confidence());
+        session.setAsrWarningsJson(draftMapper.writeAsrWarnings(result.warnings()));
+        session.setUpdatedAt(Instant.now());
+        if (result.succeeded()) {
+            String normalizedTranscript = normalize(result.normalizedTranscript() == null ? result.transcript() : result.normalizedTranscript());
+            if (normalizedTranscript == null) {
+                session.setAsrStatus(VoiceSessionAsrStatus.NO_SPEECH);
+                session.setStatus(VoiceSessionStatus.FAILED);
+                session.setTranscript(null);
+                session.setNormalizedTranscript(null);
+                session.setAsrWarningsJson(draftMapper.writeAsrWarnings(List.of(warning("ASR_EMPTY_TRANSCRIPT"))));
+                return;
+            }
+            session.setAsrStatus(VoiceSessionAsrStatus.SUCCEEDED);
+            session.setStatus(VoiceSessionStatus.TRANSCRIBED);
+            session.setTranscript(normalize(result.transcript()));
+            session.setNormalizedTranscript(normalizedTranscript);
+            session.setCommandStatus(VoiceSessionCommandStatus.NOT_REQUESTED);
+            return;
+        }
+        session.setAsrStatus(result.status());
+        session.setStatus(result.status() == VoiceSessionAsrStatus.NOT_REQUESTED ? session.getStatus() : VoiceSessionStatus.FAILED);
+        session.setTranscript(null);
+        session.setNormalizedTranscript(null);
+    }
+
+    private byte[] audioBytes(MultipartFile audio) {
+        if (audio == null || audio.isEmpty()) {
+            throw new BusinessException("ASR_AUDIO_REQUIRED", VoiceAsrMessages.message("ASR_AUDIO_REQUIRED"), HttpStatus.BAD_REQUEST);
+        }
+        try {
+            return audio.getBytes();
+        } catch (IOException ex) {
+            throw new BusinessException("ASR_AUDIO_REQUIRED", VoiceAsrMessages.message("ASR_AUDIO_REQUIRED"), HttpStatus.BAD_REQUEST);
+        }
+    }
+
+    private void validateAudio(MultipartFile audio, byte[] bytes, Long durationMs) {
+        if (bytes.length == 0) {
+            throw new BusinessException("ASR_AUDIO_REQUIRED", VoiceAsrMessages.message("ASR_AUDIO_REQUIRED"), HttpStatus.BAD_REQUEST);
+        }
+        if (bytes.length > asrProperties.maxFileBytes()) {
+            throw new BusinessException("ASR_FILE_TOO_LARGE", VoiceAsrMessages.message("ASR_FILE_TOO_LARGE"), HttpStatus.PAYLOAD_TOO_LARGE);
+        }
+        if (!asrProperties.allowedMimeTypes().contains(contentType(audio))) {
+            throw new BusinessException("ASR_UNSUPPORTED_FORMAT", VoiceAsrMessages.message("ASR_UNSUPPORTED_FORMAT"), HttpStatus.UNSUPPORTED_MEDIA_TYPE);
+        }
+        if (durationMs != null) {
+            double seconds = durationMs / 1000d;
+            if (seconds < asrProperties.minAudioSeconds()) {
+                throw new BusinessException("ASR_AUDIO_TOO_SHORT", VoiceAsrMessages.message("ASR_AUDIO_TOO_SHORT"), HttpStatus.UNPROCESSABLE_ENTITY);
+            }
+            if (seconds > asrProperties.maxAudioSeconds()) {
+                throw new BusinessException("ASR_AUDIO_TOO_LONG", VoiceAsrMessages.message("ASR_AUDIO_TOO_LONG"), HttpStatus.UNPROCESSABLE_ENTITY);
+            }
+        }
+    }
+
+    private String contentType(MultipartFile audio) {
+        String contentType = audio == null ? null : audio.getContentType();
+        if (contentType == null || contentType.isBlank()) return "application/octet-stream";
+        return contentType.split(";")[0].trim().toLowerCase(Locale.ROOT);
+    }
+
+    private VoiceAsrWarning warning(String code) {
+        return new VoiceAsrWarning(code, VoiceAsrMessages.message(code));
     }
 
     private String normalize(String value) {
