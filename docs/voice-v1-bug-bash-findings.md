@@ -201,3 +201,56 @@ Blocking release?
 Status:
 
 - RESOLVED.
+
+### VOICE-P8F-RERUN-001
+
+Title: Live audio mock transcribe fails through backend external_http ASR path
+
+Severity: P0
+
+Layer classification: BACKEND_ASR_CLIENT / ASR_SERVICE
+
+Steps to reproduce:
+
+1. Start ASR service in mock mode on localhost.
+2. Start backend with `MONEYFLOW_ASR_PROVIDER=external_http`.
+3. Create an authenticated `AUDIO` VoiceSession.
+4. POST a small WAV file to `/api/workspaces/{workspaceId}/voice-sessions/{sessionId}/transcribe`.
+
+Expected:
+
+- Session `asrStatus=SUCCEEDED`.
+- Transcript and normalized transcript are stored.
+- Interpret can create a draft queue.
+
+Actual:
+
+- Backend response wrapper was successful but session `asrStatus=FAILED`.
+- No transcript was stored.
+- Follow-up interpret failed with `VOICE_SESSION_TRANSCRIPT_REQUIRED`.
+- ASR service log showed HTTP 400 on `/asr/transcribe`.
+
+Evidence:
+
+- DB target: User-approved Neon.tech current DB live UAT, secrets redacted.
+- Workspace: `Voice V1 UAT Workspace`.
+- Audio session: `4c61cc8d...`.
+
+Suspected files:
+
+- `src/main/java/com/moneyflowbackend/voice/session/VoiceSessionService.java`
+- `src/main/java/com/moneyflowbackend/voice/asr/*`
+- `moneyflow-asr-service/app/main.py`
+- `moneyflow-asr-service/app/transcriber.py`
+
+Recommended fix phase:
+
+- Immediate P8F follow-up before browser recording UAT or real PhoWhisper smoke.
+
+Blocking release?
+
+- Yes for Voice V1 audio beta.
+
+Status:
+
+- OPEN.

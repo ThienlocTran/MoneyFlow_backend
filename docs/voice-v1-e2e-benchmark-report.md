@@ -214,3 +214,78 @@ Startup proof: backend started with `SPRING_PROFILES_ACTIVE=local`, external HTT
 | `VOICE-P8F-001` | RESOLVED | Original `bpchar` vs `varchar(3)` startup blocker no longer reproduced |
 
 Authenticated API E2E, browser UAT, and real PhoWhisper smoke were not rerun in this blocker fix.
+
+## P8F-RERUN Live Authenticated UAT After VOICE-P8F-001
+
+Date: 2026-08-04
+
+### Environment
+
+| Area | Value |
+| --- | --- |
+| Backend HEAD | `bebcf4c fix(voice): align voice session draft currency schema` |
+| Frontend HEAD | `f3e7232 docs(voice): add vietnamese benchmark suite` |
+| ASR service HEAD/path | `98ffa9a`, `D:\MindMirror\MoneyFlow\moneyflow-asr-service` |
+| Java | `24.0.2` |
+| Python | `3.12.13` |
+| Browser | Chrome via Playwright channel |
+| DB target | User-approved Neon.tech current DB live UAT, secrets redacted |
+| DB safety note | User explicitly allowed temporary current Neon.tech DB use for Voice V1 live UAT only. No broad update/delete was run. |
+| ASR mode | `mock` |
+| Backend ASR provider | `external_http`, local ASR URL configured, URL details omitted from report except localhost |
+| Auth method | Public register/login. Tokens redacted. |
+| Workspace | `Voice V1 UAT Workspace`, id `ae2583f9...` |
+
+### API E2E Result Table
+
+| Scenario | Endpoint sequence | Expected | Actual | Pass/Fail | Evidence note |
+| --- | --- | --- | --- | --- | --- |
+| Health | ASR live/ready, backend live/ready | ASR UP, backend UP | ASR mock ready UP; backend ready UP with database UP | PASS | Flyway schema at version 27; no CHAR/VARCHAR startup blocker |
+| Authenticated workspace/token | register/login, create/list workspace | Token and workspace available | Test user `voiceuat_1785820887606`, workspace `Voice V1 UAT Workspace` | PASS | Token not recorded |
+| Text-only multi-intent | create, patch transcript, interpret, get detail | 4 drafts, no auto-post | 4 drafts: `INCOME_FACT`, `EXPENSE`, `EXPENSE`, `SAVINGS_ALLOCATION`; transaction count before confirm 0 | PASS | Session `0d101b5f...` |
+| Confirm one | confirm expense draft twice | One transaction, duplicate confirm no duplicate | First confirm `CONFIRMED`; repeat returned `idempotentReplay=true`; transaction count 0 to 1 | PASS | Draft `981d9410...`, transaction `cbdd9372...` |
+| Traceability | Confirm response transaction fields | Voice session/draft ids preserved | `voiceSessionId=0d101b5f...`, `voiceSessionDraftId=981d9410...`, `playbackAvailable=false` | PASS | Transcript-only traceability works |
+| Confirm eligible | confirm-eligible on multi-intent session | Eligible complete drafts confirmed, unsupported remain visible | `confirmedCount=0`, `skippedCount=4`; already-confirmed draft replayed, second expense needed wallet, unsupported drafts stayed unsupported | PASS WITH LIMITATION | No remaining complete unconfirmed draft existed |
+| Audio mock transcribe | create audio session, transcribe wav through external_http mock ASR | `asrStatus=SUCCEEDED`, transcript stored | Backend returned success wrapper but session `asrStatus=FAILED`, no transcript; ASR logged HTTP 400 on `/asr/transcribe` | FAIL | New bug `VOICE-P8F-RERUN-001` |
+| Error: interpret without transcript | create text session, interpret | Stable warning/error, no transaction | HTTP 400 `VOICE_SESSION_TRANSCRIPT_REQUIRED` | PASS | No stack trace |
+| Error: confirm missing wallet/category | confirm expense without wallet/category | Needs review, no transaction | `NEEDS_REVIEW`, `VOICE_DRAFT_WALLET_REQUIRED` | PASS | Category was also required by UI state |
+| Error: confirm unsupported draft | confirm `INCOME_FACT` | Unsupported, no transaction | `UNSUPPORTED`, `VOICE_DRAFT_CONFIRM_UNSUPPORTED` | PASS | No silent expense conversion |
+| Missing audio / ASR unavailable | transcribe missing audio, stop ASR and transcribe | Stable ASR errors | Not completed after audio mock blocker | NOT RUN | Covered by tests, live rerun still needed |
+
+### Browser UAT Result Table
+
+| Scenario | Expected | Actual | Pass/Fail | Screenshot/network note |
+| --- | --- | --- | --- | --- |
+| Login/workspace | User can log in, workspace available | Login succeeded; workspace selected via current workspace storage | PASS | No token exposed |
+| `/financial-inbox` text multi-intent | New VoiceSession endpoints, 4 cards | UI sent `POST /voice-sessions`, `PATCH /transcript`, `POST /interpret`; rendered 4 cards with income fact, two expenses, savings | PASS | `target/voice-p8f-rerun-financial-inbox-ui.png` |
+| Legacy endpoint avoidance | No primary `/voice-command/interpret` | Network list did not include `/voice-command/interpret` | PASS | Session endpoints observed |
+| Transaction traceability page | Voice-created transaction visible | `/transactions` showed the UAT transaction note/workspace context | PASS | Transaction page text contained UAT evidence |
+| Mobile 360px | No horizontal overflow, controls usable | `scrollWidth <= clientWidth`; 4 draft cards visible and controls reachable | PASS | `target/voice-p8f-rerun-mobile.png` |
+| Mic permission denied | Friendly message, text fallback | Not run in browser | NOT RUN | Headless browser UAT used text fallback |
+| Too short recording | Block before ASR | Not run in browser | NOT RUN | Requires real media recorder interaction |
+| Normal recording mock ASR | Transcribe call and draft queue | Not run because API audio mock transcribe failed | BLOCKED | `VOICE-P8F-RERUN-001` |
+| ASR unavailable | Friendly ASR unavailable state | Not run in browser | NOT RUN | API/audio blocker first |
+| Confirm one draft in UI | Confirm endpoint, no duplicate | Not run in browser | NOT RUN | API confirm-one passed |
+| Confirm eligible in UI | Honest partial success | Not run in browser | NOT RUN | API confirm-eligible evidence collected |
+| Reduced motion | UI usable | Not run | NOT RUN | Deferred |
+
+### Transaction Safety Evidence
+
+- Text interpretation did not auto-post: transaction count was 0 before confirm.
+- Confirm-one created exactly one transaction and repeat confirm returned idempotent replay.
+- Unsupported `INCOME_FACT` stayed unsupported and was not converted to expense.
+- Missing wallet/category stayed `NEEDS_REVIEW`.
+
+### Traceability Evidence
+
+- Confirmed transaction preserved `voiceSessionId=0d101b5f...`.
+- Confirmed transaction preserved `voiceSessionDraftId=981d9410...`.
+- Transaction is transcript/session traceable, not audio playable: `playbackAvailable=false`.
+
+### Real PhoWhisper Smoke
+
+Not tested. Mock audio path failed first, so real PhoWhisper was deferred.
+
+### Follow-up Result
+
+`VOICE-P8F-001` remains resolved. Live text VoiceSession E2E, confirm-one, traceability, and browser text fallback pass. Release readiness remains blocked by live audio mock ASR failure `VOICE-P8F-RERUN-001` and unrun browser recording scenarios.

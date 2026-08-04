@@ -45,8 +45,8 @@
 | Docker local DB | PASS | `moneyflow-voice-uat-postgres` healthy on `127.0.0.1:15432` |
 | ASR mock health | PASS | `/health/live` returned UP |
 | Backend startup | PASS | P8F-BLOCKER-1 added `V27__fix_voice_session_draft_currency_type.sql`; live/ready returned UP against current DB with user permission |
-| Authenticated API E2E | NOT RERUN | Backend startup blocker resolved; API E2E was outside this fix |
-| Browser UAT | NOT RERUN | Backend startup blocker resolved; browser UAT was outside this fix |
+| Authenticated API E2E | PARTIAL | Text multi-intent, confirm-one, confirm-eligible limitation, and traceability passed; audio mock transcribe failed with `VOICE-P8F-RERUN-001` |
+| Browser UAT | PARTIAL | `/financial-inbox` text fallback rendered 4 cards and used VoiceSession endpoints; recording scenarios not run because audio mock API path failed |
 | Real PhoWhisper smoke | NOT RUN | Deferred until mock live E2E can run |
 
-Beta readiness: NO. `VOICE-P8F-001` is resolved; rerun live authenticated API E2E and browser UAT next.
+Beta readiness: NO. `VOICE-P8F-001` is resolved, but `VOICE-P8F-RERUN-001` blocks Voice V1 audio beta.
