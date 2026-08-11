@@ -1,6 +1,7 @@
 package com.moneyflowbackend.voice.command;
 
 import com.moneyflowbackend.common.exception.BusinessException;
+import com.moneyflowbackend.quickentry.parser.VietnameseTextNormalizer;
 import com.moneyflowbackend.voice.dto.VoiceQueryRequest;
 import com.moneyflowbackend.voice.dto.VoiceQueryResponse;
 import com.moneyflowbackend.voice.dto.VoiceReviewDraftResponse;
@@ -171,6 +172,6 @@ public class VoiceCommandService {
         if (text.length() > 500) {
             throw new BusinessException("VOICE_COMMAND_TEXT_TOO_LONG", "Voice command text is too long", HttpStatus.BAD_REQUEST);
         }
-        return text.trim().replaceAll("\\s+", " ");
+        return VietnameseTextNormalizer.compact(text);
     }
 }

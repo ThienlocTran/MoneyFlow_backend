@@ -333,7 +333,7 @@ public class VoiceReviewService {
         return VoiceReviewDraftResponse.DraftItem.builder()
                 .draftId(draftId)
                 .index(index)
-                .sourceText(sourceText)
+                .sourceText(normalize(sourceText))
                 .confidence(ready ? "HIGH" : "LOW")
                 .candidate(candidate)
                 .warnings(warnings(codes))
@@ -796,6 +796,7 @@ public class VoiceReviewService {
         if ("DEBT_NOT_FOUND".equals(code)) return "Choose an existing open debt before recording this payment.";
         if ("DEBT_CONFIRM_NOT_SUPPORTED".equals(code)) return "MoneyFlow understood this debt draft, but automatic debt saving is not enabled yet.";
         if ("DEBT_QUERY_USE_ASK_MODE".equals(code)) return "This is a debt question. MoneyFlow will answer read-only and will not create a transaction.";
+        if ("INCOME_AMOUNT_MISSING".equals(code)) return "Có dấu hiệu khoản thu nhập nhưng thiếu số tiền. Hãy sửa transcript hoặc nhập số tiền.";
         return switch (code) {
             case "MULTIPLE_AMOUNTS_DETECTED", "MULTIPLE_ITEMS_DETECTED" -> "Đã phát hiện nhiều khoản, hãy kiểm tra từng dòng trước khi lưu.";
             case "VOICE_MULTI_INTENT_DETECTED" -> "MoneyFlow phát hiện nhiều khoản trong một câu. Hãy kiểm tra từng dòng trước khi lưu.";

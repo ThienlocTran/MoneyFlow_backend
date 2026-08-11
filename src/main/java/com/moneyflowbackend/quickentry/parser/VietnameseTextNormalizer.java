@@ -11,7 +11,11 @@ public final class VietnameseTextNormalizer {
         if (value == null) {
             return "";
         }
-        return value.trim().replaceAll("\\s+", " ");
+        String normalized = Normalizer.normalize(value, Normalizer.Form.NFC)
+                .replaceAll("(?<=[\\p{L}])\\.(?=[\\p{L}])", ". ")
+                .replaceAll("(?i)\\bphẩy\\b\\.?\\s*$", "")
+                .replaceAll("(?i)\\bphay\\b\\.?\\s*$", "");
+        return Normalizer.normalize(normalized.trim().replaceAll("\\s+", " "), Normalizer.Form.NFC);
     }
 
     public static String comparable(String value) {

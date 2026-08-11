@@ -715,6 +715,7 @@ public class QuickEntryParser {
             return List.of();
         }
         List<QuickEntryPreviewResponse.Candidate> candidates = new ArrayList<>();
+        addLeadingMissingAmountIncomeCandidate(display, amountCandidates, transactionDate, transactionTime, candidates);
         for (int i = 0; i < amountCandidates.size(); i++) {
             QuickAmountParser.AmountCandidate amountCandidate = amountCandidates.get(i);
             String segment = amountSegment(display, amountCandidates, i);
@@ -915,6 +916,47 @@ public class QuickEntryParser {
                 .build());
     }
 
+    private void addLeadingMissingAmountIncomeCandidate(
+            String display,
+            List<QuickAmountParser.AmountCandidate> amountCandidates,
+            LocalDate transactionDate,
+            LocalTime transactionTime,
+            List<QuickEntryPreviewResponse.Candidate> candidates) {
+        if (amountCandidates.isEmpty()) {
+            return;
+        }
+        QuickAmountParser.AmountCandidate firstAmount = amountCandidates.get(0);
+        int separator = lastSeparator(display, firstAmount.start());
+        if (separator < 0) {
+            return;
+        }
+        String segment = displayText(display, 0, separator);
+        String normalizedSegment = VietnameseTextNormalizer.comparable(segment);
+        if (segment.isBlank() || !INCOME_WORDS.stream().anyMatch(word -> containsWordOrPhrase(normalizedSegment, word))) {
+            return;
+        }
+        String candidateId = candidateId(display, -1, segment, null);
+        candidates.add(QuickEntryPreviewResponse.Candidate.builder()
+                .candidateId(candidateId)
+                .clientCandidateId(candidateId)
+                .intentType(VoiceIntentType.TRANSACTION_INCOME)
+                .candidateStatus(VoiceCandidateStatus.NEEDS_REVIEW)
+                .ledgerEffect(VoiceLedgerEffect.DOES_NOT_AFFECT_WALLET)
+                .originalText(segment)
+                .description(VietnameseTextNormalizer.capitalize(segment))
+                .type(TransactionType.INCOME)
+                .transactionDate(transactionDate)
+                .transactionTime(transactionTime)
+                .confidence(0.45)
+                .readyToConfirm(false)
+                .commitSupported(false)
+                .affectsWalletBalance(false)
+                .validationStatus("NEEDS_REVIEW")
+                .missingFields(new ArrayList<>(List.of("AMOUNT")))
+                .warnings(new ArrayList<>(List.of("INCOME_AMOUNT_MISSING")))
+                .build());
+    }
+
     private VoiceIntentType detectPostAmountIntent(String normalizedTail) {
         if (hasAny(normalizedTail, "quy khan cap", "emergency fund", "khan cap")) return VoiceIntentType.EMERGENCY_FUND_CONTRIBUTION;
         if (hasAny(normalizedTail, "gui tiet kiem", "muc tieu tiet kiem", "tiet kiem cho", "vao muc tieu", "de danh")) return VoiceIntentType.SAVINGS_GOAL_CONTRIBUTION;
@@ -969,7 +1011,7 @@ public class QuickEntryParser {
         QuickAmountParser.AmountCandidate current = amountCandidates.get(index);
         int previousEnd = index == 0 ? 0 : amountCandidates.get(index - 1).end();
         int nextStart = index + 1 < amountCandidates.size() ? amountCandidates.get(index + 1).start() : display.length();
-        int commaStart = Math.max(display.lastIndexOf(',', current.start()), display.lastIndexOf(';', current.start()));
+        int commaStart = lastSeparator(display, current.start());
         int commaEnd = nextSeparator(display, current.end());
         int start = commaStart >= previousEnd ? commaStart + 1 : previousEnd;
         int end = commaEnd >= 0 && commaEnd <= nextStart ? commaEnd : current.end();
@@ -988,11 +1030,25 @@ public class QuickEntryParser {
     }
 
     private int nextSeparator(String display, int start) {
-        int comma = display.indexOf(',', start);
-        int semicolon = display.indexOf(';', start);
-        if (comma < 0) return semicolon;
-        if (semicolon < 0) return comma;
-        return Math.min(comma, semicolon);
+        for (int i = Math.max(0, start); i < display.length(); i++) {
+            if (isSeparator(display, i)) return i;
+        }
+        return -1;
+    }
+
+    private int lastSeparator(String display, int start) {
+        for (int i = Math.min(start - 1, display.length() - 1); i >= 0; i--) {
+            if (isSeparator(display, i)) return i;
+        }
+        return -1;
+    }
+
+    private boolean isSeparator(String display, int index) {
+        char ch = display.charAt(index);
+        if (ch == ',' || ch == ';' || ch == '!' || ch == '?') return true;
+        return ch == '.'
+                && (index == 0 || !Character.isDigit(display.charAt(index - 1)))
+                && (index + 1 >= display.length() || !Character.isDigit(display.charAt(index + 1)));
     }
 
     private String candidateDescription(String segment, QuickAmountParser.AmountCandidate amountCandidate) {

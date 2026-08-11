@@ -213,6 +213,32 @@ class VoiceReviewIntegrationTests {
     }
 
     @Test
+    void azurePartialIncomeClauseReturnsWarningAndTwoExpenseDrafts() {
+        TestContext ctx = context("voice_review_partial_income", WorkspaceRole.OWNER);
+        Category gas = category(ctx, "Xăng xe", CategoryType.EXPENSE);
+        Category food = category(ctx, "Ăn uống", CategoryType.EXPENSE);
+        keyword(ctx, gas, "xăng");
+        keyword(ctx, food, "ăn");
+
+        VoiceReviewDraftResponse response = voiceReviewService.parse(ctx.workspace().getId(),
+                parse("Lần này được kiếm được.Đổ xăng hết 6 chục ngàn thôi ăn hết 50.000.Phẩy."),
+                ctx.user().getId());
+
+        assertThat(response.getMode()).isEqualTo("MULTI");
+        assertThat(response.getDrafts()).hasSize(3);
+        assertThat(response.getDrafts()).extracting(draft -> draft.getCandidate().getType())
+                .containsExactly(VoiceReviewDraftType.INCOME_FACT, VoiceReviewDraftType.EXPENSE, VoiceReviewDraftType.EXPENSE);
+        assertThat(response.getDrafts().get(0).getCandidate().getAmount()).isNull();
+        assertThat(response.getDrafts().get(0).getWarnings()).extracting("code").contains("INCOME_AMOUNT_MISSING");
+        assertThat(response.getDrafts().get(1).getSourceText()).isEqualTo("Đổ xăng hết 6 chục ngàn");
+        assertThat(response.getDrafts().get(1).getSourceText()).doesNotContain("̂", "̀", "́");
+        assertThat(response.getDrafts()).extracting(draft -> draft.getCandidate().getAmount())
+                .containsExactly(null, new BigDecimal("60000"), new BigDecimal("50000"));
+        assertThat(response.getDrafts().get(1).getCandidate().getCategoryId()).isEqualTo(gas.getId());
+        assertThat(response.getDrafts().get(2).getCandidate().getCategoryId()).isEqualTo(food.getId());
+    }
+
+    @Test
     void patchDraftUpdatesFieldsWithoutCreatingTransaction() {
         Fixture fixture = fixture("voice_review_patch");
         VoiceRecord record = record(fixture.ctx(), VoiceRecordStatus.PARSED);
