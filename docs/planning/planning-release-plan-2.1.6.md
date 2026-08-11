@@ -1,6 +1,6 @@
 # Planning Backend Release Plan 2.1.6
 
-Status: P13E complete in backend code. P13F planning overview remains planned.
+Status: P13F complete in backend code. P13G release lock remains planned.
 
 ## Theme
 
@@ -37,7 +37,7 @@ MoneyFlow 2.1.6 should turn existing planning-adjacent backend pieces into a cle
 | P13C | Reserve allocation model + CRUD foundation | Complete: planning reserve table, workspace-scoped CRUD, release/cancel flow | Projection and cross-module dedupe | `ReserveAllocationApiIntegrationTests` | Reserve allocation can be created, read, updated, released, cancelled without wallet balance effects. |
 | P13D | Planning projection service | Complete: read-only projection formula, wallet ledger, planning reserves, planned obligations, warnings | Public overview API and frontend UI | `PlanningProjectionServiceTests` | Available ledger, reserves, upcoming, overdue, expected incoming, shortfall calculated correctly. |
 | P13E | Mark-paid/link-to-transaction behavior | Complete: link existing transaction and explicit mark-paid create flow | Auto-posting and undo paid | `PlannedObligationPaymentIntegrationTests` | Paid obligation links safely, same workspace only, no duplicate spend. |
-| P13F | Planning API overview + action item integration | `/planning/overview`, warnings/action items, stable DTOs | Notifications | Controller/API tests | Frontend can fetch projection, obligations, reserves, warnings. |
+| P13F | Planning API overview + action item integration | Complete: `/planning/overview`, projection endpoint, summaries, action items | Notifications and frontend UI | `PlanningOverviewApiIntegrationTests` | Frontend can fetch projection, obligations, reserves, warnings. |
 | P13G | Planning backend release lock | Targeted tests, docs, scans, release status | Full frontend UAT | Targeted release validation | Backend status honestly marked locked/partial/blocked. |
 
 ## Validation Strategy
@@ -153,6 +153,35 @@ Known P13E limitations:
 - Reserve usage workflow remains deferred.
 - Undo paid/reopen obligation remains deferred.
 - Amount mismatch is blocked in v1 and may be tuned later.
+
+## P13F Delivered
+
+- Added planning overview response DTOs.
+- Added `PlanningOverviewService`.
+- Added read-only planning endpoints:
+  - `GET /api/workspaces/{workspaceId}/planning/overview`
+  - `GET /api/workspaces/{workspaceId}/planning/projection`
+  - `GET /api/workspaces/{workspaceId}/planning/obligations/summary`
+  - `GET /api/workspaces/{workspaceId}/planning/reserves/summary`
+- Added query defaults: `asOfDate` defaults to current date, `horizonDays` defaults to `30`, valid horizon is `1..365`.
+- Added overview-local planning action items for overdue obligations, due-soon obligations, shortfall, low spendable, active reserves, and partial planning data.
+- Kept Financial Insight action-item service untouched; integration deferred.
+- Preserved read-only behavior: no transaction, obligation, or reserve mutation from overview/projection/summary GETs.
+
+Targeted validation:
+
+`.\mvnw.cmd "-Dtest=*PlanningOverview*Tests,*PlanningController*Tests,*PlanningApi*Tests,*PlanningProjection*Tests" test`
+
+Result: 20 tests passed, 0 failures, 0 errors, 0 skipped.
+
+Known P13F limitations:
+
+- Frontend UI not implemented yet.
+- Recurring obligation generation remains deferred.
+- Notification/reminder system remains deferred.
+- AI planning summary remains deferred.
+- Overview quality depends on user-entered obligations/reserves.
+- Mark-paid undo/reopen remains deferred.
 - Reserve does not move money between wallets.
 - Reserve release does not create income.
 - Available balance check warns because no reliable reserve-specific source is used in P13C.
@@ -199,4 +228,4 @@ Existing reusable pieces:
 
 ## Next Queue Item
 
-P13F - planning overview API and insight action integration.
+P13G - Planning backend release lock.

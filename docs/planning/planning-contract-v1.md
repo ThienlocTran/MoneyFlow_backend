@@ -1,6 +1,6 @@
 # Planning Backend Contract V1
 
-Status: P13E mark-paid/link-to-transaction implemented. API overview phase remains planned.
+Status: P13F planning overview API implemented. Release lock remains planned.
 
 ## Goals
 
@@ -134,6 +134,21 @@ Returns:
 - active reserves
 - warnings
 - action items
+
+P13F implements:
+
+- `GET /overview`
+- `GET /projection`
+- `GET /obligations/summary`
+- `GET /reserves/summary`
+
+Query defaults:
+
+- `asOfDate`: current date when omitted
+- `horizonDays`: default `30`, valid `1..365`
+- `includeInactive`: default `false`
+
+Overview response includes projection, obligation summary, reserve summary, upcoming/overdue obligations, active reserves, planning action items, and warnings.
 
 ### Obligations
 
@@ -483,6 +498,49 @@ Ledger rule:
 - link existing transaction creates no transaction
 - mark-paid creates exactly one transaction through `TransactionService`
 - due date alone never creates a transaction
+
+## P13F Implemented Foundation
+
+Endpoints:
+
+- `GET /api/workspaces/{workspaceId}/planning/overview`
+- `GET /api/workspaces/{workspaceId}/planning/projection`
+- `GET /api/workspaces/{workspaceId}/planning/obligations/summary`
+- `GET /api/workspaces/{workspaceId}/planning/reserves/summary`
+
+Overview response:
+
+- projection snapshot from P13D
+- obligation summary: upcoming/overdue/due-soon/paid/cancelled counts
+- reserve summary: active/released/cancelled amounts and counts
+- upcoming obligations list
+- overdue obligations list
+- active reserves list
+- deterministic planning action items
+- projection warnings
+
+Planning action items:
+
+- `PLANNING_OBLIGATION_OVERDUE`
+- `PLANNING_OBLIGATION_DUE_SOON`
+- `PROJECTED_SHORTFALL`
+- `LOW_ACTUALLY_SPENDABLE`
+- `ACTIVE_RESERVE_SUMMARY`
+- `PARTIAL_PLANNING_DATA`
+
+Read-only rule:
+
+- overview/projection/summary endpoints are GET-only
+- no transaction is created
+- no obligation is marked paid/cancelled
+- no reserve is released/cancelled
+- due-soon/overdue states are computed only
+
+Financial Insight integration:
+
+- not touched in P13F
+- planning action items are returned inside `PlanningOverviewResponse`
+- cross-module integration can be added later if needed
 
 ## Warning Codes
 

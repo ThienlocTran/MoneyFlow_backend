@@ -3,9 +3,14 @@ package com.moneyflowbackend.planning.controller;
 import com.moneyflowbackend.common.exception.BusinessException;
 import com.moneyflowbackend.dto.ApiResponse;
 import com.moneyflowbackend.planning.dto.ActuallySpendableResponse;
+import com.moneyflowbackend.planning.dto.PlanningObligationSummaryResponse;
+import com.moneyflowbackend.planning.dto.PlanningOverviewResponse;
 import com.moneyflowbackend.planning.dto.PlanningPreferenceRequest;
 import com.moneyflowbackend.planning.dto.PlanningPreferenceResponse;
+import com.moneyflowbackend.planning.dto.PlanningProjectionSnapshot;
+import com.moneyflowbackend.planning.dto.PlanningReserveSummaryResponse;
 import com.moneyflowbackend.planning.model.PlanningHorizon;
+import com.moneyflowbackend.planning.service.PlanningOverviewService;
 import com.moneyflowbackend.planning.service.PlanningPreferenceService;
 import com.moneyflowbackend.planning.service.PlanningService;
 import org.springframework.http.ResponseEntity;
@@ -27,10 +32,12 @@ import java.util.UUID;
 public class PlanningController {
     private final PlanningService planningService;
     private final PlanningPreferenceService preferenceService;
+    private final PlanningOverviewService overviewService;
 
-    public PlanningController(PlanningService planningService, PlanningPreferenceService preferenceService) {
+    public PlanningController(PlanningService planningService, PlanningPreferenceService preferenceService, PlanningOverviewService overviewService) {
         this.planningService = planningService;
         this.preferenceService = preferenceService;
+        this.overviewService = overviewService;
     }
 
     @GetMapping("/actually-spendable")
@@ -43,6 +50,42 @@ public class PlanningController {
         return ResponseEntity.ok(ApiResponse.ok(
                 "Planning loaded",
                 planningService.actuallySpendable(workspaceId, currentUserId(), parseHorizon(horizon), parseDate(from), parseDate(to), walletIds)));
+    }
+
+    @GetMapping("/overview")
+    public ResponseEntity<ApiResponse<PlanningOverviewResponse>> overview(
+            @PathVariable UUID workspaceId,
+            @RequestParam(required = false) String asOfDate,
+            @RequestParam(required = false) Integer horizonDays,
+            @RequestParam(defaultValue = "false") boolean includeInactive) {
+        return ResponseEntity.ok(ApiResponse.ok("Planning overview loaded",
+                overviewService.overview(workspaceId, parseDate(asOfDate), horizonDays, includeInactive, currentUserId())));
+    }
+
+    @GetMapping("/projection")
+    public ResponseEntity<ApiResponse<PlanningProjectionSnapshot>> projection(
+            @PathVariable UUID workspaceId,
+            @RequestParam(required = false) String asOfDate,
+            @RequestParam(required = false) Integer horizonDays) {
+        return ResponseEntity.ok(ApiResponse.ok("Planning projection loaded",
+                overviewService.projection(workspaceId, parseDate(asOfDate), horizonDays, currentUserId())));
+    }
+
+    @GetMapping("/obligations/summary")
+    public ResponseEntity<ApiResponse<PlanningObligationSummaryResponse>> obligationSummary(
+            @PathVariable UUID workspaceId,
+            @RequestParam(required = false) String asOfDate,
+            @RequestParam(required = false) Integer horizonDays) {
+        return ResponseEntity.ok(ApiResponse.ok("Planning obligation summary loaded",
+                overviewService.obligationSummary(workspaceId, parseDate(asOfDate), horizonDays, currentUserId())));
+    }
+
+    @GetMapping("/reserves/summary")
+    public ResponseEntity<ApiResponse<PlanningReserveSummaryResponse>> reserveSummary(
+            @PathVariable UUID workspaceId,
+            @RequestParam(defaultValue = "false") boolean includeInactive) {
+        return ResponseEntity.ok(ApiResponse.ok("Planning reserve summary loaded",
+                overviewService.reserveSummary(workspaceId, includeInactive, currentUserId())));
     }
 
     @GetMapping("/preferences")

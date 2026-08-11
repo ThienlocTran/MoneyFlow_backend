@@ -61,4 +61,17 @@ public interface PlannedObligationRepository extends JpaRepository<PlannedObliga
     List<PlannedObligation> findProjectionObligations(
             @Param("workspaceId") UUID workspaceId,
             @Param("to") LocalDate to);
+
+    @Query("""
+            SELECT o FROM PlannedObligation o
+            LEFT JOIN FETCH o.wallet
+            LEFT JOIN FETCH o.category
+            WHERE o.workspace.id = :workspaceId
+              AND o.deletedAt IS NULL
+              AND o.dueDate <= :to
+            ORDER BY o.dueDate ASC, o.createdAt ASC
+            """)
+    List<PlannedObligation> findOverviewObligations(
+            @Param("workspaceId") UUID workspaceId,
+            @Param("to") LocalDate to);
 }
