@@ -27,7 +27,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "MONEYFLOW_CLOUDINARY_API_SECRET=diagnostics-api-secret",
         "MONEYFLOW_CLOUDINARY_BASE_FOLDER=dev",
         "MONEYFLOW_ASR_PROVIDER=external_http",
-        "MONEYFLOW_ASR_SERVICE_URL=https://secret-asr.example/path?token=hidden"
+        "MONEYFLOW_ASR_SERVICE_URL=https://secret-asr.example/path?token=hidden",
+        "MONEYFLOW_ASR_TIMEOUT_SECONDS=60",
+        "MONEYFLOW_ASR_LANGUAGE=vi",
+        "AZURE_SPEECH_LANGUAGE=vi"
 })
 @AutoConfigureMockMvc
 @ActiveProfiles("test")

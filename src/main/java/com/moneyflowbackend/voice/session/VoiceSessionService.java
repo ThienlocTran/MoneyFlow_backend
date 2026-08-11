@@ -158,7 +158,8 @@ public class VoiceSessionService {
         requireActiveMember(workspaceId, userId);
         VoiceSession session = session(workspaceId, sessionId);
         if (asrProperties.provider() == VoiceAsrProviderType.NONE
-                || (asrProperties.provider() == VoiceAsrProviderType.EXTERNAL_HTTP && !asrProperties.externalServiceConfigured())) {
+                || (asrProperties.provider() == VoiceAsrProviderType.EXTERNAL_HTTP && !asrProperties.externalServiceConfigured())
+                || (asrProperties.provider() == VoiceAsrProviderType.AZURE_SPEECH && !asrProperties.azureSpeechConfigured())) {
             session.setAsrStatus(VoiceSessionAsrStatus.NOT_REQUESTED);
             session.setAsrWarningsJson(draftMapper.writeAsrWarnings(List.of(warning("ASR_NOT_CONFIGURED"))));
             session.setUpdatedAt(Instant.now());
@@ -554,7 +555,7 @@ public class VoiceSessionService {
             throw new BusinessException("ASR_FILE_TOO_LARGE", VoiceAsrMessages.message("ASR_FILE_TOO_LARGE"), HttpStatus.PAYLOAD_TOO_LARGE);
         }
         if (!asrProperties.allowedMimeTypes().contains(contentType(audio))) {
-            throw new BusinessException("ASR_UNSUPPORTED_FORMAT", VoiceAsrMessages.message("ASR_UNSUPPORTED_FORMAT"), HttpStatus.UNSUPPORTED_MEDIA_TYPE);
+            throw new BusinessException("ASR_UNSUPPORTED_AUDIO_FORMAT", VoiceAsrMessages.message("ASR_UNSUPPORTED_AUDIO_FORMAT"), HttpStatus.UNSUPPORTED_MEDIA_TYPE);
         }
         if (durationMs != null) {
             double seconds = durationMs / 1000d;

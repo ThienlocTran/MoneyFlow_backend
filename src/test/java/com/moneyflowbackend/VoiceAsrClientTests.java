@@ -1,6 +1,7 @@
 package com.moneyflowbackend;
 
 import com.moneyflowbackend.voice.asr.ExternalHttpVoiceAsrClient;
+import com.moneyflowbackend.voice.asr.AzureSpeechVoiceAsrClient;
 import com.moneyflowbackend.voice.asr.VoiceAsrProperties;
 import com.moneyflowbackend.voice.session.VoiceSessionAsrStatus;
 import org.junit.jupiter.api.Test;
@@ -78,14 +79,68 @@ class VoiceAsrClientTests {
         assertThat(result.warnings()).extracting("code").containsExactly("ASR_NOT_CONFIGURED");
     }
 
+    @Test
+    void azureSpeechMapsSuccess() {
+        CapturingHttpClient client = new CapturingHttpClient(200, """
+                {"RecognitionStatus":"Success","DisplayText":"Ăn sáng hết ba mươi lăm nghìn","NBest":[{"Confidence":0.91}]}
+                """);
+        AzureSpeechVoiceAsrClient provider = new AzureSpeechVoiceAsrClient(azureProperties("fake-key", "japaneast"), client);
+
+        var result = provider.transcribe(wavRequest());
+
+        assertThat(result.status()).isEqualTo(VoiceSessionAsrStatus.SUCCEEDED);
+        assertThat(result.transcript()).isEqualTo("Ăn sáng hết ba mươi lăm nghìn");
+        assertThat(client.uri.toString()).contains("https://japaneast.stt.speech.microsoft.com/");
+        assertThat(client.uri.toString()).contains("language=vi-VN");
+    }
+
+    @Test
+    void azureSpeechMissingKeyReturnsNotConfigured() {
+        AzureSpeechVoiceAsrClient provider = new AzureSpeechVoiceAsrClient(azureProperties("", "japaneast"), new CapturingHttpClient(200, "{}"));
+
+        var result = provider.transcribe(wavRequest());
+
+        assertThat(result.status()).isEqualTo(VoiceSessionAsrStatus.NOT_REQUESTED);
+        assertThat(result.warnings()).extracting("code").containsExactly("ASR_NOT_CONFIGURED");
+    }
+
+    @Test
+    void azureSpeechMapsAuthAndRateLimit() {
+        AzureSpeechVoiceAsrClient authProvider = new AzureSpeechVoiceAsrClient(azureProperties("fake-key", "japaneast"), new CapturingHttpClient(401, "{}"));
+        AzureSpeechVoiceAsrClient rateProvider = new AzureSpeechVoiceAsrClient(azureProperties("fake-key", "japaneast"), new CapturingHttpClient(429, "{}"));
+
+        assertThat(authProvider.transcribe(wavRequest()).warnings()).extracting("code").containsExactly("ASR_AUTH_FAILED");
+        assertThat(rateProvider.transcribe(wavRequest()).warnings()).extracting("code").containsExactly("ASR_RATE_LIMITED");
+    }
+
+    @Test
+    void azureSpeechRejectsUnsupportedAudio() {
+        AzureSpeechVoiceAsrClient provider = new AzureSpeechVoiceAsrClient(azureProperties("fake-key", "japaneast"), new CapturingHttpClient(200, "{}"));
+
+        var result = provider.transcribe(request());
+
+        assertThat(result.status()).isEqualTo(VoiceSessionAsrStatus.FAILED);
+        assertThat(result.warnings()).extracting("code").containsExactly("ASR_UNSUPPORTED_AUDIO_FORMAT");
+    }
+
     private VoiceAsrProperties properties(String url) {
-        return new VoiceAsrProperties("external_http", url, 60, 60, 0.8, 26214400, "vi", false,
+        return new VoiceAsrProperties("external_http", url, "", "", 60, 60, 0.8, 26214400, "vi", false,
+                "audio/webm,audio/ogg,audio/wav,audio/mpeg,audio/mp4,audio/x-m4a");
+    }
+
+    private VoiceAsrProperties azureProperties(String key, String region) {
+        return new VoiceAsrProperties("azure_speech", "", key, region, 30, 15, 0.8, 26214400, "vi-VN", false,
                 "audio/webm,audio/ogg,audio/wav,audio/mpeg,audio/mp4,audio/x-m4a");
     }
 
     private com.moneyflowbackend.voice.asr.VoiceAsrRequest request() {
         return new com.moneyflowbackend.voice.asr.VoiceAsrRequest(
                 UUID.randomUUID(), "audio".getBytes(StandardCharsets.UTF_8), "clip.webm", "audio/webm", "vi", false, true);
+    }
+
+    private com.moneyflowbackend.voice.asr.VoiceAsrRequest wavRequest() {
+        return new com.moneyflowbackend.voice.asr.VoiceAsrRequest(
+                UUID.randomUUID(), "audio".getBytes(StandardCharsets.UTF_8), "clip.wav", "audio/wav", "vi-VN", false, true);
     }
 
     private static class CapturingHttpClient extends BaseHttpClient {

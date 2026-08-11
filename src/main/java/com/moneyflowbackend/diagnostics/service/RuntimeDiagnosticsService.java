@@ -88,8 +88,9 @@ public class RuntimeDiagnosticsService {
                                 voiceAsrProperties.provider().name(),
                                 voiceAsrProperties.provider() != VoiceAsrProviderType.NONE,
                                 voiceAsrProperties.provider() == VoiceAsrProviderType.MOCK
-                                        || (voiceAsrProperties.provider() == VoiceAsrProviderType.EXTERNAL_HTTP && voiceAsrProperties.externalServiceConfigured()),
-                                voiceAsrProperties.externalServiceConfigured(),
+                                        || (voiceAsrProperties.provider() == VoiceAsrProviderType.EXTERNAL_HTTP && voiceAsrProperties.externalServiceConfigured())
+                                        || (voiceAsrProperties.provider() == VoiceAsrProviderType.AZURE_SPEECH && voiceAsrProperties.azureSpeechConfigured()),
+                                voiceAsrProperties.externalServiceConfigured() || voiceAsrProperties.azureSpeechConfigured(),
                                 voiceAsrProperties.timeoutSeconds(),
                                 voiceAsrProperties.language(),
                                 voiceAsrProperties.maxFileBytes(),

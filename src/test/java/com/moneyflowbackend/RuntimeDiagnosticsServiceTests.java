@@ -26,7 +26,7 @@ class RuntimeDiagnosticsServiceTests {
                 new DisabledVoiceAudioStorageService(),
                 new DisabledAvatarStorageService(),
                 new ReceiptOcrProperties("none", 5, 5242880, 30, ""),
-                new VoiceAsrProperties("external_http", "https://secret.example/asr?token=hidden", 60, 60, 0.8, 26214400, "vi", false,
+                new VoiceAsrProperties("external_http", "https://secret.example/asr?token=hidden", "", "", 60, 60, 0.8, 26214400, "vi", false,
                         "audio/webm,audio/ogg,audio/wav,audio/mpeg,audio/mp4,audio/x-m4a"),
                 "cloudinary",
                 "cloudinary",

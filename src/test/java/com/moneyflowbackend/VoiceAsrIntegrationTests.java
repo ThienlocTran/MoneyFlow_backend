@@ -106,7 +106,7 @@ class VoiceAsrIntegrationTests {
                         .file(file("clip.txt", "text/plain", "abc"))
                         .header("Authorization", bearer(owner.token())))
                 .andExpect(status().isUnsupportedMediaType())
-                .andExpect(jsonPath("$.code").value("ASR_UNSUPPORTED_FORMAT"));
+                .andExpect(jsonPath("$.code").value("ASR_UNSUPPORTED_AUDIO_FORMAT"));
 
         mockMvc.perform(multipart("/api/workspaces/{workspaceId}/voice-sessions/{sessionId}/transcribe", owner.workspace().getId(), sessionId)
                         .file(file("clip.webm", "audio/webm", "abcd"))

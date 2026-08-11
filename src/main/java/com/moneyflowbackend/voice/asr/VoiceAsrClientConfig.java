@@ -12,6 +12,7 @@ public class VoiceAsrClientConfig {
         return switch (properties.provider()) {
             case MOCK -> new MockVoiceAsrClient();
             case EXTERNAL_HTTP -> new ExternalHttpVoiceAsrClient(properties, HttpClient.newHttpClient());
+            case AZURE_SPEECH -> new AzureSpeechVoiceAsrClient(properties, HttpClient.newHttpClient());
             case NONE -> new NoopVoiceAsrClient();
         };
     }

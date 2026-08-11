@@ -11,6 +11,8 @@ import java.util.stream.Collectors;
 public class VoiceAsrProperties {
     private final VoiceAsrProviderType provider;
     private final String serviceUrl;
+    private final String azureSpeechKey;
+    private final String azureSpeechRegion;
     private final int timeoutSeconds;
     private final double maxAudioSeconds;
     private final double minAudioSeconds;
@@ -22,15 +24,19 @@ public class VoiceAsrProperties {
     public VoiceAsrProperties(
             @Value("${MONEYFLOW_ASR_PROVIDER:none}") String provider,
             @Value("${MONEYFLOW_ASR_SERVICE_URL:http://localhost:8092}") String serviceUrl,
+            @Value("${AZURE_SPEECH_KEY:}") String azureSpeechKey,
+            @Value("${AZURE_SPEECH_REGION:}") String azureSpeechRegion,
             @Value("${MONEYFLOW_ASR_TIMEOUT_SECONDS:60}") int timeoutSeconds,
             @Value("${MONEYFLOW_ASR_MAX_AUDIO_SECONDS:60}") double maxAudioSeconds,
             @Value("${MONEYFLOW_ASR_MIN_AUDIO_SECONDS:0.8}") double minAudioSeconds,
             @Value("${MONEYFLOW_ASR_MAX_FILE_BYTES:26214400}") long maxFileBytes,
-            @Value("${MONEYFLOW_ASR_LANGUAGE:vi}") String language,
+            @Value("${AZURE_SPEECH_LANGUAGE:${MONEYFLOW_ASR_LANGUAGE:vi}}") String language,
             @Value("${MONEYFLOW_ASR_RETURN_SEGMENTS:false}") boolean returnSegments,
             @Value("${MONEYFLOW_ASR_ALLOWED_MIME_TYPES:audio/webm,audio/ogg,audio/wav,audio/mpeg,audio/mp4,audio/x-m4a}") String allowedMimeTypes) {
         this.provider = parseProvider(provider);
         this.serviceUrl = serviceUrl == null ? "" : serviceUrl.trim();
+        this.azureSpeechKey = azureSpeechKey == null ? "" : azureSpeechKey.trim();
+        this.azureSpeechRegion = azureSpeechRegion == null ? "" : azureSpeechRegion.trim();
         this.timeoutSeconds = Math.max(1, timeoutSeconds);
         this.maxAudioSeconds = Math.max(0.1, maxAudioSeconds);
         this.minAudioSeconds = Math.max(0, minAudioSeconds);
@@ -50,6 +56,18 @@ public class VoiceAsrProperties {
 
     public boolean externalServiceConfigured() {
         return !serviceUrl.isBlank();
+    }
+
+    public boolean azureSpeechConfigured() {
+        return !azureSpeechKey.isBlank() && !azureSpeechRegion.isBlank();
+    }
+
+    public String azureSpeechKey() {
+        return azureSpeechKey;
+    }
+
+    public String azureSpeechRegion() {
+        return azureSpeechRegion;
     }
 
     public int timeoutSeconds() {
