@@ -1,6 +1,6 @@
 # Receipt OCR Contract V1
 
-Status: backend contract for 2.1.4. Backend locked; live Azure UAT pending.
+Status: backend contract for 2.1.4. Backend locked; Azure local setup documented.
 
 ## Product Guardrail
 
@@ -106,12 +106,12 @@ Configuration placeholders:
 
 - `MONEYFLOW_RECEIPT_OCR_PROVIDER=azure_document_intelligence`
 - `AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT=<endpoint>`
-- `AZURE_DOCUMENT_INTELLIGENCE_KEY=<secret>`
+- `AZURE_DOCUMENT_INTELLIGENCE_KEY` from local `.env`
 - `AZURE_DOCUMENT_INTELLIGENCE_MODEL_ID=prebuilt-receipt`
 - `AZURE_DOCUMENT_INTELLIGENCE_API_VERSION=2024-11-30`
 - `MONEYFLOW_RECEIPT_OCR_TIMEOUT_SECONDS=45`
-- `MONEYFLOW_RECEIPT_OCR_POLL_INTERVAL_MS=1000`
-- `MONEYFLOW_RECEIPT_OCR_MAX_POLL_ATTEMPTS=30`
+- `MONEYFLOW_RECEIPT_OCR_POLL_INTERVAL_MS=1500`
+- `MONEYFLOW_RECEIPT_OCR_MAX_POLL_ATTEMPTS=20`
 
 Request strategy:
 
@@ -461,6 +461,7 @@ Implemented shape:
 
 - Live Azure UAT requires a real configured Azure Document Intelligence resource and was not part of automated tests.
 - Session OCR depends on the stored receipt URL when image bytes are unavailable.
+- Local Azure setup guide: `docs/receipt-ocr/azure-document-intelligence-setup.md`.
 
 ## P11E/P11F Known Limitations
 

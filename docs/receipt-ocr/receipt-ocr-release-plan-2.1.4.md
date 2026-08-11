@@ -1,6 +1,6 @@
 # Receipt OCR Release Plan 2.1.4
 
-Status: backend locked; live Azure UAT pending.
+Status: backend locked; Azure local setup documented.
 
 ## Product Guardrail
 
@@ -201,3 +201,11 @@ Known limitations:
 - Automated receipt/transaction and receipt/voice validation passed.
 - Live Azure OCR UAT not executed because it requires a local Azure Document Intelligence resource/key.
 - Frontend UI remains deferred and is not claimed by this backend release.
+
+## Azure Local Setup Delivered
+
+- Added `docs/receipt-ocr/azure-document-intelligence-setup.md`.
+- Added `.env.example` placeholders for Azure Document Intelligence.
+- Local `.env` can use resource endpoint `https://moneyflow-doc-intelligence.cognitiveservices.azure.com`.
+- Defaults: model `prebuilt-receipt`, API version `2024-11-30`, timeout `45s`, poll interval `1500ms`, max poll attempts `20`.
+- Real smoke remains manual and requires a local key plus a reachable uploaded receipt image URL.

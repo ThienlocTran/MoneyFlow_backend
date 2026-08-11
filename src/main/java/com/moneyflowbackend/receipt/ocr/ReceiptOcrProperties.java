@@ -24,15 +24,15 @@ public class ReceiptOcrProperties {
             @Value("${MONEYFLOW_RECEIPT_OCR_PROVIDER:none}") String provider,
             @Value("${MONEYFLOW_RECEIPT_OCR_MAX_IMAGES:5}") int maxImages,
             @Value("${MONEYFLOW_RECEIPT_OCR_MAX_IMAGE_BYTES:5242880}") long maxImageBytes,
-            @Value("${MONEYFLOW_RECEIPT_OCR_TIMEOUT_SECONDS:30}") int timeoutSeconds,
+            @Value("${MONEYFLOW_RECEIPT_OCR_TIMEOUT_SECONDS:45}") int timeoutSeconds,
             @Value("${MONEYFLOW_RECEIPT_OCR_SERVICE_URL:}") String serviceUrl,
             @Value("${MONEYFLOW_RECEIPT_OCR_LANGUAGE:vi}") String language,
             @Value("${AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT:}") String azureEndpoint,
             @Value("${AZURE_DOCUMENT_INTELLIGENCE_KEY:}") String azureKey,
             @Value("${AZURE_DOCUMENT_INTELLIGENCE_MODEL_ID:prebuilt-receipt}") String azureModelId,
             @Value("${AZURE_DOCUMENT_INTELLIGENCE_API_VERSION:2024-11-30}") String azureApiVersion,
-            @Value("${MONEYFLOW_RECEIPT_OCR_POLL_INTERVAL_MS:1000}") long pollIntervalMs,
-            @Value("${MONEYFLOW_RECEIPT_OCR_MAX_POLL_ATTEMPTS:30}") int maxPollAttempts) {
+            @Value("${MONEYFLOW_RECEIPT_OCR_POLL_INTERVAL_MS:1500}") long pollIntervalMs,
+            @Value("${MONEYFLOW_RECEIPT_OCR_MAX_POLL_ATTEMPTS:20}") int maxPollAttempts) {
         this.provider = parseProvider(provider);
         this.maxImages = Math.max(1, maxImages);
         this.maxImageBytes = Math.max(1, maxImageBytes);
@@ -48,11 +48,11 @@ public class ReceiptOcrProperties {
     }
 
     public ReceiptOcrProperties(String provider, int maxImages, long maxImageBytes, int timeoutSeconds, String serviceUrl) {
-        this(provider, maxImages, maxImageBytes, timeoutSeconds, serviceUrl, "vi", "", "", "prebuilt-receipt", "2024-11-30", 1000, 30);
+        this(provider, maxImages, maxImageBytes, timeoutSeconds, serviceUrl, "vi", "", "", "prebuilt-receipt", "2024-11-30", 1500, 20);
     }
 
     public ReceiptOcrProperties(String provider, int maxImages, long maxImageBytes, int timeoutSeconds, String serviceUrl, String language) {
-        this(provider, maxImages, maxImageBytes, timeoutSeconds, serviceUrl, language, "", "", "prebuilt-receipt", "2024-11-30", 1000, 30);
+        this(provider, maxImages, maxImageBytes, timeoutSeconds, serviceUrl, language, "", "", "prebuilt-receipt", "2024-11-30", 1500, 20);
     }
 
     public ReceiptOcrProviderType provider() {
