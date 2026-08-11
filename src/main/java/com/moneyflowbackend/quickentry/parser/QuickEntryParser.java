@@ -215,8 +215,6 @@ public class QuickEntryParser {
                 wallet = walletMatch.wallet();
                 matchedWalletText = walletMatch.text();
                 removableSpans.add(new Span(walletMatch.start(), walletMatch.end()));
-            } else if (type == TransactionType.INCOME) {
-                missing.add("walletId");
             } else if (type == TransactionType.EXPENSE) {
                 if (WALLET_HINT.matcher(normalized).find()) {
                     missing.add("walletId");
@@ -1185,7 +1183,7 @@ public class QuickEntryParser {
             return false;
         }
         if (type == TransactionType.INCOME) {
-            return amount != null && wallet != null && transactionDate != null;
+            return amount != null && transactionDate != null;
         }
         if (type == TransactionType.EXPENSE) {
             return amount != null && category != null && wallet != null && transactionDate != null;

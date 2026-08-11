@@ -344,6 +344,7 @@ class CategoryBoardApiIntegrationTests {
         assertThat(board.jars()).extracting("jarId").containsExactly(ownJar.getId());
         assertThat(board.jars().getFirst().categories()).extracting("categoryId").containsExactly(own.getId());
         assertThat(board.uncategorizedGroup().categories()).extracting("categoryId").containsExactly(broken.getId());
+        assertThat(board.jars().getFirst().categories()).extracting("categoryId").doesNotContain(broken.getId());
         assertThat(board.warnings()).contains("CATEGORY_BOARD_PARTIAL_DATA");
         assertThat(board.toString()).doesNotContain(otherJar.getName(), "Other category");
         assertThat(categoryRepository.countByWorkspaceId(owner.workspace().getId())).isEqualTo(categoryCount);

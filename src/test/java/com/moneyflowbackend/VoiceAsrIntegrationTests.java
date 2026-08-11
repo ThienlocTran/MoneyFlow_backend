@@ -61,7 +61,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest(properties = {
         "MONEYFLOW_ASR_PROVIDER=mock",
-        "MONEYFLOW_ASR_MAX_FILE_BYTES=3"
+        "MONEYFLOW_ASR_MAX_FILE_BYTES=3",
+        "MONEYFLOW_ASR_MAX_AUDIO_SECONDS=15"
 })
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
@@ -120,6 +121,20 @@ class VoiceAsrIntegrationTests {
                         .header("Authorization", bearer(owner.token())))
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.code").value("ASR_AUDIO_TOO_SHORT"));
+
+        mockMvc.perform(multipart("/api/workspaces/{workspaceId}/voice-sessions/{sessionId}/transcribe", owner.workspace().getId(), sessionId)
+                        .file(file("clip.webm", "audio/webm", "abc"))
+                        .param("durationMs", "16100")
+                        .header("Authorization", bearer(owner.token())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.asrStatus").value("SUCCEEDED"));
+
+        mockMvc.perform(multipart("/api/workspaces/{workspaceId}/voice-sessions/{sessionId}/transcribe", owner.workspace().getId(), sessionId)
+                        .file(file("clip.webm", "audio/webm", "abc"))
+                        .param("durationMs", "17000")
+                        .header("Authorization", bearer(owner.token())))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("ASR_AUDIO_TOO_LONG"));
     }
 
     @Test

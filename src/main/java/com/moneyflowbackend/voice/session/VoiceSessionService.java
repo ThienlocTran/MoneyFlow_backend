@@ -45,6 +45,7 @@ import java.util.UUID;
 
 @Service
 public class VoiceSessionService {
+    private static final double AUDIO_DURATION_TOLERANCE_SECONDS = 1.5d;
     private final VoiceSessionRepository voiceSessionRepository;
     private final VoiceSessionDraftRepository voiceSessionDraftRepository;
     private final WorkspaceRepository workspaceRepository;
@@ -609,7 +610,7 @@ public class VoiceSessionService {
             if (seconds < asrProperties.minAudioSeconds()) {
                 throw new BusinessException("ASR_AUDIO_TOO_SHORT", VoiceAsrMessages.message("ASR_AUDIO_TOO_SHORT"), HttpStatus.UNPROCESSABLE_ENTITY);
             }
-            if (seconds > asrProperties.maxAudioSeconds()) {
+            if (seconds > asrProperties.maxAudioSeconds() + AUDIO_DURATION_TOLERANCE_SECONDS) {
                 throw new BusinessException("ASR_AUDIO_TOO_LONG", VoiceAsrMessages.message("ASR_AUDIO_TOO_LONG"), HttpStatus.UNPROCESSABLE_ENTITY);
             }
         }
