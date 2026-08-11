@@ -209,7 +209,7 @@ class VoiceSessionIntegrationTests {
                 .andExpect(jsonPath("$.data.mode").value("MULTI_DRAFT_REVIEW"))
                 .andExpect(jsonPath("$.data.drafts.length()").value(4))
                 .andExpect(jsonPath("$.data.drafts[0].draftIndex").value(0))
-                .andExpect(jsonPath("$.data.drafts[0].type").value("INCOME_FACT"))
+                .andExpect(jsonPath("$.data.drafts[0].type").value("INCOME"))
                 .andExpect(jsonPath("$.data.drafts[0].walletRequired").value(false))
                 .andExpect(jsonPath("$.data.drafts[0].affectsWalletBalance").value(false))
                 .andExpect(jsonPath("$.data.drafts[1].type").value("EXPENSE"))
@@ -223,7 +223,7 @@ class VoiceSessionIntegrationTests {
         assertSafety(cash, before);
         assertThat(voiceSessionDraftRepository.findAllByVoiceSessionIdOrderByDraftIndexAsc(UUID.fromString(sessionId)))
                 .extracting("type")
-                .containsExactly("INCOME_FACT", "EXPENSE", "EXPENSE", "SAVINGS_ALLOCATION");
+                .containsExactly("INCOME", "EXPENSE", "EXPENSE", "SAVINGS_ALLOCATION");
     }
 
     @Test

@@ -156,7 +156,7 @@ class VoiceSessionConfirmIntegrationTests {
         keyword(owner.workspace(), fuel, "xăng");
         String sessionId = interpretedSession(owner, "Hôm nay đã kiếm được 800 Tôi ăn hết 50 Cái đổ xăng hết 65.000 Ta gửi tiết kiệm hết 35");
         var drafts = voiceSessionDraftRepository.findAllByVoiceSessionIdOrderByDraftIndexAsc(UUID.fromString(sessionId));
-        assertThat(drafts).extracting("type").containsExactly("INCOME_FACT", "EXPENSE", "EXPENSE", "SAVINGS_ALLOCATION");
+        assertThat(drafts).extracting("type").containsExactly("INCOME", "EXPENSE", "EXPENSE", "SAVINGS_ALLOCATION");
 
         mockMvc.perform(post("/api/workspaces/{workspaceId}/voice-sessions/{sessionId}/drafts/{draftId}/confirm",
                         owner.workspace().getId(), sessionId, drafts.get(3).getId())
@@ -181,10 +181,10 @@ class VoiceSessionConfirmIntegrationTests {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.confirmedCount").value(0))
+                .andExpect(jsonPath("$.data.confirmedCount").value(1))
                 .andExpect(jsonPath("$.data.sessionStatus").value("PARTIALLY_CONFIRMED"));
 
-        assertThat(transactionRepository.count()).isEqualTo(1);
+        assertThat(transactionRepository.count()).isEqualTo(2);
     }
 
     @Test

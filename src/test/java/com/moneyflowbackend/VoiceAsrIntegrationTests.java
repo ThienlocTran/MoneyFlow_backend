@@ -222,7 +222,7 @@ class VoiceAsrIntegrationTests {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.mode").value("MULTI_DRAFT_REVIEW"))
                 .andExpect(jsonPath("$.data.drafts.length()").value(4))
-                .andExpect(jsonPath("$.data.drafts[0].type").value("INCOME_FACT"))
+                .andExpect(jsonPath("$.data.drafts[0].type").value("INCOME"))
                 .andExpect(jsonPath("$.data.drafts[1].type").value("EXPENSE"))
                 .andExpect(jsonPath("$.data.drafts[2].type").value("EXPENSE"))
                 .andExpect(jsonPath("$.data.drafts[2].categoryId").value(fuel.getId().toString()))
@@ -231,7 +231,7 @@ class VoiceAsrIntegrationTests {
         assertSafety(cash, before);
         assertThat(voiceSessionDraftRepository.findAllByVoiceSessionIdOrderByDraftIndexAsc(UUID.fromString(sessionId)))
                 .extracting("type")
-                .containsExactly("INCOME_FACT", "EXPENSE", "EXPENSE", "SAVINGS_ALLOCATION");
+                .containsExactly("INCOME", "EXPENSE", "EXPENSE", "SAVINGS_ALLOCATION");
     }
 
     private VoiceAsrTranscribeResult success(String transcript) {

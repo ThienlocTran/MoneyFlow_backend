@@ -26,6 +26,7 @@ import com.moneyflowbackend.voice.service.VoiceReviewService;
 import com.moneyflowbackend.wallet.model.Wallet;
 import com.moneyflowbackend.wallet.model.WalletType;
 import com.moneyflowbackend.wallet.repository.WalletRepository;
+import com.moneyflowbackend.wallet.service.WalletBalanceService;
 import com.moneyflowbackend.workspace.model.Workspace;
 import com.moneyflowbackend.workspace.model.WorkspaceMember;
 import com.moneyflowbackend.workspace.model.WorkspaceRole;
@@ -58,6 +59,7 @@ class VoiceReviewIntegrationTests {
     @Autowired IncomeSourceRepository incomeSourceRepository;
     @Autowired VoiceRecordRepository voiceRecordRepository;
     @Autowired TransactionRepository transactionRepository;
+    @Autowired WalletBalanceService walletBalanceService;
 
     @Test
     void parseExpenseReturnsEditableDraftWithoutCommitting() {
@@ -90,7 +92,7 @@ class VoiceReviewIntegrationTests {
 
         assertThat(response.getMode()).isEqualTo("SINGLE");
         assertThat(response.getDrafts()).hasSize(1);
-        assertThat(response.getCandidate().getType()).isEqualTo(VoiceReviewDraftType.INCOME_FACT);
+        assertThat(response.getCandidate().getType()).isEqualTo(VoiceReviewDraftType.INCOME);
         assertThat(response.getCandidate().getAmount()).isEqualByComparingTo("800000");
         assertThat(response.getCandidate().getWalletId()).isNull();
         assertThat(response.getCandidate().isAffectsWalletBalance()).isFalse();
@@ -109,7 +111,7 @@ class VoiceReviewIntegrationTests {
         assertThat(response.getWarnings()).contains("MULTIPLE_AMOUNTS_DETECTED");
         assertThat(response.getDrafts()).hasSize(4);
         assertThat(response.getDrafts()).extracting(draft -> draft.getCandidate().getType())
-                .containsExactly(VoiceReviewDraftType.INCOME_FACT, VoiceReviewDraftType.EXPENSE, VoiceReviewDraftType.EXPENSE, VoiceReviewDraftType.SAVINGS_ALLOCATION);
+                .containsExactly(VoiceReviewDraftType.INCOME, VoiceReviewDraftType.EXPENSE, VoiceReviewDraftType.EXPENSE, VoiceReviewDraftType.SAVINGS_ALLOCATION);
         assertThat(response.getDrafts()).extracting(draft -> draft.getCandidate().getAmount())
                 .containsExactly(new BigDecimal("800000"), new BigDecimal("60000"), new BigDecimal("50000"), new BigDecimal("85000"));
         assertThat(response.getDrafts().get(0).getCandidate().getWalletId()).isNull();
@@ -138,7 +140,7 @@ class VoiceReviewIntegrationTests {
         assertThat(response.getWarnings()).contains("VOICE_MULTI_INTENT_DETECTED");
         assertThat(response.getDrafts()).hasSize(4);
         assertThat(response.getDrafts()).extracting(draft -> draft.getCandidate().getType())
-                .containsExactly(VoiceReviewDraftType.INCOME_FACT, VoiceReviewDraftType.EXPENSE, VoiceReviewDraftType.EXPENSE, VoiceReviewDraftType.SAVINGS_ALLOCATION);
+                .containsExactly(VoiceReviewDraftType.INCOME, VoiceReviewDraftType.EXPENSE, VoiceReviewDraftType.EXPENSE, VoiceReviewDraftType.SAVINGS_ALLOCATION);
         assertThat(response.getDrafts()).extracting(draft -> draft.getCandidate().getAmount())
                 .containsExactly(new BigDecimal("800000"), new BigDecimal("50000"), new BigDecimal("65000"), new BigDecimal("35000"));
         assertThat(response.getDrafts().get(0).getCandidate().isWalletRequired()).isFalse();
@@ -163,7 +165,7 @@ class VoiceReviewIntegrationTests {
         assertThat(response.getMode()).isEqualTo("MULTI");
         assertThat(response.getDrafts()).hasSize(3);
         assertThat(response.getDrafts()).extracting(draft -> draft.getCandidate().getType())
-                .containsExactly(VoiceReviewDraftType.INCOME_FACT, VoiceReviewDraftType.EXPENSE, VoiceReviewDraftType.EXPENSE);
+                .containsExactly(VoiceReviewDraftType.INCOME, VoiceReviewDraftType.EXPENSE, VoiceReviewDraftType.EXPENSE);
         assertThat(response.getDrafts()).extracting(draft -> draft.getCandidate().getAmount())
                 .containsExactly(new BigDecimal("600000"), new BigDecimal("80000"), new BigDecimal("30000"));
         assertThat(response.getDrafts().get(1).getCandidate().getCategoryId()).isEqualTo(gas.getId());
@@ -187,7 +189,7 @@ class VoiceReviewIntegrationTests {
         assertThat(response.getDrafts()).extracting(draft -> draft.getCandidate().getAmount())
                 .contains(new BigDecimal("600000"), new BigDecimal("80000"), new BigDecimal("30000"));
         assertThat(response.getDrafts()).extracting(draft -> draft.getCandidate().getType())
-                .contains(VoiceReviewDraftType.INCOME_FACT, VoiceReviewDraftType.EXPENSE);
+                .contains(VoiceReviewDraftType.INCOME, VoiceReviewDraftType.EXPENSE);
     }
 
     @Test
@@ -227,7 +229,7 @@ class VoiceReviewIntegrationTests {
         assertThat(response.getMode()).isEqualTo("MULTI");
         assertThat(response.getDrafts()).hasSize(3);
         assertThat(response.getDrafts()).extracting(draft -> draft.getCandidate().getType())
-                .containsExactly(VoiceReviewDraftType.INCOME_FACT, VoiceReviewDraftType.EXPENSE, VoiceReviewDraftType.EXPENSE);
+                .containsExactly(VoiceReviewDraftType.INCOME, VoiceReviewDraftType.EXPENSE, VoiceReviewDraftType.EXPENSE);
         assertThat(response.getDrafts().get(0).getCandidate().getAmount()).isNull();
         assertThat(response.getDrafts().get(0).getWarnings()).extracting("code").contains("INCOME_AMOUNT_MISSING");
         assertThat(response.getDrafts().get(1).getSourceText()).isEqualTo("Đổ xăng hết 6 chục ngàn");
@@ -346,19 +348,20 @@ class VoiceReviewIntegrationTests {
 
         VoiceReviewDraftResponse response = voiceReviewService.parse(ctx.workspace().getId(), parse("hom nay toi kiem duoc 800"), ctx.user().getId());
 
-        assertThat(response.getCandidate().getType()).isEqualTo(VoiceReviewDraftType.INCOME_FACT);
+        assertThat(response.getCandidate().getType()).isEqualTo(VoiceReviewDraftType.INCOME);
         assertThat(response.getCandidate().getWalletId()).isNull();
         assertThat(response.getCandidate().isAffectsWalletBalance()).isFalse();
         assertThat(response.getCandidate().getNeedsFields()).doesNotContain("walletId");
     }
 
     @Test
-    void confirmIncomeFactWithoutWalletDoesNotAffectWalletAndIsIdempotent() {
+    void confirmIncomeWithoutWalletDoesNotAffectWalletAndIsIdempotent() {
         Fixture fixture = fixture("vr_income_fact");
         VoiceRecord record = record(fixture.ctx(), VoiceRecordStatus.PARSED);
+        BigDecimal before = walletBalanceService.calculateCurrentBalance(fixture.cash().getId());
 
         VoiceReviewConfirmRequest req = new VoiceReviewConfirmRequest();
-        req.setCandidate(draft(VoiceReviewDraftType.INCOME_FACT, "800000", null, null, null, "income fact"));
+        req.setCandidate(draft(VoiceReviewDraftType.INCOME, "800000", null, null, null, "income"));
 
         VoiceReviewConfirmResponse first = voiceReviewService.confirm(fixture.ctx().workspace().getId(), record.getId(), req, fixture.ctx().user().getId());
         VoiceReviewConfirmResponse second = voiceReviewService.confirm(fixture.ctx().workspace().getId(), record.getId(), req, fixture.ctx().user().getId());
@@ -366,6 +369,8 @@ class VoiceReviewIntegrationTests {
         assertThat(second.getTransactionId()).isEqualTo(first.getTransactionId());
         assertThat(first.getTransaction().getWalletId()).isNull();
         assertThat(first.getTransaction().isAffectsWalletBalance()).isFalse();
+        assertThat(first.getTransaction().getType()).isEqualTo("INCOME");
+        assertThat(walletBalanceService.calculateCurrentBalance(fixture.cash().getId())).isEqualByComparingTo(before);
         assertThat(transactionRepository.findAllByWorkspaceIdAndVoiceRecordIdAndSourceTypeOrderByCreatedAtAsc(
                 fixture.ctx().workspace().getId(), record.getId(), com.moneyflowbackend.transaction.model.TransactionSourceType.VOICE)).hasSize(1);
     }
@@ -401,7 +406,7 @@ class VoiceReviewIntegrationTests {
     }
 
     @Test
-    void mixedIncomeFactSnapshotAndExpenseReturnSeparateDraftTypes() {
+    void mixedIncomeSnapshotAndExpenseReturnSeparateDraftTypes() {
         TestContext ctx = context("voice_review_mixed_snapshot", WorkspaceRole.OWNER);
         Wallet mb = wallet(ctx, "MB Bank");
         Category food = category(ctx, "An uong", CategoryType.EXPENSE);
@@ -412,7 +417,7 @@ class VoiceReviewIntegrationTests {
 
         assertThat(response.getMode()).isEqualTo("MULTI");
         assertThat(response.getDrafts()).extracting(draft -> draft.getCandidate().getType())
-                .containsExactly(VoiceReviewDraftType.INCOME_FACT, VoiceReviewDraftType.WALLET_SNAPSHOT, VoiceReviewDraftType.EXPENSE);
+                .containsExactly(VoiceReviewDraftType.INCOME, VoiceReviewDraftType.WALLET_SNAPSHOT, VoiceReviewDraftType.EXPENSE);
         assertThat(response.getDrafts().get(1).getCandidate().getWalletId()).isEqualTo(mb.getId());
         assertThat(response.getDrafts().get(2).getCandidate().getCategoryId()).isEqualTo(food.getId());
     }

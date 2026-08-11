@@ -525,6 +525,7 @@ public class TransactionService {
         BigDecimal amount = requireAmount(req.getAmount());
         WorkspacePerson person = resolvePersonForWrite(workspaceId, req.getAttributedPersonId(), true);
 
+        boolean affectsWalletBalance = affectsWalletBalance(type, req.getWalletId(), req.getAffectsWalletBalance());
         Transaction tx = Transaction.builder()
                 .workspace(workspace)
                 .createdByUser(user)
@@ -546,7 +547,7 @@ public class TransactionService {
                 .voiceSessionDraftId(voiceSessionDraftId)
                 .walletUnknown(false)
                 .historical(false)
-                .affectsWalletBalance(req.getAffectsWalletBalance() == null ? true : req.getAffectsWalletBalance())
+                .affectsWalletBalance(affectsWalletBalance)
                 .build();
         if (voiceRecordId != null) {
             voiceRecordRepository.findByIdAndWorkspaceId(voiceRecordId, workspaceId)
@@ -576,7 +577,7 @@ public class TransactionService {
             return mapToResponse(tx);
         }
 
-        boolean walletRequired = type != TransactionType.INCOME || !Boolean.FALSE.equals(req.getAffectsWalletBalance());
+        boolean walletRequired = type != TransactionType.INCOME || affectsWalletBalance;
         Wallet wallet = resolveWallet(workspaceId, req.getWalletId(), walletRequired, true, "WALLET_NOT_FOUND");
         Category category = resolveCategory(workspaceId, req.getCategoryId(), type, false, true);
         tx.setSpendingScope(resolveSpendingScopeForCreate(type, normalizedSourceType, req, category));
@@ -691,10 +692,12 @@ public class TransactionService {
             return mapToResponse(tx);
         }
 
-        Wallet wallet = resolveWalletForUpdate(workspaceId, tx.getWallet(), req.getWalletId(), true, newStatus, postingNow);
+        boolean affectsWalletBalance = affectsWalletBalance(requestedType, req.getWalletId(), req.getAffectsWalletBalance());
+        Wallet wallet = resolveWalletForUpdate(workspaceId, tx.getWallet(), req.getWalletId(), requestedType != TransactionType.INCOME || affectsWalletBalance, newStatus, postingNow);
         Category category = resolveCategoryForUpdate(workspaceId, tx.getCategory(), req.getCategoryId(), tx.getTransactionType(), true, newStatus, postingNow);
         tx.setWallet(wallet);
         tx.setCategory(category);
+        tx.setAffectsWalletBalance(affectsWalletBalance);
         tx.setSpendingScope(resolveSpendingScopeForUpdate(requestedType, req, tx));
         tx = transactionRepository.save(tx);
         transactionAuditService.record(tx, userId, TransactionAuditAction.UPDATE, before, transactionAuditService.snapshot(tx));
@@ -797,6 +800,13 @@ public class TransactionService {
             throw new BusinessException("INVALID_AMOUNT", "Amount must be greater than 0");
         }
         return amount;
+    }
+
+    private boolean affectsWalletBalance(TransactionType type, UUID walletId, Boolean requested) {
+        if (type == TransactionType.INCOME) {
+            return walletId != null;
+        }
+        return requested == null || requested;
     }
 
     private LocalDate today(Workspace workspace) {

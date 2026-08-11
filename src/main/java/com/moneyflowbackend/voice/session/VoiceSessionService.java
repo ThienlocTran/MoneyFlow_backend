@@ -433,7 +433,7 @@ public class VoiceSessionService {
 
     private String validationCode(VoiceSessionDraft draft, VoiceSessionConfirmDraftRequest req) {
         if (amount(draft, req) == null || amount(draft, req).signum() <= 0) return "VOICE_DRAFT_AMOUNT_REQUIRED";
-        if (walletId(draft, req) == null) return "VOICE_DRAFT_WALLET_REQUIRED";
+        if (draft.isWalletRequired() && walletId(draft, req) == null) return "VOICE_DRAFT_WALLET_REQUIRED";
         if ("EXPENSE".equals(draft.getType()) && categoryId(draft, req) == null) return "VOICE_DRAFT_CATEGORY_REQUIRED";
         return null;
     }
@@ -455,7 +455,7 @@ public class VoiceSessionService {
         txReq.setTransactionTime(occurredTime(req));
         txReq.setDescription(note(draft, req));
         txReq.setNote(note(draft, req));
-        txReq.setAffectsWalletBalance(Boolean.TRUE.equals(draft.getAffectsWalletBalance()) || draft.getAffectsWalletBalance() == null);
+        txReq.setAffectsWalletBalance(!"INCOME".equals(draft.getType()) || walletId(draft, req) != null);
         UUID voiceRecordId = session.getSourceType() == VoiceSessionSourceType.AUDIO
                 ? ensureSessionVoiceRecord(session, null).getId()
                 : null;
