@@ -450,3 +450,44 @@ Actual P9B browser audio path:
 ### Release Result
 
 P9A backend audio contract is fixed, and the P9B-HARNESS browser recording UAT runs successfully using fake media. The warning copy issue (VOICE-P9B-002) is resolved. The system is ready for mock pipeline voice beta. Real PhoWhisper model integration smoke remains separate.
+
+## P9D - Real Browser Audio Capture Fix
+
+Date: 2026-08-04
+
+### Root Cause
+
+Real browser capture could produce a playable blob while still leaving the app unable to explain the failure layer. The frontend sent the blob without a stable filename, measured duration with coarse one-second ticks, did not hard-block chunkless or likely-silent audio, and showed only generic ASR-empty copy when transcript was blank.
+
+### Fix
+
+- Frontend multipart upload now sends a deterministic filename from the audio MIME type, for example `voice-recording.webm`.
+- Duration is measured with `performance.now()` and sent as milliseconds to the backend.
+- Audio quality gate now checks blob size, chunk count, duration, peak/average level, and silence ratio before transcribe.
+- Likely-silent, empty, too-short, and too-long audio stop before `/transcribe`.
+- Collapsed diagnostics show safe fields only: redacted session id, MIME type, duration, size, chunks, peak/avg level, silence ratio, ASR status, and warning codes.
+- No parser, confirm executor, legacy endpoint, transaction posting, or fake transcript behavior was changed.
+
+### Validation
+
+| Check | Result |
+| --- | --- |
+| Frontend `pnpm run type-check` | PASS |
+| Frontend `pnpm run scan:mojibake` | PASS |
+| Frontend `pnpm run build` | PASS |
+
+### UAT Evidence
+
+Real mic browser UAT was not rerun in this code pass. The fix adds the instrumentation needed to distinguish silent capture, wrong blob upload, backend/ASR failure, and empty transcript on the next live run.
+
+Expected P9D rerun evidence to collect:
+
+- actual `mimeType`
+- blob size
+- duration in ms
+- chunk count
+- peak/avg level
+- silence ratio
+- `/transcribe` result
+- `asrStatus`
+- transcript and draft count

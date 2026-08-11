@@ -202,6 +202,48 @@ Status:
 
 - RESOLVED.
 
+### VOICE-P9D-001
+
+Title: Real browser recording can create audio but still leave transcript empty without layer evidence
+
+Severity: P1
+
+Layer classification: FRONTEND_CAPTURE / FRONTEND_STATE
+
+Steps to reproduce:
+
+1. Open `/dashboard`.
+2. Record 5-10 seconds with real microphone.
+3. Stop and review the audio/transcript state.
+
+Expected:
+
+- Valid audible audio sends `/voice-sessions`, `/transcribe`, then `/interpret` when transcript is non-empty.
+- Silent, empty, too-short, too-long, or chunkless audio is blocked before ASR with a specific message.
+- Diagnostics identify MIME type, duration, blob size, chunks, levels, silence ratio, and ASR status.
+
+Actual before fix:
+
+- Audio player could appear while transcript stayed empty.
+- UI did not clearly identify whether the issue was silent capture, wrong upload shape, backend/ASR failure, or empty transcript.
+
+Root cause:
+
+- Browser blob upload lacked a deterministic filename.
+- Duration was coarse one-second state rather than precise recording duration.
+- Quality gate did not hard-block chunkless or likely-silent audio.
+- Diagnostic panel missed chunk count, silence ratio, ASR status, and warning codes.
+
+Resolution:
+
+- Added MIME-derived audio filename on multipart upload.
+- Added precise duration, chunk count, RMS-assisted mic levels, silence ratio, hard blocks, friendly failure states, and redacted diagnostics.
+- Parser, confirm executor, and transaction posting were unchanged.
+
+Status:
+
+- FIXED IN FRONTEND. Real mic UAT rerun still required for beta evidence.
+
 ### VOICE-P8F-RERUN-001
 
 Title: Live audio mock transcribe fails through backend external_http ASR path

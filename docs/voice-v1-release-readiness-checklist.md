@@ -95,3 +95,19 @@ P9A root cause: Java `HttpClient` attempted HTTP/2 cleartext upgrade (`h2c`) aga
 | Backend voice tests | PASS | Targeted backend voice tests pass (102 tests). |
 
 Beta readiness: YES for mock pipeline and fake-media verification. Real PhoWhisper model integration smoke remains separate.
+
+## P9D Status
+
+| Gate | Status | Evidence |
+| --- | --- | --- |
+| Stable audio filename | PASS | Frontend multipart upload sends a MIME-derived filename such as `voice-recording.webm` |
+| Precise duration | PASS | Recording duration uses `performance.now()` milliseconds, not one-second ticks |
+| Empty/chunkless audio gate | PASS | Size and chunk count are checked before transcribe |
+| Silent audio gate | PASS | Peak/average level and silence ratio can block likely-silent recordings before ASR |
+| Safe diagnostics | PASS | Collapsed panel shows redacted session id, MIME type, duration, size, chunks, peak/avg level, silence ratio, ASR status, warning codes |
+| Frontend validation | PASS | `pnpm run type-check`, `pnpm run scan:mojibake`, `pnpm run build` |
+| Real mic browser UAT | NOT RUN | Needs rerun on `/dashboard` or `/financial-inbox` with real microphone |
+| Fake-media UAT after P9D | NOT RUN | Existing P9B harness remains valid but was not rerun after this patch |
+| Real PhoWhisper smoke | NOT RUN | Separate P10 evidence still required |
+
+Beta readiness: NO for real-mic audio evidence until P9D browser UAT reruns. Mock/fake-media pipeline evidence remains green from P9B-HARNESS.
