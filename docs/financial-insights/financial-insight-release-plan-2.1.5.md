@@ -1,6 +1,6 @@
 # Financial Insight Release Plan 2.1.5
 
-Status: P12D complete in backend code. Public insight APIs remain planned.
+Status: P12E complete in backend code. Public insight APIs remain planned.
 
 ## Theme
 
@@ -34,7 +34,7 @@ Deferred:
 | P12B | Insight metric query layer | Complete | Queries are workspace-scoped, date-range aware, exclude deleted/draft/planned/void, preserve debt/transfer rules. |
 | P12C | Spending/category/jar insight rules | Complete | Cards include evidence, severity, confidence, thresholds, and exclusions. |
 | P12D | Actually spendable calculation backend | Complete | Uses wallet balance, reserve, and obligation sources and states exclusions. |
-| P12E | Action items/data quality insights | Planned | Action items route to existing modules and never mutate data. |
+| P12E | Action items/data quality insights | Complete | Action items route to existing modules and never mutate data. |
 | P12F | Insight API endpoints | Planned | Endpoints return stable DTOs, membership checked, no writes, no fake data. |
 | P12G | Release lock | Planned | Targeted suites and release scans pass or limitations are documented. |
 
@@ -121,12 +121,39 @@ Deferred:
 - empty data
 - VND currency convention
 
+## P12E Delivered
+
+- Added internal action item DTOs and report model.
+- Added `FinancialActionItemQueryService`.
+- Added `FinancialActionItemService`.
+- Implemented grouped cleanup/data quality items for missing category, missing wallet, no-wallet income, voice drafts, receipt/OCR drafts, debt due dates, historical analytics-only rows, and P12D spendable warnings.
+- Added severity mapping and deterministic ranking with default max 10 items.
+- Kept public API work deferred.
+
+## P12E Test Coverage
+
+`FinancialActionItemServiceTests` covers:
+
+- grouped missing category warning
+- small missing category info behavior
+- no-wallet income info behavior
+- expense missing wallet warning
+- pending voice draft action
+- pending receipt/OCR review actions
+- negative and low actually-spendable actions
+- reserve/upcoming obligation data quality mappings
+- debt missing due date
+- historical data excluded
+- ranking and max items
+- workspace-scoped dependency calls
+- empty state
+
 ## Validation Strategy
 
 - P12B: `FinancialInsightMetricQueryServiceTests` plus transaction regression suite.
 - P12C: `FinancialInsightRuleServiceTests`.
 - P12D: `FinancialInsightActuallySpendableServiceTests`.
-- P12E: action item tests for missing fields and stale data.
+- P12E: `FinancialActionItemServiceTests`.
 - P12F: controller integration tests for membership, no writes, and empty states.
 - P12G: targeted insight, dashboard, planning, transaction, voice, and receipt smoke suites.
 
@@ -143,4 +170,4 @@ Deferred:
 
 ## Next Queue Item
 
-P12E - action items and data quality insights.
+P12F - financial insight API endpoints.

@@ -1,6 +1,6 @@
 # Financial Insight Contract V1
 
-Status: P12D internal actually-spendable snapshot calculation implemented. Public insight APIs are not implemented yet.
+Status: P12E internal action item and data quality detection implemented. Public insight APIs are not implemented yet.
 
 ## Guardrails
 
@@ -105,6 +105,45 @@ Data sources:
 - No-wallet income: current-month no-wallet income metric, warning only.
 
 No public controller is added in P12D.
+
+## P12E Action Item Service
+
+`FinancialActionItemService` produces grouped internal action items and data quality warnings.
+
+Implemented action item types:
+
+- `TRANSACTION_MISSING_CATEGORY`
+- `TRANSACTION_MISSING_WALLET`
+- `INCOME_WITHOUT_WALLET`
+- `VOICE_DRAFT_PENDING`
+- `RECEIPT_DRAFT_PENDING`
+- `OCR_REVIEW_REQUIRED`
+- `DEBT_MISSING_DUE_DATE`
+- `RESERVE_DATA_MISSING`
+- `UPCOMING_OBLIGATION_DATA_MISSING`
+- `NEGATIVE_ACTUALLY_SPENDABLE`
+- `LOW_ACTUALLY_SPENDABLE`
+- `HISTORICAL_DATA_EXCLUDED_FROM_WALLET`
+- `DATA_QUALITY_PARTIAL`
+
+Internal model:
+
+- `FinancialActionItem`
+- `FinancialActionItemReport`
+- `FinancialActionMetric`
+- `ActionItemType`
+
+Data sources:
+
+- Posted expenses missing category or wallet.
+- P12B no-wallet income metric.
+- Pending voice session drafts.
+- Pending receipt session drafts and incomplete or low-confidence OCR drafts.
+- Open payable debts missing due date.
+- Historical analytics-only transactions.
+- P12D actually-spendable snapshot warnings.
+
+No public controller is added in P12E.
 
 ## Metric Formulas
 
@@ -220,6 +259,22 @@ Ranking and dedup:
 - Missing payable obligation data yields `UPCOMING_OBLIGATION_DATA_UNAVAILABLE` and `PARTIAL_DATA`.
 - Obligations without expected amount are excluded and reported through partial-data warnings.
 
+## P12E Action Item Rules
+
+- Missing expense category is grouped into one item; warning when count >= 3 or amount >= `200000 VND`.
+- Expense missing wallet is a warning.
+- Income without wallet is informational, not an error.
+- Pending voice drafts are informational; warning when count >= 3.
+- Pending receipt drafts are informational.
+- OCR review is warning when required fields are missing or confidence is low.
+- Payable debts without due date create a warning.
+- Historical analytics-only rows create an informational data quality item.
+- Negative actually spendable creates a critical item.
+- Low positive actually spendable below `500000 VND` creates a warning.
+- Reserve and upcoming obligation missing-data warnings map to informational action items.
+- Similar records are grouped; default maximum is 10 items.
+- Ranking is severity first, then amount/count, then deterministic key.
+
 ## Security Rules
 
 - Metric service methods are internal and filter by `workspaceId`.
@@ -234,6 +289,8 @@ Ranking and dedup:
 - No public insight API endpoints yet.
 - No anomaly detection beyond deterministic P12C spending spike rules.
 - No public actually-spendable insight endpoint until P12F.
+- No public action item endpoint until P12F.
 - Metrics depend on existing transaction classification correctness.
 - Jar budget comparison is deferred because jars do not have a monthly budget amount.
 - Calculation quality depends on reserve and obligation data completeness.
+- Action routes are internal placeholders for future frontend mapping.
