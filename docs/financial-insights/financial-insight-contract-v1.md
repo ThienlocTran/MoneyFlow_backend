@@ -1,11 +1,11 @@
 # Financial Insight Contract V1
 
-Status: P12F public read-only insight APIs implemented.
+Status: P12G backend locked. P12F public read-only insight APIs are implemented and covered by targeted Financial Insight tests.
 
 ## Guardrails
 
 - Read-only: insight code must not create, edit, delete, or infer financial records.
-- Workspace-scoped: every query filters by `workspaceId`; future API endpoints must also verify active workspace membership.
+- Workspace-scoped: every query filters by `workspaceId`; public API endpoints verify active workspace membership before insight service calls.
 - Evidence-backed: later cards must cite metric values, date ranges, and exclusions.
 - No fake runtime data: empty backend data returns empty or zero metrics.
 - No AI calls in the 2.1.5 backend foundation.
@@ -71,6 +71,25 @@ P12F exposes frontend-facing response records under `insight.dto.response`:
 - shared period, totals, breakdown, card, action item, and no-wallet income response records
 
 No-wallet income response copy is informational: it says the amount still counts in income statistics but does not increase wallet balance.
+
+## P12G Release Evidence
+
+Backend release status: COMPLETE / BACKEND LOCKED.
+
+Targeted validation command:
+
+`.\mvnw.cmd "-Dtest=*FinancialInsight*Tests,*Insight*Tests,*Metric*Tests,*SpendingInsight*Tests,*CategoryInsight*Tests,*JarInsight*Tests,*ActuallySpendable*Tests,*Spendable*Tests,*ActionItem*Tests,*DataQuality*Tests,*FinancialInsightController*Tests,*FinancialInsightApi*Tests,*InsightApi*Tests" test`
+
+Result: 51 tests passed, 0 failures, 0 errors, 0 skipped.
+
+Release boundary:
+
+- backend/API only
+- no frontend dashboard claim
+- no AI/LLM generation
+- no notification or scheduled jobs
+- no fake runtime data
+- no write side effects from insight API endpoints
 
 ## P12B Metric Query Service
 

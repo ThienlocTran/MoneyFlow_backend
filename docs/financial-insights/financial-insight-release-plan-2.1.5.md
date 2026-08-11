@@ -1,6 +1,6 @@
 # Financial Insight Release Plan 2.1.5
 
-Status: P12F complete in backend code. Release lock remains planned.
+Status: COMPLETE / BACKEND LOCKED for backend Financial Insight 2.1.5. Frontend UI remains deferred.
 
 ## Theme
 
@@ -36,7 +36,30 @@ Deferred:
 | P12D | Actually spendable calculation backend | Complete | Uses wallet balance, reserve, and obligation sources and states exclusions. |
 | P12E | Action items/data quality insights | Complete | Action items route to existing modules and never mutate data. |
 | P12F | Insight API endpoints | Complete | Endpoints return stable DTOs, membership checked, no writes, no fake data. |
-| P12G | Release lock | Planned | Targeted suites and release scans pass or limitations are documented. |
+| P12G | Release lock | Complete | Targeted insight suites and release scans pass; backend limitations are documented. |
+
+## P12G Release Lock
+
+Backend status: COMPLETE / BACKEND LOCKED.
+
+P12G verified:
+
+- P12A audit and contract docs exist.
+- P12B metric query layer exists and is tested.
+- P12C deterministic insight rules exist and are tested.
+- P12D actually-spendable calculation exists and is tested.
+- P12E action item/data quality service exists and is tested.
+- P12F read-only API endpoints exist and are tested.
+- Workspace membership is checked by the API controller.
+- No frontend UI, AI calls, scheduled jobs, or notification work is claimed.
+
+Targeted validation:
+
+`.\mvnw.cmd "-Dtest=*FinancialInsight*Tests,*Insight*Tests,*Metric*Tests,*SpendingInsight*Tests,*CategoryInsight*Tests,*JarInsight*Tests,*ActuallySpendable*Tests,*Spendable*Tests,*ActionItem*Tests,*DataQuality*Tests,*FinancialInsightController*Tests,*FinancialInsightApi*Tests,*InsightApi*Tests" test`
+
+Result: 51 tests passed, 0 failures, 0 errors, 0 skipped.
+
+Release status remains backend-only because the insight dashboard UI is deferred.
 
 ## P12F Delivered
 
@@ -187,7 +210,7 @@ Targeted validation command:
 - P12D: `FinancialInsightActuallySpendableServiceTests`.
 - P12E: `FinancialActionItemServiceTests`.
 - P12F: controller integration tests for membership, no writes, and empty states.
-- P12G: targeted insight, dashboard, planning, transaction, voice, and receipt smoke suites.
+- P12G: targeted Financial Insight tests only; no broad dashboard, planning, transaction, voice, or receipt suites were run.
 
 ## Risk Register
 
@@ -202,4 +225,4 @@ Targeted validation command:
 
 ## Next Queue Item
 
-P12F - financial insight API endpoints.
+P13A - Planning backend audit.
