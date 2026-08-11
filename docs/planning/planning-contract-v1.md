@@ -1,6 +1,6 @@
 # Planning Backend Contract V1
 
-Status: PLANNED / NOT IMPLEMENTED. P13A defines the contract only.
+Status: P13B planned obligation CRUD foundation implemented. Projection/reserve/mark-paid phases remain planned.
 
 ## Goals
 
@@ -132,9 +132,11 @@ Returns:
 
 Query:
 
-- `from`
-- `to`
+- `from` optional, `YYYY-MM-DD`
+- `to` optional, `YYYY-MM-DD`
 - `status` optional
+- `priority` optional
+- `includeCancelled` optional, default `false`
 
 `POST /obligations`
 
@@ -142,7 +144,15 @@ Creates a planned obligation. Must not create a transaction or affect wallet bal
 
 `PATCH /obligations/{obligationId}`
 
-Updates planned obligation fields. Must not mutate linked transaction data.
+Updates planned obligation fields. Must not mutate linked transaction data. Cancelled obligations cannot be updated.
+
+`GET /obligations/{obligationId}`
+
+Returns one planned obligation in the workspace.
+
+`POST /obligations/{obligationId}/cancel`
+
+Sets status to `CANCELLED`. Second cancel is idempotent. Paid reversal is deferred.
 
 `POST /obligations/{obligationId}/mark-paid`
 
@@ -151,6 +161,8 @@ Later behavior:
 - if linking an existing posted transaction, set status `PAID` and `linkedTransactionId`
 - if creating a transaction, route through normal transaction service by explicit user action
 - no auto-posting from due date alone
+
+Status: deferred to P13E.
 
 ### Reserves
 
@@ -197,9 +209,33 @@ Releases reserve. It increases actually spendable but does not create income.
 
 `PlannedObligationResponse`:
 
-- fields from `PlannedObligation`
-- `sourceType`: `ONE_OFF`, `RECURRING_OCCURRENCE`, `DEBT`
-- `evidence`
+- `id`
+- `workspaceId`
+- `name`
+- `amount`
+- `currency`
+- `dueDate`
+- `status`
+- `computedState`
+- `priority`
+- `walletId`, `walletName`
+- `categoryId`, `categoryName`
+- `jarId`, `jarName` derived through category
+- `note`
+- `recurrenceType`
+- `linkedTransactionId`
+- `createdAt`
+- `updatedAt`
+
+P13B stores `recurrenceType` but does not generate recurring rows.
+
+Computed state:
+
+- `PAID` if status is `PAID`
+- `CANCELLED` if status is `CANCELLED`
+- `OVERDUE` if status is `PLANNED` and due date is before today
+- `DUE_SOON` if due date is today through 7 days from today
+- `UPCOMING` otherwise
 
 `ReserveAllocationResponse`:
 
@@ -222,6 +258,38 @@ Releases reserve. It increases actually spendable but does not create income.
 - Drafts do not affect planning until confirmed if current product rules say so.
 - Historical rows with `affectsWalletBalance=false` do not affect wallet balance or spendable money.
 - Recurrence generation must be bounded by a clear horizon.
+
+## P13B Implemented Foundation
+
+Table: `planned_obligations`
+
+Fields implemented:
+
+- workspace/user references
+- name, amount, currency, due date
+- status: `PLANNED`, `PAID`, `CANCELLED`
+- priority: `REQUIRED`, `IMPORTANT`, `OPTIONAL`
+- recurrence type: `NONE`, `WEEKLY`, `MONTHLY`, `YEARLY`
+- optional wallet/category references
+- optional linked transaction reference reserved for P13E
+- note, cancel reason, cancelled timestamp, timestamps, soft-delete column, version
+
+Validation:
+
+- name required, trimmed, max 120
+- amount required and greater than zero
+- currency defaults to `VND`, must be 3 uppercase letters
+- due date required
+- priority defaults to `REQUIRED`
+- recurrence type defaults to `NONE`
+- wallet/category must belong to the same workspace
+- cancelled obligations cannot be patched
+- paid obligations cannot be cancelled in P13B
+
+Ledger rule:
+
+- create/update/cancel planned obligation does not create or mutate transactions
+- wallet balance is unchanged by planned obligation CRUD
 
 ## Warning Codes
 

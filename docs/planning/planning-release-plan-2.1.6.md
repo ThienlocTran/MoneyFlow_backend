@@ -1,6 +1,6 @@
 # Planning Backend Release Plan 2.1.6
 
-Status: PLANNED / NOT IMPLEMENTED. P13A audit and contract only.
+Status: P13B complete in backend code. P13C reserve allocation remains planned.
 
 ## Theme
 
@@ -33,7 +33,7 @@ MoneyFlow 2.1.6 should turn existing planning-adjacent backend pieces into a cle
 | Phase | Goal | Scope | Deferred | Tests | Acceptance criteria |
 | --- | --- | --- | --- | --- | --- |
 | P13A | Planning backend audit + contract | Docs, model map, API proposal, risk register | Runtime code | Docs validation only | Audit/contract/plan/release docs exist and do not claim implementation. |
-| P13B | Planned obligation model + CRUD foundation | One-off planned obligation or thin wrapper around recurring occurrences, workspace-scoped CRUD | Projection and UI | Repository/service/controller tests | Planned obligation can be created, read, updated, cancelled without wallet balance effects. |
+| P13B | Planned obligation model + CRUD foundation | Complete: one-off planned obligation table, workspace-scoped CRUD, validation, cancel flow | Projection and UI | `PlannedObligationApiIntegrationTests` | Planned obligation can be created, read, updated, cancelled without wallet balance effects. |
 | P13C | Reserve allocation model + CRUD foundation | Unified planning reserve or integration contract over sinking/savings/emergency reserves | Cross-module dedupe beyond v1 | Reserve service/API tests | Active reserves reduce spendable; release does not create income. |
 | P13D | Planning projection service | Projection formula, warnings, debt/obligation/reserve inputs | Frontend UI | Projection service tests | Available ledger, reserves, upcoming, overdue, expected incoming, shortfall calculated correctly. |
 | P13E | Mark-paid/link-to-transaction behavior | Link obligation to posted transaction or explicit transaction creation path | Auto-posting | Transaction/linking tests | Paid obligation links safely, same workspace only, no duplicate spend. |
@@ -51,6 +51,31 @@ MoneyFlow 2.1.6 should turn existing planning-adjacent backend pieces into a cle
 - P13G: targeted Planning backend tests only, release scans, docs lock.
 
 No full Maven suite is required during queue phases unless specifically requested.
+
+## P13B Delivered
+
+- Added `planned_obligations` Flyway migration.
+- Added planned obligation entity, status/priority/recurrence/computed-state enums.
+- Added repository search capped at 100 rows.
+- Added service validation and same-workspace wallet/category checks.
+- Added CRUD/list/detail/cancel endpoints under `/api/workspaces/{workspaceId}/planning/obligations`.
+- Added computed state mapping: upcoming, due soon, overdue, paid, cancelled.
+- Stored recurrence type but deferred recurrence generation.
+- Preserved ledger invariants: no transactions are created or modified by planned-obligation CRUD.
+
+Targeted validation:
+
+`.\mvnw.cmd "-Dtest=*PlannedObligation*Tests,*PlanningObligation*Tests" test`
+
+Result: 9 tests passed, 0 failures, 0 errors, 0 skipped.
+
+Known P13B limitations:
+
+- No reserve allocation until P13C.
+- No projection engine integration until P13D.
+- No mark-paid/link-to-transaction until P13E.
+- No recurrence generation.
+- No frontend UI change.
 
 ## Acceptance Rules
 
