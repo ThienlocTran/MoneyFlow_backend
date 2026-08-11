@@ -3,6 +3,11 @@ package com.moneyflowbackend.receipt.session;
 import com.moneyflowbackend.auth.model.User;
 import com.moneyflowbackend.auth.repository.UserRepository;
 import com.moneyflowbackend.common.exception.BusinessException;
+import com.moneyflowbackend.receipt.ocr.ReceiptImageInput;
+import com.moneyflowbackend.receipt.ocr.ReceiptOcrResult;
+import com.moneyflowbackend.receipt.ocr.ReceiptOcrService;
+import com.moneyflowbackend.receipt.ocr.ReceiptOcrStatus;
+import com.moneyflowbackend.receipt.service.ReceiptTextParser;
 import com.moneyflowbackend.receipt.session.storage.ReceiptImageStorageService;
 import com.moneyflowbackend.receipt.session.storage.StoredReceiptImage;
 import com.moneyflowbackend.workspace.model.Workspace;
@@ -23,6 +28,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
+import java.text.Normalizer;
+import java.util.regex.Pattern;
 
 @Service
 public class ReceiptSessionService {
@@ -35,8 +42,11 @@ public class ReceiptSessionService {
     private final WorkspaceMemberRepository workspaceMemberRepository;
     private final UserRepository userRepository;
     private final ReceiptImageStorageService storageService;
+    private final ReceiptOcrService ocrService;
+    private final ReceiptTextParser receiptTextParser;
     private final Clock clock;
     private final long maxImageBytes;
+    private static final Pattern MANY_BLANK_LINES = Pattern.compile("\\n{3,}");
 
     public ReceiptSessionService(
             ReceiptSessionRepository receiptSessionRepository,
@@ -44,6 +54,8 @@ public class ReceiptSessionService {
             WorkspaceMemberRepository workspaceMemberRepository,
             UserRepository userRepository,
             ReceiptImageStorageService storageService,
+            ReceiptOcrService ocrService,
+            ReceiptTextParser receiptTextParser,
             Clock clock,
             @Value("${MONEYFLOW_RECEIPT_MAX_IMAGE_BYTES:8388608}") long maxImageBytes) {
         this.receiptSessionRepository = receiptSessionRepository;
@@ -51,6 +63,8 @@ public class ReceiptSessionService {
         this.workspaceMemberRepository = workspaceMemberRepository;
         this.userRepository = userRepository;
         this.storageService = storageService;
+        this.ocrService = ocrService;
+        this.receiptTextParser = receiptTextParser;
         this.clock = clock;
         this.maxImageBytes = Math.max(1, maxImageBytes);
     }
@@ -97,6 +111,68 @@ public class ReceiptSessionService {
             session.setImageStorageStatus(ReceiptImageStorageStatus.STORAGE_FAILED);
             session.setWarningsJson(writeWarnings(List.of(warning("RECEIPT_STORAGE_FAILED"), warning("OCR_NOT_REQUESTED"))));
         }
+        return detail(receiptSessionRepository.save(session));
+    }
+
+    @Transactional
+    public ReceiptSessionDetailResponse runOcr(UUID workspaceId, UUID sessionId, UUID userId) {
+        requireActiveMember(workspaceId, userId);
+        ReceiptSession session = session(workspaceId, sessionId);
+        if (session.getImageContentType() == null || session.getImageSizeBytes() == null || session.getImageSizeBytes() <= 0) {
+            session.setOcrStatus(ReceiptSessionOcrStatus.NOT_REQUESTED);
+            session.setWarningsJson(writeWarnings(List.of(warning("RECEIPT_IMAGE_REQUIRED"))));
+            return detail(receiptSessionRepository.save(session));
+        }
+
+        ReceiptOcrResult result = ocrService.extractText(List.of(new ReceiptImageInput(
+                0,
+                session.getImageOriginalFilename(),
+                session.getImageContentType(),
+                session.getImageSizeBytes(),
+                new byte[0])));
+        session.setOcrProvider(result.provider().name());
+
+        if (result.status() == ReceiptOcrStatus.DISABLED) {
+            session.setOcrStatus(ReceiptSessionOcrStatus.NOT_CONFIGURED);
+            session.setWarningsJson(writeWarnings(List.of(warning("OCR_NOT_CONFIGURED"))));
+            return detail(receiptSessionRepository.save(session));
+        }
+        if (result.status() == ReceiptOcrStatus.UNSUPPORTED) {
+            session.setOcrStatus(ReceiptSessionOcrStatus.FAILED);
+            session.setWarningsJson(writeWarnings(codes(result, "OCR_PROVIDER_NOT_IMPLEMENTED")));
+            return detail(receiptSessionRepository.save(session));
+        }
+        if (result.status() == ReceiptOcrStatus.TEXT_EMPTY) {
+            session.setOcrStatus(ReceiptSessionOcrStatus.FAILED);
+            session.setWarningsJson(writeWarnings(List.of(warning("OCR_EMPTY_TEXT"))));
+            return detail(receiptSessionRepository.save(session));
+        }
+        if (result.status() == ReceiptOcrStatus.TIMEOUT) {
+            session.setOcrStatus(ReceiptSessionOcrStatus.FAILED);
+            session.setWarningsJson(writeWarnings(List.of(warning("OCR_PROVIDER_TIMEOUT"))));
+            return detail(receiptSessionRepository.save(session));
+        }
+        if (result.status() != ReceiptOcrStatus.SUCCEEDED && result.status() != ReceiptOcrStatus.EXTRACTED) {
+            session.setOcrStatus(ReceiptSessionOcrStatus.FAILED);
+            session.setWarningsJson(writeWarnings(codes(result, "OCR_PROVIDER_FAILED")));
+            return detail(receiptSessionRepository.save(session));
+        }
+
+        String normalized = normalizeOcrText(result.text());
+        if (normalized == null) {
+            session.setOcrStatus(ReceiptSessionOcrStatus.FAILED);
+            session.setWarningsJson(writeWarnings(List.of(warning("OCR_EMPTY_TEXT"))));
+            return detail(receiptSessionRepository.save(session));
+        }
+        ReceiptTextParser.ParsedReceipt parsed = receiptTextParser.parse(normalized);
+        session.setOcrStatus(ReceiptSessionOcrStatus.SUCCEEDED);
+        session.setRawOcrText(result.text());
+        session.setNormalizedOcrText(normalized);
+        session.setMerchantName(parsed.merchantName());
+        session.setReceiptDate(parsed.receiptDate());
+        session.setTotalAmount(parsed.totalAmount());
+        session.setCurrency(session.getCurrency() == null ? "VND" : session.getCurrency());
+        session.setWarningsJson(writeWarnings(codesOrEmpty(result)));
         return detail(receiptSessionRepository.save(session));
     }
 
@@ -147,6 +223,13 @@ public class ReceiptSessionService {
                 .imageSizeBytes(session.getImageSizeBytes())
                 .imageUrl(session.getImageUrl())
                 .ocrStatus(session.getOcrStatus())
+                .ocrProvider(session.getOcrProvider())
+                .rawOcrText(session.getRawOcrText())
+                .normalizedOcrText(session.getNormalizedOcrText())
+                .merchantName(session.getMerchantName())
+                .receiptDate(session.getReceiptDate())
+                .totalAmount(session.getTotalAmount())
+                .currency(session.getCurrency())
                 .warnings(warnings)
                 .nextActions(nextActions(session))
                 .createdAt(session.getCreatedAt())
@@ -156,6 +239,7 @@ public class ReceiptSessionService {
 
     private List<String> nextActions(ReceiptSession session) {
         if (session.getImageContentType() == null) return List.of("UPLOAD_IMAGE");
+        if (session.getOcrStatus() == ReceiptSessionOcrStatus.SUCCEEDED) return List.of("BUILD_DRAFT");
         if (session.getImageStorageStatus() == ReceiptImageStorageStatus.STORAGE_FAILED) return List.of("RETRY_UPLOAD", "RUN_OCR");
         return List.of("RUN_OCR");
     }
@@ -204,6 +288,35 @@ public class ReceiptSessionService {
         return trimmed.isBlank() ? null : trimmed;
     }
 
+    private String normalizeOcrText(String value) {
+        if (value == null) return null;
+        String normalized = Normalizer.normalize(value.replace("\r\n", "\n").replace('\r', '\n').strip(), Normalizer.Form.NFC);
+        normalized = MANY_BLANK_LINES.matcher(normalized).replaceAll("\n\n");
+        return normalized.isBlank() ? null : normalized;
+    }
+
+    private List<ReceiptSessionWarningResponse> codes(ReceiptOcrResult result, String fallback) {
+        if (result.warnings() == null || result.warnings().isEmpty()) return List.of(warning(fallback));
+        return result.warnings().stream()
+                .map(item -> warning(mapOcrCode(item.getCode(), fallback)))
+                .toList();
+    }
+
+    private List<ReceiptSessionWarningResponse> codesOrEmpty(ReceiptOcrResult result) {
+        if (result.warnings() == null || result.warnings().isEmpty()) return List.of();
+        return result.warnings().stream()
+                .map(item -> warning(mapOcrCode(item.getCode(), "OCR_PROVIDER_FAILED")))
+                .toList();
+    }
+
+    private String mapOcrCode(String code, String fallback) {
+        if ("RECEIPT_OCR_NOT_CONFIGURED".equals(code)) return "OCR_NOT_CONFIGURED";
+        if ("RECEIPT_OCR_TEXT_EMPTY".equals(code)) return "OCR_EMPTY_TEXT";
+        if ("RECEIPT_OCR_TIMEOUT".equals(code)) return "OCR_PROVIDER_TIMEOUT";
+        if ("RECEIPT_OCR_FAILED".equals(code) || "RECEIPT_OCR_SERVICE_UNAVAILABLE".equals(code)) return "OCR_PROVIDER_FAILED";
+        return code == null || code.isBlank() ? fallback : code;
+    }
+
     private String writeWarnings(List<ReceiptSessionWarningResponse> warnings) {
         List<String> codes = warnings.stream().map(ReceiptSessionWarningResponse::getCode).distinct().toList();
         return String.join(",", codes);
@@ -231,6 +344,12 @@ public class ReceiptSessionService {
             case "RECEIPT_IMAGE_REQUIRED" -> "Receipt image is required.";
             case "RECEIPT_STORAGE_NOT_CONFIGURED" -> "Receipt image storage is not configured.";
             case "RECEIPT_STORAGE_FAILED" -> "Receipt image storage failed.";
+            case "OCR_NOT_CONFIGURED" -> "Receipt OCR is not configured.";
+            case "OCR_PROVIDER_NOT_IMPLEMENTED" -> "Receipt OCR provider is not implemented yet.";
+            case "OCR_PROVIDER_FAILED" -> "Receipt OCR provider failed.";
+            case "OCR_EMPTY_TEXT" -> "Receipt OCR returned no text.";
+            case "OCR_LOW_CONFIDENCE" -> "Receipt OCR confidence is low.";
+            case "OCR_PROVIDER_TIMEOUT" -> "Receipt OCR provider timed out.";
             case "OCR_UNSUPPORTED_IMAGE_FORMAT" -> "Receipt image format is unsupported.";
             case "OCR_FILE_TOO_LARGE" -> "Receipt image is too large.";
             case "OCR_NOT_REQUESTED" -> "OCR has not been requested.";

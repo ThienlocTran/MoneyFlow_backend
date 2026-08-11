@@ -1,6 +1,6 @@
 # Receipt OCR Contract V1
 
-Status: backend contract for 2.1.4. P11B session/image upload foundation is implemented; OCR, draft builder, and confirm are not implemented yet.
+Status: backend contract for 2.1.4. P11C OCR provider abstraction and mock provider are implemented; Azure, draft builder, and confirm are not implemented yet.
 
 ## Product Guardrail
 
@@ -63,6 +63,31 @@ Keep existing `/receipt-review/parse` and `/parse-with-images` compatible during
 
 - Loads receipt session detail.
 - Enforces workspace ownership by session ID and workspace ID.
+
+## P11C Implemented OCR
+
+`POST /api/workspaces/{workspaceId}/receipt-sessions/{sessionId}/ocr`
+
+- Runs configured receipt OCR provider.
+- Persists `ocrStatus`, `ocrProvider`, `rawOcrText`, `normalizedOcrText`, merchant/date/total metadata, currency, and warnings.
+- Does not build receipt drafts.
+- Does not create transactions.
+- Re-running OCR overwrites the current OCR result.
+
+Provider modes:
+
+- `none`: safe default; returns `ocrStatus=NOT_CONFIGURED` and `OCR_NOT_CONFIGURED`.
+- `mock`: deterministic dev/test provider.
+- `azure_document_intelligence`: placeholder only; returns `OCR_PROVIDER_NOT_IMPLEMENTED` until P11D.
+- `external_http`: retained for existing stateless receipt-review compatibility.
+
+Mock provider behavior:
+
+- Filename containing `coffee` or `cafe`: coffee receipt text, total `25000`.
+- Filename containing `fuel` or `xang`: fuel receipt text, total `60000`.
+- Filename containing `empty`: empty result mapped to `OCR_EMPTY_TEXT`.
+- Filename containing `unicode`: decomposed text used to verify NFC normalization.
+- Default: existing mock receipt text, total `40000`.
 
 ## Session DTO
 
@@ -159,6 +184,9 @@ Draft status:
 - `RECEIPT_STORAGE_NOT_CONFIGURED`
 - `RECEIPT_STORAGE_FAILED`
 - `OCR_NOT_REQUESTED`
+- `OCR_NOT_CONFIGURED`
+- `OCR_PROVIDER_NOT_IMPLEMENTED`
+- `OCR_PROVIDER_FAILED`
 - `OCR_UNSUPPORTED_IMAGE_FORMAT`
 - `OCR_FILE_TOO_LARGE`
 - `OCR_EMPTY_TEXT`
@@ -219,8 +247,15 @@ Preferred future shape:
 
 ## P11B Known Limitations
 
-- OCR is not run from receipt sessions yet.
 - No receipt draft entity exists yet.
 - No confirm executor exists yet.
 - HEIC/HEIF upload support is deferred.
 - Existing stateless receipt review endpoints remain separate from receipt sessions.
+
+## P11C Known Limitations
+
+- Mock OCR is deterministic and not real OCR.
+- Azure Document Intelligence is not implemented until P11D.
+- Receipt drafts are not implemented until P11E.
+- Confirm executor is not implemented until P11F.
+- UI is not implemented in this phase.

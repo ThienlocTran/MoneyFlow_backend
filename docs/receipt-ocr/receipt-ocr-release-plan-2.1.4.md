@@ -1,6 +1,6 @@
 # Receipt OCR Release Plan 2.1.4
 
-Status: planned. P11B session/image upload foundation is implemented.
+Status: planned. P11C OCR provider abstraction and mock provider are implemented.
 
 ## Product Guardrail
 
@@ -60,7 +60,7 @@ Deferred:
 
 - P11A: `git diff --check`, scoped mojibake scan, scoped secret scan.
 - P11B: session repository/service/controller integration tests; receipt and transaction targeted Maven tests.
-- P11C: provider selection, disabled/mock behavior, limit validation tests.
+- P11C: provider selection, disabled/mock/Azure-placeholder behavior, OCR persistence, workspace isolation, no transaction side effect.
 - P11D: Azure provider unit tests using mocked HTTP, no real provider call.
 - P11E: parser/draft builder tests for Vietnamese receipts, missing fields, category hints.
 - P11F: confirm integration tests for success, missing required fields, idempotent replay, source traceability.
@@ -90,7 +90,7 @@ Deferred:
 
 ## Next Queue Item
 
-P11C - OCR provider abstraction + mock provider.
+P11D - Azure Document Intelligence provider.
 
 ## P11B Delivered
 
@@ -110,3 +110,21 @@ Known limitations:
 - Confirm executor not implemented yet.
 - UI not implemented in this phase.
 - HEIC/HEIF support deferred.
+
+## P11C Delivered
+
+- Added session OCR run endpoint.
+- Reused receipt OCR provider abstraction for session OCR.
+- Added `azure_document_intelligence` placeholder provider for P11D.
+- Expanded deterministic mock OCR behavior by filename.
+- Persisted OCR result fields on `receipt_sessions`.
+- Added OCR text normalization to NFC and LF line breaks.
+- Added tests for mock success, no image, provider none, Azure placeholder, empty OCR, Unicode normalization, workspace isolation, rerun, and no transaction side effect.
+
+Known limitations:
+
+- Mock OCR is deterministic and not real OCR.
+- Azure Document Intelligence provider is placeholder-only until P11D.
+- Receipt draft builder not implemented yet.
+- Confirm executor not implemented yet.
+- UI not implemented in this phase.

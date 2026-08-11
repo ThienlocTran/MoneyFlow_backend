@@ -39,6 +39,13 @@ public class ReceiptSessionController {
         return ResponseEntity.ok(ApiResponse.ok("Receipt image uploaded", receiptSessionService.uploadImage(workspaceId, sessionId, file, currentUserId())));
     }
 
+    @PostMapping("/{sessionId}/ocr")
+    public ResponseEntity<ApiResponse<ReceiptSessionDetailResponse>> runOcr(
+            @PathVariable UUID workspaceId,
+            @PathVariable UUID sessionId) {
+        return ResponseEntity.ok(ApiResponse.ok("Receipt OCR completed", receiptSessionService.runOcr(workspaceId, sessionId, currentUserId())));
+    }
+
     @GetMapping("/{sessionId}")
     public ResponseEntity<ApiResponse<ReceiptSessionDetailResponse>> get(
             @PathVariable UUID workspaceId,
