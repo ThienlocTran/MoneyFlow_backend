@@ -14,6 +14,7 @@ import java.util.UUID;
 @Builder
 public class VoiceSessionDetailResponse {
     private UUID sessionId;
+    private UUID voiceRecordId;
     private VoiceSessionSourceType sourceType;
     private VoiceSessionStatus status;
     private VoiceSessionAudioStatus audioStatus;

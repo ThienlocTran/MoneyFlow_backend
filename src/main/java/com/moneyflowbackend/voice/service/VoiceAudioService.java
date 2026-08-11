@@ -72,7 +72,6 @@ public class VoiceAudioService {
     public VoiceAudioUploadResponse uploadAudio(UUID voiceRecordId, MultipartFile file, Integer durationSeconds, UUID userId) {
         VoiceRecord voiceRecord = findVoiceRecord(voiceRecordId);
         requireWritableMember(voiceRecord, userId);
-        requireVoiceTransaction(voiceRecord);
         String mimeType = validateFile(file);
         Integer normalizedDuration = validateDuration(durationSeconds);
 

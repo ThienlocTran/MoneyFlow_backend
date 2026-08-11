@@ -97,6 +97,26 @@ class VoiceSessionConfirmIntegrationTests {
     }
 
     @Test
+    void confirmAudioSessionCarriesVoiceRecordIdForPlaybackMetadata() throws Exception {
+        TestUser owner = registerAndLogin("vsc_audio_record");
+        Wallet cash = wallet(owner.workspace(), "Cash");
+        Category food = category(owner.workspace(), "Ăn uống", CategoryType.EXPENSE);
+        keyword(owner.workspace(), food, "ăn");
+        String sessionId = interpretedAudioSession(owner, "Tôi ăn sáng 50000");
+        String draftId = firstDraftId(sessionId);
+
+        mockMvc.perform(post("/api/workspaces/{workspaceId}/voice-sessions/{sessionId}/drafts/{draftId}/confirm",
+                        owner.workspace().getId(), sessionId, draftId)
+                        .header("Authorization", bearer(owner.token()))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("walletId", cash.getId(), "categoryId", food.getId(), "note", "Ăn sáng"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.transaction.voiceSessionId").value(sessionId))
+                .andExpect(jsonPath("$.data.transaction.voiceRecordId").isNotEmpty())
+                .andExpect(jsonPath("$.data.transaction.audioStatus").value("PARSED"));
+    }
+
+    @Test
     void missingRequiredFieldsReturnWarningsWithoutTransaction() throws Exception {
         TestUser owner = registerAndLogin("vsc_missing");
         Wallet cash = wallet(owner.workspace(), "Cash");
@@ -214,11 +234,30 @@ class VoiceSessionConfirmIntegrationTests {
         return sessionId;
     }
 
+    private String interpretedAudioSession(TestUser owner, String transcript) throws Exception {
+        String sessionId = createSession(owner, "AUDIO");
+        mockMvc.perform(patch("/api/workspaces/{workspaceId}/voice-sessions/{sessionId}/transcript", owner.workspace().getId(), sessionId)
+                        .header("Authorization", bearer(owner.token()))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("transcript", transcript))))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/workspaces/{workspaceId}/voice-sessions/{sessionId}/interpret", owner.workspace().getId(), sessionId)
+                        .header("Authorization", bearer(owner.token()))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isOk());
+        return sessionId;
+    }
+
     private String createSession(TestUser owner) throws Exception {
+        return createSession(owner, "TEXT");
+    }
+
+    private String createSession(TestUser owner, String sourceType) throws Exception {
         String body = mockMvc.perform(post("/api/workspaces/{workspaceId}/voice-sessions", owner.workspace().getId())
                         .header("Authorization", bearer(owner.token()))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(json(Map.of("sourceType", "TEXT"))))
+                        .content(json(Map.of("sourceType", sourceType))))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
         return objectMapper.readTree(body).path("data").path("sessionId").asText();

@@ -139,11 +139,12 @@ class VoiceAsrIntegrationTests {
                 .andExpect(jsonPath("$.data.asrStatus").value("SUCCEEDED"))
                 .andExpect(jsonPath("$.data.commandStatus").value("NOT_REQUESTED"))
                 .andExpect(jsonPath("$.data.transcript").value("Hôm nay tôi ăn sáng hết 35 nghìn"))
+                .andExpect(jsonPath("$.data.voiceRecordId").isNotEmpty())
                 .andExpect(jsonPath("$.data.asr.provider").value("MOCK"))
                 .andExpect(jsonPath("$.data.asr.warnings[0].code").value("ASR_MOCK_TRANSCRIPT"));
 
         assertSafety(cash, before);
-        assertThat(voiceRecordRepository.count()).isZero();
+        assertThat(voiceRecordRepository.count()).isOne();
         assertThat(voiceSessionDraftRepository.findAllByVoiceSessionIdOrderByDraftIndexAsc(UUID.fromString(sessionId))).isEmpty();
     }
 

@@ -37,7 +37,7 @@ import java.util.regex.Pattern;
 public class QuickEntryParser {
     private static final Set<String> INCOME_WORDS = Set.of(
             "thu", "nhan", "luong", "thuong", "me cho", "ba cho", "duoc cho", "duoc tang",
-            "hoan tien", "gia dinh gui", "kiem duoc", "kiem tien", "nhan luong", "duoc tra", "duoc chuyen");
+            "hoan tien", "gia dinh gui", "kiem duoc", "kiem tien", "nhan luong", "duoc tra", "duoc chuyen", "ky");
     private static final Set<String> EXPENSE_WORDS = Set.of(
             "chi", "mua", "tra", "dong", "dong tien", "thanh toan", "an", "uong", "cafe",
             "ca phe", "xang", "do xang", "gui xe", "het", "cua hang");
@@ -719,10 +719,11 @@ public class QuickEntryParser {
             QuickAmountParser.AmountCandidate amountCandidate = amountCandidates.get(i);
             String segment = amountSegment(display, amountCandidates, i);
             String normalizedSegment = VietnameseTextNormalizer.comparable(segment);
+            BigDecimal segmentAmount = contextualAmount(amountCandidate, normalizedSegment);
             VoiceIntentType segmentIntent = detectNonTransactionIntent(normalizedSegment);
             WalletMatch segmentSnapshotWallet = detectWalletSnapshot(normalizedSegment, segment, wallets).orElse(null);
             if (segmentSnapshotWallet != null) {
-                candidates.add(walletSnapshotCandidate(display, segment, i, amountCandidate.amount(), transactionDate, transactionTime, segmentSnapshotWallet));
+                candidates.add(walletSnapshotCandidate(display, segment, i, segmentAmount, transactionDate, transactionTime, segmentSnapshotWallet));
                 continue;
             }
             if (segmentIntent == null && !hasTransactionWord(normalizedSegment)) {
@@ -733,14 +734,14 @@ public class QuickEntryParser {
                 List<String> warnings = new ArrayList<>(List.of("VOICE_INTENT_NOT_COMMITTABLE"));
                 VoiceCandidateStatus candidateStatus = candidateStatus(segmentIntent);
                 candidates.add(QuickEntryPreviewResponse.Candidate.builder()
-                        .candidateId(candidateId(display, i, segment, amountCandidate.amount()))
-                        .clientCandidateId(candidateId(display, i, segment, amountCandidate.amount()))
+                        .candidateId(candidateId(display, i, segment, segmentAmount))
+                        .clientCandidateId(candidateId(display, i, segment, segmentAmount))
                         .intentType(segmentIntent)
                         .candidateStatus(candidateStatus)
                         .ledgerEffect(ledgerEffect(segmentIntent))
                         .originalText(segment)
                         .description(candidateDescription(segment, amountCandidate))
-                        .amount(amountCandidate.amount())
+                        .amount(segmentAmount)
                         .transactionDate(transactionDate)
                         .transactionTime(transactionTime)
                         .confidence(0.65)
@@ -802,14 +803,14 @@ public class QuickEntryParser {
             boolean ready = missingFields.isEmpty();
             boolean affectsWalletBalance = segmentType != TransactionType.INCOME || segmentWallet != null;
             candidates.add(QuickEntryPreviewResponse.Candidate.builder()
-                    .candidateId(candidateId(display, i, segment, amountCandidate.amount()))
-                    .clientCandidateId(candidateId(display, i, segment, amountCandidate.amount()))
+                    .candidateId(candidateId(display, i, segment, segmentAmount))
+                    .clientCandidateId(candidateId(display, i, segment, segmentAmount))
                     .intentType(intentType(segmentType))
                     .candidateStatus(ready ? VoiceCandidateStatus.READY : VoiceCandidateStatus.NEEDS_REVIEW)
                     .ledgerEffect(ledgerEffect(segmentType, segmentWallet, segmentTransferWallets.source(), segmentTransferWallets.destination()))
                     .originalText(segment)
                     .description(description)
-                    .amount(amountCandidate.amount())
+                    .amount(segmentAmount)
                     .type(segmentType)
                     .status(status)
                     .walletId(segmentWallet == null ? null : segmentWallet.getId())
@@ -974,6 +975,16 @@ public class QuickEntryParser {
         int end = commaEnd >= 0 && commaEnd <= nextStart ? commaEnd : current.end();
         String segment = displayText(display, start, end);
         return segment.isBlank() ? display : segment;
+    }
+
+    private BigDecimal contextualAmount(QuickAmountParser.AmountCandidate amountCandidate, String normalizedSegment) {
+        BigDecimal amount = amountCandidate.amount();
+        if (amountCandidate.unitlessPlain()
+                && amount.compareTo(new BigDecimal("1000")) < 0
+                && hasTransactionWord(normalizedSegment)) {
+            return amount.multiply(new BigDecimal("1000"));
+        }
+        return amount;
     }
 
     private int nextSeparator(String display, int start) {

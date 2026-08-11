@@ -149,6 +149,70 @@ class VoiceReviewIntegrationTests {
     }
 
     @Test
+    void azureTranscriptWithWeakPunctuationKeepsIncomeGasAndFoodDrafts() {
+        TestContext ctx = context("voice_review_azure_multi", WorkspaceRole.OWNER);
+        Category gas = category(ctx, "Xăng xe", CategoryType.EXPENSE);
+        Category food = category(ctx, "Ăn uống", CategoryType.EXPENSE);
+        keyword(ctx, gas, "xăng");
+        keyword(ctx, food, "ăn");
+
+        VoiceReviewDraftResponse response = voiceReviewService.parse(ctx.workspace().getId(),
+                parse("Hôm nay tôi kiếm được 600.000, đổ xăng hết 8 chục, tôi ăn hết 30"),
+                ctx.user().getId());
+
+        assertThat(response.getMode()).isEqualTo("MULTI");
+        assertThat(response.getDrafts()).hasSize(3);
+        assertThat(response.getDrafts()).extracting(draft -> draft.getCandidate().getType())
+                .containsExactly(VoiceReviewDraftType.INCOME_FACT, VoiceReviewDraftType.EXPENSE, VoiceReviewDraftType.EXPENSE);
+        assertThat(response.getDrafts()).extracting(draft -> draft.getCandidate().getAmount())
+                .containsExactly(new BigDecimal("600000"), new BigDecimal("80000"), new BigDecimal("30000"));
+        assertThat(response.getDrafts().get(1).getCandidate().getCategoryId()).isEqualTo(gas.getId());
+        assertThat(response.getDrafts().get(2).getCandidate().getCategoryId()).isEqualTo(food.getId());
+    }
+
+    @Test
+    void noisyAzureIncomeWordDoesNotCollapseToOnlyGasDraft() {
+        TestContext ctx = context("voice_review_azure_noisy", WorkspaceRole.OWNER);
+        Category gas = category(ctx, "Xăng xe", CategoryType.EXPENSE);
+        Category food = category(ctx, "Ăn uống", CategoryType.EXPENSE);
+        keyword(ctx, gas, "xăng");
+        keyword(ctx, food, "ăn");
+
+        VoiceReviewDraftResponse response = voiceReviewService.parse(ctx.workspace().getId(),
+                parse("Hôm nay tôi ký 600.000 từ đổ xăng hết 8 chục tôi ăn hết 30"),
+                ctx.user().getId());
+
+        assertThat(response.getMode()).isEqualTo("MULTI");
+        assertThat(response.getDrafts()).hasSizeGreaterThanOrEqualTo(3);
+        assertThat(response.getDrafts()).extracting(draft -> draft.getCandidate().getAmount())
+                .contains(new BigDecimal("600000"), new BigDecimal("80000"), new BigDecimal("30000"));
+        assertThat(response.getDrafts()).extracting(draft -> draft.getCandidate().getType())
+                .contains(VoiceReviewDraftType.INCOME_FACT, VoiceReviewDraftType.EXPENSE);
+    }
+
+    @Test
+    void spokenVietnameseAmountsSplitIntoThreeExpenseDrafts() {
+        TestContext ctx = context("voice_review_spoken_amounts", WorkspaceRole.OWNER);
+        Category gas = category(ctx, "Xăng xe", CategoryType.EXPENSE);
+        Category food = category(ctx, "Ăn uống", CategoryType.EXPENSE);
+        Category coffee = category(ctx, "Cà phê", CategoryType.EXPENSE);
+        keyword(ctx, gas, "xăng");
+        keyword(ctx, food, "ăn");
+        keyword(ctx, coffee, "cà phê");
+
+        VoiceReviewDraftResponse response = voiceReviewService.parse(ctx.workspace().getId(),
+                parse("Đổ xăng năm mươi nghìn uống cà phê hai mươi lăm nghìn ăn sáng ba mươi lăm nghìn"),
+                ctx.user().getId());
+
+        assertThat(response.getMode()).isEqualTo("MULTI");
+        assertThat(response.getDrafts()).hasSize(3);
+        assertThat(response.getDrafts()).extracting(draft -> draft.getCandidate().getAmount())
+                .containsExactly(new BigDecimal("50000"), new BigDecimal("25000"), new BigDecimal("35000"));
+        assertThat(response.getDrafts()).extracting(draft -> draft.getCandidate().getType())
+                .containsExactly(VoiceReviewDraftType.EXPENSE, VoiceReviewDraftType.EXPENSE, VoiceReviewDraftType.EXPENSE);
+    }
+
+    @Test
     void patchDraftUpdatesFieldsWithoutCreatingTransaction() {
         Fixture fixture = fixture("voice_review_patch");
         VoiceRecord record = record(fixture.ctx(), VoiceRecordStatus.PARSED);

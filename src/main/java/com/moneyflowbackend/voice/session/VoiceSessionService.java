@@ -21,6 +21,9 @@ import com.moneyflowbackend.voice.command.VoiceCommandInterpretRequest;
 import com.moneyflowbackend.voice.command.VoiceCommandInterpretResponse;
 import com.moneyflowbackend.voice.command.VoiceCommandMode;
 import com.moneyflowbackend.voice.command.VoiceCommandService;
+import com.moneyflowbackend.voice.model.VoiceRecord;
+import com.moneyflowbackend.voice.model.VoiceRecordStatus;
+import com.moneyflowbackend.voice.repository.VoiceRecordRepository;
 import com.moneyflowbackend.workspace.model.Workspace;
 import com.moneyflowbackend.workspace.model.WorkspaceMember;
 import com.moneyflowbackend.workspace.repository.WorkspaceMemberRepository;
@@ -53,6 +56,7 @@ public class VoiceSessionService {
     private final VoiceAsrClient asrClient;
     private final TransactionService transactionService;
     private final TransactionRepository transactionRepository;
+    private final VoiceRecordRepository voiceRecordRepository;
 
     public VoiceSessionService(
             VoiceSessionRepository voiceSessionRepository,
@@ -65,7 +69,8 @@ public class VoiceSessionService {
             VoiceAsrProperties asrProperties,
             VoiceAsrClient asrClient,
             TransactionService transactionService,
-            TransactionRepository transactionRepository) {
+            TransactionRepository transactionRepository,
+            VoiceRecordRepository voiceRecordRepository) {
         this.voiceSessionRepository = voiceSessionRepository;
         this.voiceSessionDraftRepository = voiceSessionDraftRepository;
         this.workspaceRepository = workspaceRepository;
@@ -77,6 +82,7 @@ public class VoiceSessionService {
         this.asrClient = asrClient;
         this.transactionService = transactionService;
         this.transactionRepository = transactionRepository;
+        this.voiceRecordRepository = voiceRecordRepository;
     }
 
     @Transactional
@@ -177,6 +183,7 @@ public class VoiceSessionService {
         session.setAudioStatus(VoiceSessionAudioStatus.NONE);
         session.setUpdatedAt(Instant.now());
         voiceSessionRepository.saveAndFlush(session);
+        ensureSessionVoiceRecord(session, audio);
 
         VoiceAsrTranscribeResult result = asrClient.transcribe(new VoiceAsrRequest(
                 session.getId(),
@@ -188,6 +195,7 @@ public class VoiceSessionService {
                 normalize));
 
         applyAsrResult(session, result);
+        ensureSessionVoiceRecord(session, null);
         return detail(voiceSessionRepository.save(session));
     }
 
@@ -285,6 +293,7 @@ public class VoiceSessionService {
                 .toList();
         return VoiceSessionDetailResponse.builder()
                 .sessionId(session.getId())
+                .voiceRecordId(sessionVoiceRecordId(session))
                 .sourceType(session.getSourceType())
                 .status(session.getStatus())
                 .audioStatus(session.getAudioStatus())
@@ -447,16 +456,54 @@ public class VoiceSessionService {
         txReq.setDescription(note(draft, req));
         txReq.setNote(note(draft, req));
         txReq.setAffectsWalletBalance(Boolean.TRUE.equals(draft.getAffectsWalletBalance()) || draft.getAffectsWalletBalance() == null);
+        UUID voiceRecordId = session.getSourceType() == VoiceSessionSourceType.AUDIO
+                ? ensureSessionVoiceRecord(session, null).getId()
+                : null;
         return transactionService.createWithSource(
                 workspaceId,
                 txReq,
                 userId,
                 TransactionSourceType.VOICE,
                 sourceText(session, draft),
-                null,
+                voiceRecordId,
                 sourceReference(session, draft),
                 session.getId(),
                 draft.getId());
+    }
+
+    private VoiceRecord ensureSessionVoiceRecord(VoiceSession session, MultipartFile audio) {
+        String key = voiceRecordKey(session);
+        VoiceRecord record = voiceRecordRepository.findVoiceIdempotencyMatch(session.getWorkspace().getId(), session.getUser().getId(), key)
+                .orElseGet(() -> VoiceRecord.builder()
+                        .workspace(session.getWorkspace())
+                        .createdByUser(session.getUser())
+                        .idempotencyKey(key)
+                        .voiceStatus(VoiceRecordStatus.PARSED)
+                        .build());
+        record.setOriginalTranscript(session.getTranscript());
+        record.setEditedTranscript(session.getNormalizedTranscript());
+        if (audio != null) {
+            record.setMimeType(contentType(audio));
+            record.setFileSizeBytes(audio.getSize());
+            record.setDurationSeconds(session.getDurationMs() == null ? null : Math.max(1, (int) Math.ceil(session.getDurationMs() / 1000d)));
+        }
+        if (record.getVoiceStatus() == VoiceRecordStatus.DRAFT) {
+            record.setVoiceStatus(VoiceRecordStatus.PARSED);
+        }
+        return voiceRecordRepository.save(record);
+    }
+
+    private UUID sessionVoiceRecordId(VoiceSession session) {
+        if (session.getSourceType() != VoiceSessionSourceType.AUDIO) {
+            return null;
+        }
+        return voiceRecordRepository.findVoiceIdempotencyMatch(session.getWorkspace().getId(), session.getUser().getId(), voiceRecordKey(session))
+                .map(VoiceRecord::getId)
+                .orElse(null);
+    }
+
+    private String voiceRecordKey(VoiceSession session) {
+        return "voice-session:" + session.getId();
     }
 
     private void updateConfirmStatus(VoiceSession session) {

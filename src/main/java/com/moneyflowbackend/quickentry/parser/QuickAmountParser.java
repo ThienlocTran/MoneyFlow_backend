@@ -18,6 +18,7 @@ public class QuickAmountParser {
     private static final Pattern THOUSAND = Pattern.compile("(?<![\\d])(-?\\d+(?:[.,]\\d+)?)\\s*(?:k|nghin|ngan)\\b");
     private static final Pattern TENS_THOUSAND_NUMBER = Pattern.compile("\\b(-?\\d)\\s+chuc(?:\\s*(?:k|nghin|ngan))?\\b");
     private static final Pattern TENS_THOUSAND_WORDS = Pattern.compile("\\b(mot|hai|ba|bon|tu|nam|sau|bay|tam|chin)\\s+chuc(?:\\s*(?:k|nghin|ngan))?\\b");
+    private static final Pattern WORD_THOUSAND = Pattern.compile("\\b((?:(?:mot|hai|ba|bon|tu|nam|sau|bay|tam|chin|muoi|lam)\\s+){0,3}(?:mot|hai|ba|bon|tu|nam|sau|bay|tam|chin|muoi|lam))\\s+(?:nghin|ngan)\\b");
     private static final Pattern GROUPED = Pattern.compile("(?<![\\d/:.-])-?\\d{1,3}(?:[.,\\s]\\d{3})+(?:\\s*(?:d|vnd))?\\b");
     private static final Pattern VND = Pattern.compile("(?<![\\d/:.-])-?\\d+(?:\\s*(?:d|vnd))\\b");
     private static final Pattern BARE = Pattern.compile("(?<![\\d/:.-])-?\\d+(?![\\d/:.-])");
@@ -37,6 +38,7 @@ public class QuickAmountParser {
         addUnitMatches(THOUSAND.matcher(normalized), display, blocked, candidates, zero, new BigDecimal("1000"));
         addUnitMatches(TENS_THOUSAND_NUMBER.matcher(normalized), display, blocked, candidates, zero, new BigDecimal("10000"));
         addTensThousandWordMatches(TENS_THOUSAND_WORDS.matcher(normalized), display, blocked, candidates, zero);
+        addWordThousandMatches(WORD_THOUSAND.matcher(normalized), display, blocked, candidates, zero);
         addPlainMatches(GROUPED.matcher(normalized), display, blocked, candidates, zero, false, false);
         addPlainMatches(VND.matcher(normalized), display, blocked, candidates, zero, false, false);
         addPlainMatches(BARE.matcher(normalized), display, blocked, candidates, zero, true, true);
@@ -101,6 +103,23 @@ public class QuickAmountParser {
         }
     }
 
+    private void addWordThousandMatches(
+            Matcher matcher,
+            String display,
+            List<Span> blocked,
+            List<AmountCandidate> candidates,
+            MutableFlag zero) {
+        while (matcher.find()) {
+            if (shouldSkip(matcher.toMatchResult(), blocked, candidates)) {
+                continue;
+            }
+            int value = wordAmount(matcher.group(1));
+            if (value > 0) {
+                addCandidate(new BigDecimal(value * 1000L), matcher.start(), matcher.end(), display, candidates, zero, false, false);
+            }
+        }
+    }
+
     private int wordNumber(String value) {
         return switch (value) {
             case "mot" -> 1;
@@ -114,6 +133,23 @@ public class QuickAmountParser {
             case "chin" -> 9;
             default -> 0;
         };
+    }
+
+    private int wordAmount(String value) {
+        String[] words = value.trim().split("\\s+");
+        int total = 0;
+        int pending = 0;
+        for (String word : words) {
+            if ("muoi".equals(word)) {
+                total += pending == 0 ? 10 : pending * 10;
+                pending = 0;
+                continue;
+            }
+            int digit = "lam".equals(word) ? 5 : wordNumber(word);
+            if (digit == 0) return 0;
+            pending = digit;
+        }
+        return total + pending;
     }
 
     private void addPlainMatches(
