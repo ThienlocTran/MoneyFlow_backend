@@ -1,6 +1,6 @@
 # Planning Backend Release Plan 2.1.6
 
-Status: P13F complete in backend code. P13G release lock remains planned.
+Status: COMPLETE / BACKEND LOCKED. P13A through P13G are complete for backend/API scope.
 
 ## Theme
 
@@ -38,7 +38,7 @@ MoneyFlow 2.1.6 should turn existing planning-adjacent backend pieces into a cle
 | P13D | Planning projection service | Complete: read-only projection formula, wallet ledger, planning reserves, planned obligations, warnings | Public overview API and frontend UI | `PlanningProjectionServiceTests` | Available ledger, reserves, upcoming, overdue, expected incoming, shortfall calculated correctly. |
 | P13E | Mark-paid/link-to-transaction behavior | Complete: link existing transaction and explicit mark-paid create flow | Auto-posting and undo paid | `PlannedObligationPaymentIntegrationTests` | Paid obligation links safely, same workspace only, no duplicate spend. |
 | P13F | Planning API overview + action item integration | Complete: `/planning/overview`, projection endpoint, summaries, action items | Notifications and frontend UI | `PlanningOverviewApiIntegrationTests` | Frontend can fetch projection, obligations, reserves, warnings. |
-| P13G | Planning backend release lock | Targeted tests, docs, scans, release status | Full frontend UAT | Targeted release validation | Backend status honestly marked locked/partial/blocked. |
+| P13G | Planning backend release lock | Complete: targeted tests, docs, scans, release status | Full frontend UAT | Targeted release validation | Backend status marked COMPLETE / BACKEND LOCKED. |
 
 ## Validation Strategy
 
@@ -187,6 +187,19 @@ Known P13F limitations:
 - Available balance check warns because no reliable reserve-specific source is used in P13C.
 - No frontend UI change.
 
+## P13G Delivered
+
+- Verified P13A through P13F evidence in git history, docs, code, and tests.
+- Ran targeted Planning backend validation only.
+- Updated release docs to mark backend/API scope as `COMPLETE / BACKEND LOCKED`.
+- Kept frontend Planning UI, notifications, AI summary, recurrence generation, reserve usage workflow, and undo/reopen paid obligation deferred.
+
+Targeted validation:
+
+`.\mvnw.cmd "-Dtest=*Planning*Tests,*PlannedObligation*Tests,*ReserveAllocation*Tests,*PlanningProjection*Tests,*PlanningOverview*Tests,*PlanningController*Tests,*PlanningApi*Tests,*ObligationMarkPaid*Tests,*ObligationTransactionLink*Tests" test`
+
+Result: 57 tests passed, 0 failures, 0 errors, 0 skipped.
+
 ## Acceptance Rules
 
 - No expected income is counted as spendable.
@@ -228,4 +241,4 @@ Existing reusable pieces:
 
 ## Next Queue Item
 
-P13G - Planning backend release lock.
+P14A - Category/Jar backend audit.

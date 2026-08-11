@@ -1,6 +1,6 @@
 # Planning Backend Contract V1
 
-Status: P13F planning overview API implemented. Release lock remains planned.
+Status: COMPLETE / BACKEND LOCKED for 2.1.6 backend/API scope. Frontend UI remains deferred.
 
 ## Goals
 

@@ -1,6 +1,6 @@
 # Planning Backend Audit
 
-Status: P13A audit/spec only. No Planning 2.1.6 runtime feature is implemented in this phase.
+Status: Historical P13A audit baseline. P13G later locked Planning 2.1.6 backend/API scope as complete.
 
 ## Current Model Map
 
@@ -18,7 +18,7 @@ Planning already has a small backend foundation:
   - one row per workspace
   - default horizon, custom dates, included-wallet behavior, selected wallet ids
 
-Planning does not yet have first-class `PlannedObligation`, `ReserveAllocation`, or `PlanningProjection` models under a dedicated Planning v1 contract.
+At P13A time, Planning did not yet have first-class `PlannedObligation`, `ReserveAllocation`, or `PlanningProjection` models under a dedicated Planning v1 contract. P13B through P13F implemented those backend foundations.
 
 ## Planning-Adjacent Models Found
 
@@ -185,6 +185,26 @@ Expected incoming is shown separately and not counted as spendable.
 - No notification/scheduler work should be assumed.
 - No fake future income source exists and none should be added.
 - No Planning v1 API for warnings/action items beyond current actually-spendable response.
+
+## Post-P13G Status
+
+P13B through P13F supersede several P13A gaps:
+
+- Planned obligation model/API exists.
+- Reserve allocation model/API exists.
+- Planning projection service exists.
+- Planning overview, projection, obligation summary, reserve summary, warnings, and action items APIs exist.
+- Mark-paid and link-transaction behavior exists.
+
+Remaining backend limitations:
+
+- Standalone payable debts are not included in the current planning formula.
+- Recurring obligation generation remains deferred.
+- Notification/reminder system remains deferred.
+- AI planning summary remains deferred.
+- Undo/reopen paid obligation remains deferred.
+- Reserve usage workflow remains deferred.
+- Multi-currency projection is unsupported and returned with warnings.
 
 ## Main Risks
 
