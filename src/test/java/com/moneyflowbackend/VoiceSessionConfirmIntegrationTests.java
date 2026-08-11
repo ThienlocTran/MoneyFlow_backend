@@ -12,6 +12,9 @@ import com.moneyflowbackend.category.model.CategoryKeyword;
 import com.moneyflowbackend.category.model.CategoryType;
 import com.moneyflowbackend.category.repository.CategoryKeywordRepository;
 import com.moneyflowbackend.category.repository.CategoryRepository;
+import com.moneyflowbackend.income.model.IncomeSource;
+import com.moneyflowbackend.income.model.IncomeSourceStatus;
+import com.moneyflowbackend.income.repository.IncomeSourceRepository;
 import com.moneyflowbackend.transaction.repository.TransactionRepository;
 import com.moneyflowbackend.voice.session.VoiceSessionDraftRepository;
 import com.moneyflowbackend.wallet.model.Wallet;
@@ -51,6 +54,7 @@ class VoiceSessionConfirmIntegrationTests {
     @Autowired WalletRepository walletRepository;
     @Autowired CategoryRepository categoryRepository;
     @Autowired CategoryKeywordRepository categoryKeywordRepository;
+    @Autowired IncomeSourceRepository incomeSourceRepository;
     @Autowired TransactionRepository transactionRepository;
     @Autowired VoiceSessionDraftRepository voiceSessionDraftRepository;
     @Autowired WalletBalanceService walletBalanceService;
@@ -114,6 +118,25 @@ class VoiceSessionConfirmIntegrationTests {
                 .andExpect(jsonPath("$.data.transaction.voiceSessionId").value(sessionId))
                 .andExpect(jsonPath("$.data.transaction.voiceRecordId").isNotEmpty())
                 .andExpect(jsonPath("$.data.transaction.audioStatus").value("PARSED"));
+    }
+
+    @Test
+    void confirmIncomeSessionCanSaveWithoutWalletAndWithIncomeSource() throws Exception {
+        TestUser owner = registerAndLogin("vsc_income");
+        IncomeSource source = incomeSource(owner.workspace(), "Thu nhập của anh");
+        String sessionId = interpretedSession(owner, "Hôm nay kiếm được 800000");
+        String draftId = firstDraftId(sessionId);
+
+        mockMvc.perform(post("/api/workspaces/{workspaceId}/voice-sessions/{sessionId}/drafts/{draftId}/confirm",
+                        owner.workspace().getId(), sessionId, draftId)
+                        .header("Authorization", bearer(owner.token()))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("incomeSourceId", source.getId(), "note", "Thu nhập"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.draftStatus").value("CONFIRMED"))
+                .andExpect(jsonPath("$.data.transaction.walletId").doesNotExist())
+                .andExpect(jsonPath("$.data.transaction.incomeSourceId").value(source.getId().toString()))
+                .andExpect(jsonPath("$.data.transaction.affectsWalletBalance").value(false));
     }
 
     @Test
@@ -312,6 +335,15 @@ class VoiceSessionConfirmIntegrationTests {
                 .keyword(value)
                 .priority(10)
                 .isUserLearned(true)
+                .build());
+    }
+
+    private IncomeSource incomeSource(Workspace workspace, String name) {
+        return incomeSourceRepository.saveAndFlush(IncomeSource.builder()
+                .workspace(workspace)
+                .name(name)
+                .status(IncomeSourceStatus.ACTIVE)
+                .createdByUser(workspace.getCreatedByUser())
                 .build());
     }
 

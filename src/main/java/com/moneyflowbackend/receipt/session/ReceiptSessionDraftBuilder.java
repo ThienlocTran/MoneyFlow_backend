@@ -19,8 +19,8 @@ public class ReceiptSessionDraftBuilder {
     public ReceiptSessionDraft build(ReceiptSession session) {
         String text = session.getNormalizedOcrText();
         ReceiptTextParser.ParsedReceipt parsed = receiptTextParser.parse(text);
-        BigDecimal amount = session.getTotalAmount() == null ? parsed.totalAmount() : session.getTotalAmount();
-        String merchant = first(session.getMerchantName(), parsed.merchantName());
+        BigDecimal amount = parsed.totalAmount() != null && !parsed.totalInferred() ? parsed.totalAmount() : first(session.getTotalAmount(), parsed.totalAmount());
+        String merchant = merchant(session.getMerchantName(), parsed.merchantName());
         String categoryHint = categoryHint(text);
         List<String> warnings = new ArrayList<>();
         if (amount == null) warnings.add("RECEIPT_DRAFT_MISSING_AMOUNT");
@@ -28,7 +28,7 @@ public class ReceiptSessionDraftBuilder {
         if (session.getReceiptDate() == null && parsed.receiptDate() == null) warnings.add("RECEIPT_DATE_NOT_FOUND");
         if (merchant == null) warnings.add("RECEIPT_MERCHANT_NOT_FOUND");
         warnings.add("RECEIPT_DRAFT_MISSING_WALLET");
-        if (categoryHint == null) warnings.add("RECEIPT_DRAFT_MISSING_CATEGORY");
+        if (categoryHint == null) warnings.add("RECEIPT_CATEGORY_LOW_CONFIDENCE");
         else warnings.add("RECEIPT_CATEGORY_HINT_ONLY");
 
         return ReceiptSessionDraft.builder()
@@ -53,7 +53,7 @@ public class ReceiptSessionDraftBuilder {
         if (value.contains("xang") || value.contains("petrol") || value.contains("fuel")) return "Xăng xe";
         if (value.contains("ca phe") || value.contains("cafe") || value.contains("coffee") || value.contains("tra sua")) return "Cà phê";
         if (value.contains("restaurant") || value.contains("quan ") || value.contains("food")) return "Ăn uống";
-        if (value.contains("sieu thi") || value.contains("grocery") || value.contains("mart")) return "Mua sắm";
+        if (value.contains("bach hoa xanh") || value.contains("sieu thi") || value.contains("grocery") || value.contains("mart")) return "Di cho";
         if (value.contains("thuoc") || value.contains("pharmacy")) return "Y tế";
         if (value.contains("dien") || value.contains("nuoc") || value.contains("internet")) return "Tiện ích";
         return null;
@@ -67,5 +67,16 @@ public class ReceiptSessionDraftBuilder {
 
     private String first(String value, String fallback) {
         return value == null || value.isBlank() ? fallback : value;
+    }
+
+    private BigDecimal first(BigDecimal value, BigDecimal fallback) {
+        return value == null ? fallback : value;
+    }
+
+    private String merchant(String value, String fallback) {
+        String merchant = first(value, null);
+        if (merchant == null) return fallback;
+        String normalized = VietnameseTextNormalizer.comparable(merchant);
+        return normalized.matches(".*\\b\\d{1,2}:\\d{2}\\b.*") || normalized.matches(".*\\b\\d{5,}\\b.*") ? fallback : merchant;
     }
 }

@@ -114,6 +114,45 @@ class ReceiptReviewIntegrationTests {
     }
 
     @Test
+    void bachHoaXanhReceiptUsesPayableTotalAndDoesNotGuessShipperCategory() {
+        TestContext ctx = context("receipt_review_bhx", WorkspaceRole.OWNER);
+        category(ctx, "Dua/nhan do cho shipper");
+        category(ctx, "An uong");
+
+        ReceiptReviewParseResponse response = receiptReviewService.parse(ctx.workspace().getId(), request("""
+                PHIEU THANH TOAN BACH HOA XANH
+                30/07/2026 16:29 G
+                Phai thanh toan: 67.463
+                Diem su dung: 2.463
+                Tien mat (Da lam tron): 65.000
+                Tien khach dua: 200.000
+                Tien thoi lai: 135.000
+                Ma tra cuu: 6359148EDC
+                So CT: 18001067
+                """, null), ctx.user().getId());
+
+        assertThat(response.getCandidate().getAmount()).isEqualByComparingTo("67463");
+        assertThat(response.getCandidate().getMerchantName()).isEqualTo("Bách Hóa Xanh");
+        assertThat(response.getCandidate().getCategoryName()).isNotEqualTo("Dua/nhan do cho shipper");
+        assertThat(response.getExtracted().getLineAmounts()).doesNotContain(new BigDecimal("6359148"), new BigDecimal("18001067"), new BigDecimal("200000"), new BigDecimal("135000"), new BigDecimal("2463"));
+    }
+
+    @Test
+    void payableTotalBeatsLargestCustomerCashAmounts() {
+        TestContext ctx = context("receipt_review_total_rank", WorkspaceRole.OWNER);
+
+        ReceiptReviewParseResponse response = receiptReviewService.parse(ctx.workspace().getId(), request("""
+                MINI MART
+                Tien khach dua: 500.000
+                Tien thoi lai: 430.000
+                Phai thanh toan: 70.000
+                """, null), ctx.user().getId());
+
+        assertThat(response.getCandidate().getAmount()).isEqualByComparingTo("70000");
+        assertThat(response.getExtracted().getLineAmounts()).doesNotContain(new BigDecimal("500000"), new BigDecimal("430000"));
+    }
+
+    @Test
     void occurredAtHintIsUsedWhenReceiptDateMissing() {
         TestContext ctx = context("receipt_review_hint", WorkspaceRole.OWNER);
         ReceiptReviewParseRequest req = request("Cafe\nTotal 40000", null);

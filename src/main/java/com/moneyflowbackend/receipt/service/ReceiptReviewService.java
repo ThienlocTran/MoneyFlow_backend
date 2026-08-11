@@ -305,15 +305,6 @@ public class ReceiptReviewService {
 
     private Category category(UUID workspaceId, String rawText) {
         String comparable = VietnameseTextNormalizer.comparable(rawText);
-        List<CategoryKeyword> keywords = categoryKeywordRepository.findAllByWorkspaceIdOrderByPriorityDescKeywordAsc(workspaceId);
-        Category keywordMatch = keywords.stream()
-                .filter(keyword -> keyword.getCategory() != null && keyword.getCategory().getCategoryType() == CategoryType.EXPENSE)
-                .filter(keyword -> contains(comparable, keyword.getKeyword()))
-                .map(CategoryKeyword::getCategory)
-                .filter(this::usable)
-                .findFirst()
-                .orElse(null);
-        if (keywordMatch != null) return keywordMatch;
         List<String> preferredNames = preferredCategoryNames(comparable);
         if (preferredNames.isEmpty()) return null;
         return categoryRepository.findList(workspaceId, CategoryType.EXPENSE, null, true, false, null, false, false).stream()
@@ -325,7 +316,7 @@ public class ReceiptReviewService {
     private List<String> preferredCategoryNames(String text) {
         if (hasAny(text, "xang", "petrol", "fuel", "grab", "taxi")) return List.of("xang", "di lai", "di chuyen", "transport");
         if (hasAny(text, "cafe", "coffee", "tra sua", "ca phe")) return List.of("an uong", "do uong", "cafe", "coffee");
-        if (hasAny(text, "sieu thi", "coopmart", "bach hoa", "cua hang")) return List.of("groceries", "an uong", "cho");
+        if (hasAny(text, "sieu thi", "coopmart", "bach hoa", "bach hoa xanh", "cua hang")) return List.of("di cho", "groceries", "an uong");
         if (hasAny(text, "thuoc", "pharmacy")) return List.of("y te", "health");
         return List.of();
     }
@@ -372,6 +363,7 @@ public class ReceiptReviewService {
             case "RECEIPT_DATE_INFERRED" -> "Receipt date was inferred.";
             case "RECEIPT_CATEGORY_NOT_SELECTED" -> "Choose a category before saving.";
             case "RECEIPT_WALLET_NOT_SELECTED" -> "Choose a wallet before saving.";
+            case "RECEIPT_CATEGORY_LOW_CONFIDENCE" -> "Receipt category confidence is low.";
             case "RECEIPT_TEXT_TOO_SHORT" -> "Receipt text is too short.";
             case "RECEIPT_TEXT_REQUIRED_WHEN_OCR_DISABLED" -> "OCR hóa đơn chưa được bật. Hãy dán nội dung hóa đơn để tạo bản nháp.";
             case "RECEIPT_OCR_TEXT_EMPTY" -> "OCR không đọc được nội dung hóa đơn.";

@@ -452,6 +452,7 @@ public class VoiceSessionService {
         txReq.setAmount(amount(draft, req));
         txReq.setWalletId(walletId(draft, req));
         txReq.setCategoryId(categoryId(draft, req));
+        txReq.setIncomeSourceId(req == null ? null : req.getIncomeSourceId());
         txReq.setTransactionDate(occurredDate(req));
         txReq.setTransactionTime(occurredTime(req));
         txReq.setDescription(note(draft, req));

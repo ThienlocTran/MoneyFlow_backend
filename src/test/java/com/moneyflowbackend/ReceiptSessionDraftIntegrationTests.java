@@ -112,6 +112,29 @@ class ReceiptSessionDraftIntegrationTests {
     }
 
     @Test
+    void buildDraftPrefersLabelAwareReceiptTextOverBadOcrTotalAndMerchant() throws Exception {
+        TestUser owner = registerAndLogin("receipt_draft_bhx");
+        UUID sessionId = createSession(owner);
+        setOcr(owner, sessionId, """
+                PHIEU THANH TOAN BACH HOA XANH
+                30/07/2026 16:29 G
+                Phai thanh toan: 67.463
+                Diem su dung: 2.463
+                Tien mat (Da lam tron): 65.000
+                Tien khach dua: 200.000
+                Tien thoi lai: 135.000
+                Ma tra cuu: 6359148EDC
+                """, "16:29 G", null, new BigDecimal("6359148"));
+
+        mockMvc.perform(post("/api/workspaces/{workspaceId}/receipt-sessions/{sessionId}/drafts", owner.workspace().getId(), sessionId)
+                        .header("Authorization", bearer(owner.token())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.drafts[0].amount").value(67463))
+                .andExpect(jsonPath("$.data.drafts[0].merchantName").value("Bách Hóa Xanh"))
+                .andExpect(jsonPath("$.data.drafts[0].categoryHint").value("Di cho"));
+    }
+
+    @Test
     void dateParseAndIdempotentRebuildAvoidDuplicateDrafts() throws Exception {
         TestUser owner = registerAndLogin("receipt_draft_date");
         UUID sessionId = createSession(owner);

@@ -247,9 +247,9 @@ public class ReceiptSessionService {
         session.setOcrStatus(ReceiptSessionOcrStatus.SUCCEEDED);
         session.setRawOcrText(result.text());
         session.setNormalizedOcrText(normalized);
-        session.setMerchantName(result.merchantName() == null ? parsed.merchantName() : result.merchantName());
+        session.setMerchantName(safeMerchant(result.merchantName(), parsed.merchantName()));
         session.setReceiptDate(result.receiptDate() == null ? parsed.receiptDate() : result.receiptDate());
-        session.setTotalAmount(result.totalAmount() == null ? parsed.totalAmount() : result.totalAmount());
+        session.setTotalAmount(safeTotal(result.totalAmount(), parsed));
         session.setCurrency(result.currency() == null ? (session.getCurrency() == null ? "VND" : session.getCurrency()) : result.currency());
         session.setWarningsJson(writeWarnings(codesOrEmpty(result)));
         return detail(receiptSessionRepository.save(session));
@@ -543,6 +543,24 @@ public class ReceiptSessionService {
         return code == null || code.isBlank() ? fallback : code;
     }
 
+    private BigDecimal safeTotal(BigDecimal ocrTotal, ReceiptTextParser.ParsedReceipt parsed) {
+        if (parsed.totalAmount() != null && !parsed.totalInferred()) return parsed.totalAmount();
+        return ocrTotal == null ? parsed.totalAmount() : ocrTotal;
+    }
+
+    private String safeMerchant(String ocrMerchant, String parsedMerchant) {
+        String merchant = normalize(ocrMerchant);
+        if (merchant == null || looksLikeMerchantGarbage(merchant)) return normalize(parsedMerchant);
+        return merchant;
+    }
+
+    private boolean looksLikeMerchantGarbage(String value) {
+        String normalized = com.moneyflowbackend.quickentry.parser.VietnameseTextNormalizer.comparable(value);
+        return normalized.matches(".*\\b\\d{1,2}:\\d{2}\\b.*")
+                || normalized.matches(".*\\b\\d{5,}\\b.*")
+                || normalized.length() <= 3;
+    }
+
     private String writeWarnings(List<ReceiptSessionWarningResponse> warnings) {
         List<String> codes = warnings.stream().map(ReceiptSessionWarningResponse::getCode).distinct().toList();
         return String.join(",", codes);
@@ -597,6 +615,7 @@ public class ReceiptSessionService {
             case "RECEIPT_DATE_AMBIGUOUS" -> "Receipt date is ambiguous.";
             case "RECEIPT_TOTAL_INFERRED" -> "Receipt total was inferred from OCR text.";
             case "RECEIPT_CATEGORY_HINT_ONLY" -> "Receipt category is a hint only.";
+            case "RECEIPT_CATEGORY_LOW_CONFIDENCE" -> "Receipt category confidence is low.";
             case "RECEIPT_MERCHANT_NOT_FOUND" -> "Receipt merchant was not found.";
             default -> "Receipt session needs review.";
         };

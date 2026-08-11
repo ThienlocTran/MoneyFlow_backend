@@ -20,7 +20,12 @@ public class ReceiptTextParser {
     private static final Pattern DATE = Pattern.compile("\\b(?:ngay\\s*)?(\\d{1,2}[/-]\\d{1,2}[/-]\\d{2,4}|\\d{4}-\\d{1,2}-\\d{1,2})\\b", Pattern.CASE_INSENSITIVE);
     private static final Pattern AMOUNT = Pattern.compile("(?<!\\d)(\\d{1,3}(?:[.,]\\d{3})+|\\d{4,9}|\\d{1,3})\\s*(k|nghin|ngan)?(?!\\d)", Pattern.CASE_INSENSITIVE);
     private static final List<String> TOTAL_KEYWORDS = List.of(
-            "tong cong", "tong tien", "thanh toan", "phai tra", "total", "grand total");
+            "phai thanh toan", "tong thanh toan", "tong cong", "can thanh toan", "thanh tien", "tong tien", "phai tra", "grand total", "total");
+    private static final List<String> MEDIUM_TOTAL_KEYWORDS = List.of(
+            "tien mat", "da lam tron", "khach thanh toan");
+    private static final List<String> EXCLUDED_AMOUNT_KEYWORDS = List.of(
+            "tien khach dua", "tien thoi lai", "tien tra lai", "diem su dung", "vat", "so ct", "ma tra cuu", "ma hoa don",
+            "receipt", "lookup", "order", "tel", "phone", "mst");
     private static final List<String> SKIP_MERCHANT = List.of(
             "ngay", "date", "time", "gio", "mst", "tax", "vat", "hoa don", "invoice", "order", "ma", "so hd", "tel", "phone", "total", "tong");
 
@@ -40,38 +45,30 @@ public class ReceiptTextParser {
 
     private Optional<AmountHit> totalAmount(String text, List<AmountHit> amounts) {
         if (amounts.isEmpty()) return Optional.empty();
-        String normalized = VietnameseTextNormalizer.comparable(text);
-        for (String keyword : TOTAL_KEYWORDS) {
-            int keywordIndex = normalized.lastIndexOf(keyword);
-            if (keywordIndex < 0) continue;
-            Optional<AmountHit> afterKeyword = amounts.stream()
-                    .filter(hit -> hit.start() >= keywordIndex)
-                    .min(Comparator.comparingInt(hit -> hit.start() - keywordIndex));
-            if (afterKeyword.isPresent()) {
-                AmountHit hit = afterKeyword.get();
-                return Optional.of(new AmountHit(hit.amount(), hit.start(), true));
-            }
-            Optional<AmountHit> nearby = amounts.stream()
-                    .filter(hit -> Math.abs(hit.start() - keywordIndex) <= 40)
-                    .min(Comparator.comparingInt(hit -> Math.abs(hit.start() - keywordIndex)));
-            if (nearby.isPresent()) {
-                AmountHit hit = nearby.get();
-                return Optional.of(new AmountHit(hit.amount(), hit.start(), true));
-            }
-        }
+        Optional<AmountHit> labelled = amounts.stream()
+                .filter(hit -> hit.score() > 0)
+                .max(Comparator.comparingInt(AmountHit::score).thenComparing(AmountHit::amount));
+        if (labelled.isPresent()) return labelled;
         return amounts.stream().max(Comparator.comparing(AmountHit::amount));
     }
 
     private List<AmountHit> amounts(String text) {
-        Matcher matcher = AMOUNT.matcher(VietnameseTextNormalizer.comparable(text));
         List<AmountHit> hits = new ArrayList<>();
-        while (matcher.find()) {
-            String token = matcher.group(1);
-            if (looksLikeIdOrDate(text, matcher.start(), matcher.end(), token)) continue;
-            BigDecimal amount = parseAmount(token, matcher.group(2));
-            if (amount.compareTo(BigDecimal.valueOf(1000)) >= 0 && amount.compareTo(BigDecimal.valueOf(100_000_000)) <= 0) {
-                hits.add(new AmountHit(amount, matcher.start(), false));
+        int offset = 0;
+        for (String rawLine : text.lines().toList()) {
+            String line = VietnameseTextNormalizer.comparable(rawLine);
+            Matcher matcher = AMOUNT.matcher(line);
+            while (matcher.find()) {
+                String token = matcher.group(1);
+                if (looksLikeIdOrDate(line, matcher.start(), matcher.end(), token)) continue;
+                if (containsAny(line, EXCLUDED_AMOUNT_KEYWORDS)) continue;
+                BigDecimal amount = parseAmount(token, matcher.group(2));
+                if (amount.compareTo(BigDecimal.valueOf(1000)) >= 0 && amount.compareTo(BigDecimal.valueOf(100_000_000)) <= 0) {
+                    int score = containsAny(line, TOTAL_KEYWORDS) ? 100 : containsAny(line, MEDIUM_TOTAL_KEYWORDS) ? 50 : 0;
+                    hits.add(new AmountHit(amount, offset + matcher.start(), score > 0, score));
+                }
             }
+            offset += rawLine.length() + 1;
         }
         return hits;
     }
@@ -88,20 +85,37 @@ public class ReceiptTextParser {
     private boolean looksLikeIdOrDate(String text, int start, int end, String token) {
         int left = Math.max(0, start - 12);
         int right = Math.min(text.length(), end + 12);
-        String context = VietnameseTextNormalizer.comparable(text.substring(left, right));
+        String context = text.substring(left, right);
         String digits = token.replace(".", "").replace(",", "");
         return context.matches(".*\\d{1,2}[/-]\\d{1,2}.*")
                 || context.contains("tel") || context.contains("phone") || context.contains("mst")
-                || context.contains("ma ") || context.contains("order")
+                || context.contains("ma ") || context.contains("ma:") || context.contains("ma tra cuu") || context.contains("so ct") || context.contains("order")
                 || digits.length() > 9;
     }
 
     private Optional<String> merchant(List<String> lines) {
+        Optional<String> bachHoaXanh = lines.stream()
+                .filter(line -> VietnameseTextNormalizer.comparable(line).contains("bach hoa xanh"))
+                .map(line -> "Bách Hóa Xanh")
+                .findFirst();
+        if (bachHoaXanh.isPresent()) return bachHoaXanh;
         return lines.stream()
                 .filter(line -> line.length() >= 2)
+                .filter(line -> !looksLikeTimeOrCode(line))
                 .filter(line -> SKIP_MERCHANT.stream().noneMatch(skip -> VietnameseTextNormalizer.comparable(line).contains(skip)))
                 .filter(line -> !line.matches(".*\\d{4,}.*"))
                 .findFirst();
+    }
+
+    private boolean containsAny(String text, List<String> needles) {
+        return needles.stream().anyMatch(text::contains);
+    }
+
+    private boolean looksLikeTimeOrCode(String line) {
+        String normalized = VietnameseTextNormalizer.comparable(line);
+        return normalized.matches(".*\\b\\d{1,2}:\\d{2}\\b.*")
+                || normalized.matches(".*\\b\\d{1,2}[/-]\\d{1,2}([/-]\\d{2,4})?\\b.*")
+                || normalized.matches(".*\\b\\d{5,}\\b.*");
     }
 
     private Optional<LocalDate> date(String text) {
@@ -130,6 +144,6 @@ public class ReceiptTextParser {
     public record ParsedReceipt(String merchantName, LocalDate receiptDate, BigDecimal totalAmount, List<BigDecimal> lineAmounts, boolean totalInferred) {
     }
 
-    private record AmountHit(BigDecimal amount, int start, boolean totalKeyword) {
+    private record AmountHit(BigDecimal amount, int start, boolean totalKeyword, int score) {
     }
 }

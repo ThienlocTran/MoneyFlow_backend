@@ -11,6 +11,7 @@ public class VoiceSessionConfirmDraftRequest {
     private BigDecimal amount;
     private UUID walletId;
     private UUID categoryId;
+    private UUID incomeSourceId;
     private UUID jarId;
     private OffsetDateTime occurredAt;
     private String note;
