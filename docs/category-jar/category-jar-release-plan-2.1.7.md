@@ -1,6 +1,6 @@
 # Category/Jar Backend Release Plan 2.1.7
 
-Status: PLANNED / NOT IMPLEMENTED. P14A is docs/audit/spec only.
+Status: P14B grouped Jar Board read API implemented. P14C stats remains planned.
 
 ## Theme
 
@@ -31,7 +31,7 @@ MoneyFlow 2.1.7 prepares Category/Jar as a backend product layer for a future Ja
 | Phase | Goal | Scope | Deferred | Targeted tests | Acceptance criteria |
 | --- | --- | --- | --- | --- | --- |
 | P14A | Category/Jar backend audit + contract | Docs, current model/API map, risks, contract, release plan, release stub | Runtime code | Docs validation only | Docs exist and do not claim board implementation. |
-| P14B | Jar board grouped read API | Read-only `GET /category-board` with jars, categories, uncategorized group, metadata, warnings | Write APIs, deep stats | `*CategoryBoard*Tests,*JarCategory*Tests` | Frontend can fetch a grouped board without mutations or fake rows. |
+| P14B | Jar board grouped read API | Complete: read-only `GET /category-board` with jars, categories, uncategorized group, metadata, warnings | Write APIs, deep stats | `*CategoryBoard*Tests,*JarCategory*Tests` | Frontend can fetch a grouped board without mutations or fake rows. |
 | P14C | Category/Jar stats query layer | Period stats: transaction count, totals, last used, jar totals, uncategorized totals | Chart/UI formatting | `*CategoryJarStats*Tests,*CategoryBoard*Tests` | Stats use posted, non-deleted, workspace/date-scoped transactions. |
 | P14D | Move/reorder category and jar ordering | Dedicated move API, board reorder API, validation, historical warning | Merge, jar snapshot migration | `*CategoryMove*Tests,*CategoryReorder*Tests,*JarReorder*Tests` | Move keeps category id, does not rewrite transactions, reorder rejects duplicates/cross-workspace ids. |
 | P14E | Safe archive/delete behavior | Align archive/delete endpoints and error codes, block unsafe hard delete, expose usage warnings | Merge, bulk cleanup | `*CategoryArchive*Tests,*JarArchive*Tests,*CategoryDelete*Tests` | Used categories/jars are archived or blocked, never orphan history. |
@@ -109,6 +109,24 @@ Targeted validation:
 
 No Java tests are required for P14A because no runtime code changed.
 
+## P14B Delivered
+
+- Added read-only `GET /api/workspaces/{workspaceId}/category-board`.
+- Added board response DTOs for jar groups, category items, uncategorized group, and warnings.
+- Grouped categories by visible workspace jar.
+- Returned uncategorized categories under `groupKey=UNCATEGORIZED`.
+- Added default active/non-archived filtering and `includeArchived=true` override.
+- Added `includeEmptyJars`, `includeUncategorized`, and `includeStats` query flags.
+- Kept stats deferred; `includeStats=true` returns `CATEGORY_BOARD_STATS_NOT_IMPLEMENTED`.
+- Returned conservative can flags: active categories can move/archive, delete remains false.
+- Preserved read-only behavior with no category, jar, or transaction mutation.
+
+Targeted validation:
+
+`.\mvnw.cmd "-Dtest=*CategoryBoard*Tests,*JarBoard*Tests,*CategoryJar*Tests" test`
+
+Result: targeted Category/Jar board tests passed.
+
 ## Next Queue Item
 
-P14B - Jar board grouped read API.
+P14C - Category/Jar stats query layer.

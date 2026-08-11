@@ -1,6 +1,6 @@
 # Category/Jar Backend Contract V1
 
-Status: PLANNED / NOT IMPLEMENTED for 2.1.7 board contract. Existing CRUD and monthly summary APIs remain live.
+Status: P14B grouped Jar Board read API implemented. Stats, move/reorder, archive/delete alignment, and frontend UI remain deferred.
 
 ## Concepts
 
@@ -102,18 +102,29 @@ Base board endpoint:
 
 Query:
 
-- `from` optional, `YYYY-MM-DD`
-- `to` optional, `YYYY-MM-DD`
 - `includeArchived` optional, default `false`
-- `includeStats` optional, default `true`
+- `includeEmptyJars` optional, default `true`
+- `includeUncategorized` optional, default `true`
+- `includeStats` optional, default `false`
 
 Returns:
 
 - jars with categories
 - uncategorized categories
-- per jar/category stats for selected period
 - display metadata
 - warnings
+
+P14B behavior:
+
+- groups categories under current workspace jars
+- puts categories without a visible jar into `uncategorizedGroup`
+- includes active jars and active, non-archived categories by default
+- includes inactive/archived rows only when `includeArchived=true`
+- includes empty active jars by default
+- hides empty jars when `includeEmptyJars=false`
+- returns `CATEGORY_BOARD_STATS_NOT_IMPLEMENTED` when `includeStats=true`
+- returns `HISTORICAL_JAR_SNAPSHOT_UNAVAILABLE` because transactions do not store jar snapshot
+- never mutates jars, categories, or transactions
 
 Existing endpoints to preserve:
 
@@ -188,6 +199,36 @@ Deferred. Merge rewrites transaction category ids and requires explicit confirma
 - Active duplicate names should be avoided in the same workspace/type. Current code blocks duplicates per workspace/type, regardless of jar.
 - Voice/OCR hints may resolve to active category by normalized name/keyword. If multiple matches exist, do not guess.
 - Workspace isolation applies to category, jar, wallet, transaction, keyword, and stats queries.
+
+## P14B Implemented Foundation
+
+Endpoint:
+
+- `GET /api/workspaces/{workspaceId}/category-board`
+
+Response DTOs:
+
+- `CategoryBoardResponse`
+- `JarBoardGroupResponse`
+- `CategoryBoardItemResponse`
+- `UncategorizedGroupResponse`
+
+Ordering:
+
+- jars: `displayOrder`, `name`, `createdAt`, `id`
+- categories inside each group: `displayOrder`, `name`, `createdAt`, `id`
+- uncategorized group is returned separately
+
+Can flags:
+
+- active, non-archived categories return `canMove=true`, `canArchive=true`
+- archived/inactive categories return conservative false flags
+- `canDelete=false` in P14B; safe delete is P14E
+
+Stats:
+
+- no spending totals in P14B
+- `includeStats=true` returns `CATEGORY_BOARD_STATS_NOT_IMPLEMENTED`
 
 ## Historical Reporting Recommendation
 
