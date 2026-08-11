@@ -1,16 +1,14 @@
 # Financial Insight Release Plan 2.1.5
 
-Status: PLANNED / NOT IMPLEMENTED.
+Status: P12B complete in backend code. Public insight APIs remain planned.
 
 ## Theme
 
-Financial Insight Backend Foundation.
-
-MoneyFlow should explain useful financial signals from real ledger data. This release must remain deterministic, evidence-backed, workspace-scoped, and read-only until the user chooses an existing action flow.
+MoneyFlow 2.1.5 adds deterministic Financial Insight backend foundations. Insights must be real-data, read-only, workspace-scoped, and evidence-backed.
 
 ## Scope
 
-Included:
+Included across 2.1.5:
 
 - Metric audit and backend contract.
 - Read-only metric query layer.
@@ -25,70 +23,70 @@ Deferred:
 - AI/LLM summary generation.
 - Scheduled notifications.
 - Frontend insight dashboard.
-- New database schema.
+- New database schema unless later phases prove need.
 - User-configured budgets unless explicitly added later.
-- Receipt/voice insight generation beyond confirmed transaction evidence.
 
 ## Phase Table
 
-| Phase | Goal | Included | Deferred | Tests | Acceptance criteria |
-| --- | --- | --- | --- | --- | --- |
-| P12A | Spec and metric audit | Audit docs, contract, release plan, release stub | Runtime endpoints and code | Docs checks only | Docs identify available metrics, gaps, formulas, risks, and P12B-P12G plan. |
-| P12B | Insight metric query layer | Read-only aggregate service for income, expense, category, jar, income source, no-wallet income, baselines | Public API and card copy | Focused repository/service tests | Queries are workspace-scoped, date-range aware, exclude deleted/draft/planned/void, and preserve debt/transfer rules. |
-| P12C | Spending/category/jar insight rules | `SPENDING_SPIKE`, `CATEGORY_OVERSPEND`, `JAR_OVERSPEND`, `UNUSUAL_TRANSACTION` deterministic cards | AI summaries, custom budgets if absent | Rule service tests | Cards include evidence, severity, confidence, thresholds, and exclusions. |
-| P12D | Actually spendable calculation backend | Insight wrapper around planning formula, reserve warnings, upcoming obligations | Payable debt auto-subtraction unless contract changes | Planning/insight integration tests | Uses existing planning service, shows assumptions and exclusions, does not alter balances. |
-| P12E | Action items/data quality insights | Missing category, missing jar, no-wallet income, variable obligation amount, stale closing, drafts needing review | Auto-fixes | Service/API tests | Action items route to existing modules and never mutate data. |
-| P12F | Insight API endpoints | `/insights/overview`, `/spending`, `/actually-spendable`, `/anomalies`, `/action-items` | Frontend UI | Controller integration tests | Endpoints return stable DTOs, membership checked, no writes, no fake data. |
-| P12G | Release lock | Docs, validation, known limitations, UAT checklist | New features | Targeted suites and scans | Backend status locked honestly. |
+| Phase | Goal | Status | Acceptance criteria |
+| --- | --- | --- | --- |
+| P12A | Spec and metric audit | Complete | Docs identify formulas, gaps, risks, and P12B-P12G plan. |
+| P12B | Insight metric query layer | Complete | Queries are workspace-scoped, date-range aware, exclude deleted/draft/planned/void, preserve debt/transfer rules. |
+| P12C | Spending/category/jar insight rules | Next | Cards include evidence, severity, confidence, thresholds, and exclusions. |
+| P12D | Actually spendable calculation backend | Planned | Uses existing planning service and states exclusions. |
+| P12E | Action items/data quality insights | Planned | Action items route to existing modules and never mutate data. |
+| P12F | Insight API endpoints | Planned | Endpoints return stable DTOs, membership checked, no writes, no fake data. |
+| P12G | Release lock | Planned | Targeted suites and release scans pass or limitations are documented. |
 
-## Acceptance Criteria
+## P12B Delivered
 
-- No insight endpoint writes financial data.
-- No fake/mock/sample runtime insight data.
-- No external AI or LLM calls.
-- Every response is workspace-scoped and evidence-backed.
-- Transfers are excluded from income/expense insight totals.
-- Debt movement transaction types are not counted as normal income/expense.
-- No-wallet income is income-statistical only, not wallet balance.
-- Historical analytics-only rows are never replayed into wallet balance.
-- Unconfirmed voice/receipt drafts are excluded from ledger metrics.
-- Actually spendable uses existing planning rules and states exclusions.
-- Missing data appears as action items or data quality warnings, not guessed values.
-- Large-history queries use aggregate DB queries, not full table scans in Java.
+- Added `FinancialMetricQueryService`.
+- Added internal DTO records for period totals, breakdown rows, no-wallet income, and wallet-affecting summary.
+- Used JPQL aggregate queries to avoid loading transaction history into Java.
+- Kept `from` and `to` inclusive with `LocalDate`.
+- Kept public API work deferred.
+- Kept insight card generation deferred.
+
+## P12B Test Coverage
+
+`FinancialInsightMetricQueryServiceTests` covers:
+
+- period totals
+- no-wallet income
+- income with wallet
+- expense by category
+- expense by jar
+- uncategorized expense
+- transfers excluded from income/expense
+- debt movements excluded from normal income/expense
+- adjustments/snapshots excluded from normal income/expense
+- drafts/planned/deleted excluded
+- historical analytics-only rows included in income stats but excluded from wallet-affecting movement
+- inclusive date range boundaries
+- workspace isolation
+- empty state
+- invalid date range
 
 ## Validation Strategy
 
-- P12A: `git diff --check`, mojibake scan, secret scan.
-- P12B: insight metric query tests plus `TransactionModuleIntegrationTests`.
+- P12B: `FinancialInsightMetricQueryServiceTests` plus transaction regression suite.
 - P12C: spending rule tests with threshold and insufficient-baseline cases.
-- P12D: planning and actually-spendable tests.
-- P12E: action item tests for missing fields, no-wallet income, drafts, stale closing.
-- P12F: controller integration tests for every endpoint, workspace isolation, empty-state responses.
-- P12G: targeted insight, dashboard, planning, transaction, voice/receipt smoke suites plus release scans.
+- P12D: planning and actually-spendable integration tests.
+- P12E: action item tests for missing fields and stale data.
+- P12F: controller integration tests for membership, no writes, and empty states.
+- P12G: targeted insight, dashboard, planning, transaction, voice, and receipt smoke suites.
 
 ## Risk Register
 
 | Risk | Mitigation |
 | --- | --- |
-| Generic advice with no evidence | Require `evidence[]` and metric formulas for every card. |
-| Double-count historical imports | Centralize inclusion/exclusion rules in P12B. |
-| Counting debt movement as income/expense | Use statistical `INCOME` and `EXPENSE` only for cashflow. |
-| Mixing wallet balance and income stats | Label wallet balance separately from net cashflow. |
-| False anomaly positives | Require threshold plus minimum absolute delta and confidence levels. |
-| Slow dashboard on large history | Aggregate in repository queries and page evidence IDs. |
-| Cross-workspace leakage | Membership check plus `workspaceId` in every query. |
-| Frontend invents meaning | Backend response includes labels, messages, actions, evidence, and exclusions. |
-| Mojibake in Vietnamese copy | Scan docs/source before completion. |
-
-## Deferred Modules
-
-- Frontend insight dashboard.
-- Push/email reminders.
-- AI natural-language narrative.
-- User-defined budgets.
-- Forecasting beyond deterministic baselines.
-- Bank sync or automatic balance import.
+| Generic advice with no evidence | Require metric evidence for every later card. |
+| Double-count historical imports | Centralize statistical vs wallet-affecting formulas. |
+| Debt movement counted as income/expense | Normal totals use only `INCOME` and `EXPENSE`. |
+| Wallet balance confused with cashflow | Wallet-affecting summary is separate; balances still use `WalletBalanceService`. |
+| Cross-workspace leakage | Every P12B query filters by `workspaceId`; endpoint membership checks come in P12F. |
+| Slow large-history insight queries | Use aggregate DB queries and small evidence samples. |
 
 ## Next Queue Item
 
-P12B - insight metric query layer.
+P12C - spending/category/jar insight rules.
