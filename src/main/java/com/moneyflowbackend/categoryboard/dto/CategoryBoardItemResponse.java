@@ -16,5 +16,6 @@ public record CategoryBoardItemResponse(
         boolean canMove,
         boolean canArchive,
         boolean canDelete,
+        CategoryStatsResponse stats,
         List<String> warnings) {
 }

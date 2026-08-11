@@ -12,5 +12,6 @@ public record JarBoardGroupResponse(
         Integer displayOrder,
         String status,
         long categoryCount,
+        JarStatsResponse stats,
         List<CategoryBoardItemResponse> categories) {
 }

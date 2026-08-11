@@ -10,6 +10,8 @@ public record CategoryBoardResponse(
         boolean includeArchived,
         boolean includeEmptyJars,
         boolean includeUncategorized,
+        BoardPeriodResponse period,
+        BoardStatsResponse boardStats,
         List<JarBoardGroupResponse> jars,
         UncategorizedGroupResponse uncategorizedGroup,
         List<String> warnings) {

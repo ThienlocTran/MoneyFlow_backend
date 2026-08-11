@@ -29,13 +29,19 @@ public class CategoryBoardController {
             @RequestParam(defaultValue = "false") boolean includeArchived,
             @RequestParam(defaultValue = "true") boolean includeEmptyJars,
             @RequestParam(defaultValue = "true") boolean includeUncategorized,
-            @RequestParam(defaultValue = "false") boolean includeStats) {
+            @RequestParam(defaultValue = "false") boolean includeStats,
+            @RequestParam(required = false) String from,
+            @RequestParam(required = false) String to,
+            @RequestParam(required = false) String period) {
         CategoryBoardResponse res = categoryBoardService.getBoard(
                 workspaceId,
                 includeArchived,
                 includeEmptyJars,
                 includeUncategorized,
                 includeStats,
+                from,
+                to,
+                period,
                 currentUserId());
         return ResponseEntity.ok(ApiResponse.ok("Category board loaded", res));
     }

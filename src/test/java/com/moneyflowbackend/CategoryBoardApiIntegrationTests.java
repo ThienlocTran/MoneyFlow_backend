@@ -12,9 +12,11 @@ import com.moneyflowbackend.category.model.CategoryType;
 import com.moneyflowbackend.category.repository.CategoryRepository;
 import com.moneyflowbackend.categoryboard.dto.CategoryBoardResponse;
 import com.moneyflowbackend.categoryboard.service.CategoryBoardService;
+import com.moneyflowbackend.common.exception.BusinessException;
 import com.moneyflowbackend.jar.model.Jar;
 import com.moneyflowbackend.jar.repository.JarRepository;
 import com.moneyflowbackend.transaction.model.Transaction;
+import com.moneyflowbackend.transaction.model.TransactionStatus;
 import com.moneyflowbackend.transaction.model.TransactionType;
 import com.moneyflowbackend.transaction.repository.TransactionRepository;
 import com.moneyflowbackend.workspace.model.Workspace;
@@ -26,15 +28,22 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -53,6 +62,15 @@ class CategoryBoardApiIntegrationTests {
     @Autowired CategoryRepository categoryRepository;
     @Autowired TransactionRepository transactionRepository;
     @Autowired CategoryBoardService categoryBoardService;
+
+    @TestConfiguration
+    static class FixedClockConfig {
+        @Bean
+        @Primary
+        Clock fixedClock() {
+            return Clock.fixed(Instant.parse("2026-08-11T00:00:00Z"), ZoneOffset.UTC);
+        }
+    }
 
     @Test
     void boardEndpointReturnsGroupedJarsAndUncategorizedCategories() throws Exception {
@@ -91,9 +109,10 @@ class CategoryBoardApiIntegrationTests {
         Category archived = category(ctx.workspace(), food, "Archived", 3, false, true);
 
         CategoryBoardResponse defaultBoard = categoryBoardService.getBoard(
-                ctx.workspace().getId(), false, true, true, true, ctx.user().getId());
+                ctx.workspace().getId(), false, true, true, true, null, null, null, ctx.user().getId());
 
-        assertThat(defaultBoard.warnings()).contains("CATEGORY_BOARD_STATS_NOT_IMPLEMENTED", "HISTORICAL_JAR_SNAPSHOT_UNAVAILABLE");
+        assertThat(defaultBoard.warnings()).contains("HISTORICAL_JAR_SNAPSHOT_UNAVAILABLE");
+        assertThat(defaultBoard.period().label()).isEqualTo("month");
         assertThat(defaultBoard.jars()).extracting("jarId").containsExactly(empty.getId(), food.getId());
         assertThat(defaultBoard.jars().get(1).categories()).extracting("categoryId").containsExactly(first.getId(), active.getId());
         assertThat(defaultBoard.jars().get(1).categories()).allSatisfy(item -> {
@@ -103,14 +122,92 @@ class CategoryBoardApiIntegrationTests {
         });
 
         CategoryBoardResponse withoutEmpty = categoryBoardService.getBoard(
-                ctx.workspace().getId(), false, false, true, false, ctx.user().getId());
+                ctx.workspace().getId(), false, false, true, false, null, null, null, ctx.user().getId());
         assertThat(withoutEmpty.jars()).extracting("jarId").containsExactly(food.getId());
+        assertThat(withoutEmpty.boardStats()).isNull();
 
         CategoryBoardResponse withArchived = categoryBoardService.getBoard(
-                ctx.workspace().getId(), true, true, true, false, ctx.user().getId());
+                ctx.workspace().getId(), true, true, true, false, null, null, null, ctx.user().getId());
         assertThat(withArchived.jars().get(1).categories()).extracting("categoryId")
                 .containsExactly(first.getId(), active.getId(), archived.getId());
         assertThat(withArchived.jars().get(1).categories().get(2).canMove()).isFalse();
+    }
+
+    @Test
+    void boardStatsAggregatePeriodRowsAndExcludeNonPostedExpenseNoise() {
+        TestContext ctx = context("board_stats");
+        Jar food = jar(ctx.workspace(), "FOOD", "Ăn uống", 1, true);
+        Jar travel = jar(ctx.workspace(), "TRAVEL", "Di chuyển", 2, true);
+        Category coffee = category(ctx.workspace(), food, "Cà phê", 1, true, false);
+        Category breakfast = category(ctx.workspace(), food, "Ăn sáng", 2, true, false);
+        Category fuel = category(ctx.workspace(), travel, "Xăng xe", 1, true, false);
+        Category noJar = category(ctx.workspace(), null, "Chưa gắn", 1, true, false);
+        Category income = category(ctx.workspace(), null, "Lương", 3, true, false, CategoryType.INCOME);
+        TestContext other = context("board_stats_other");
+        Category otherCategory = category(other.workspace(), null, "Other", 1, true, false);
+
+        tx(ctx, coffee, TransactionType.EXPENSE, TransactionStatus.POSTED, "25000", "2026-08-02", false);
+        tx(ctx, coffee, TransactionType.EXPENSE, TransactionStatus.POSTED, "30000", "2026-08-10", false);
+        tx(ctx, breakfast, TransactionType.EXPENSE, TransactionStatus.POSTED, "45000", "2026-08-03", false);
+        tx(ctx, fuel, TransactionType.EXPENSE, TransactionStatus.POSTED, "100000", "2026-08-04", false);
+        tx(ctx, noJar, TransactionType.EXPENSE, TransactionStatus.POSTED, "20000", "2026-08-05", false);
+        tx(ctx, null, TransactionType.EXPENSE, TransactionStatus.POSTED, "15000", "2026-08-06", false);
+        tx(ctx, income, TransactionType.INCOME, TransactionStatus.POSTED, "1000000", "2026-08-07", false);
+        tx(ctx, coffee, TransactionType.EXPENSE, TransactionStatus.DRAFT, "999999", "2026-08-08", false);
+        tx(ctx, coffee, TransactionType.EXPENSE, TransactionStatus.POSTED, "999999", "2026-08-08", true);
+        tx(ctx, coffee, TransactionType.TRANSFER, TransactionStatus.POSTED, "999999", "2026-08-08", false);
+        tx(ctx, coffee, TransactionType.EXPENSE, TransactionStatus.POSTED, "999999", "2026-07-31", false);
+        tx(other, otherCategory, TransactionType.EXPENSE, TransactionStatus.POSTED, "999999", "2026-08-02", false);
+
+        CategoryBoardResponse board = categoryBoardService.getBoard(
+                ctx.workspace().getId(), false, true, true, true, "2026-08-01", "2026-08-31", null, ctx.user().getId());
+
+        assertThat(board.period().from()).isEqualTo(LocalDate.parse("2026-08-01"));
+        assertThat(board.period().to()).isEqualTo(LocalDate.parse("2026-08-31"));
+        assertThat(board.boardStats().totalExpense()).isEqualByComparingTo("235000");
+        assertThat(board.boardStats().totalIncome()).isEqualByComparingTo("1000000");
+        assertThat(board.boardStats().categorizedExpense()).isEqualByComparingTo("200000");
+        assertThat(board.boardStats().uncategorizedExpense()).isEqualByComparingTo("35000");
+        assertThat(board.boardStats().uncategorizedCount()).isEqualTo(2);
+
+        var foodGroup = board.jars().get(0);
+        assertThat(foodGroup.stats().totalExpense()).isEqualByComparingTo("100000");
+        assertThat(foodGroup.stats().expenseTransactionCount()).isEqualTo(3);
+        assertThat(foodGroup.stats().percentageOfTotalExpense()).isEqualByComparingTo("42.55");
+        assertThat(foodGroup.stats().lastUsedAt()).isEqualTo(LocalDate.parse("2026-08-10"));
+        assertThat(foodGroup.stats().usedCategoryCount()).isEqualTo(2);
+        assertThat(foodGroup.categories().get(0).stats().totalExpense()).isEqualByComparingTo("55000");
+        assertThat(foodGroup.categories().get(0).stats().expenseTransactionCount()).isEqualTo(2);
+        assertThat(foodGroup.categories().get(0).stats().percentageOfTotalExpense()).isEqualByComparingTo("23.40");
+        assertThat(foodGroup.categories().get(0).stats().lastUsedAt()).isEqualTo(LocalDate.parse("2026-08-10"));
+
+        assertThat(board.uncategorizedGroup().stats().totalExpense()).isEqualByComparingTo("35000");
+        assertThat(board.uncategorizedGroup().stats().transactionCount()).isEqualTo(2);
+        assertThat(board.uncategorizedGroup().categories().get(0).stats().totalExpense()).isEqualByComparingTo("20000");
+    }
+
+    @Test
+    void boardStatsDefaultRangeZeroTotalsAndDateValidationWork() {
+        TestContext ctx = context("board_stats_zero");
+        Jar jar = jar(ctx.workspace(), "ZERO", "Zero", 1, true);
+        category(ctx.workspace(), jar, "Unused", 1, true, false);
+
+        CategoryBoardResponse board = categoryBoardService.getBoard(
+                ctx.workspace().getId(), false, true, true, true, null, null, null, ctx.user().getId());
+
+        assertThat(board.period().from()).isEqualTo(LocalDate.parse("2026-08-01"));
+        assertThat(board.period().to()).isEqualTo(LocalDate.parse("2026-08-31"));
+        assertThat(board.boardStats().totalExpense()).isEqualByComparingTo("0");
+        assertThat(board.jars().get(0).stats().percentageOfTotalExpense()).isEqualByComparingTo("0");
+
+        assertThatThrownBy(() -> categoryBoardService.getBoard(
+                ctx.workspace().getId(), false, true, true, true, "2026-08-31", "2026-08-01", null, ctx.user().getId()))
+                .isInstanceOf(BusinessException.class)
+                .extracting("code").isEqualTo("INVALID_DATE_RANGE");
+        assertThatThrownBy(() -> categoryBoardService.getBoard(
+                ctx.workspace().getId(), false, true, true, true, null, null, "forever", ctx.user().getId()))
+                .isInstanceOf(BusinessException.class)
+                .extracting("code").isEqualTo("INVALID_PERIOD");
     }
 
     @Test
@@ -135,7 +232,7 @@ class CategoryBoardApiIntegrationTests {
         long transactionCount = transactionRepository.count();
 
         CategoryBoardResponse board = categoryBoardService.getBoard(
-                owner.workspace().getId(), false, true, true, false, owner.user().getId());
+                owner.workspace().getId(), false, true, true, false, null, null, null, owner.user().getId());
 
         assertThat(board.jars()).extracting("jarId").containsExactly(ownJar.getId());
         assertThat(board.jars().getFirst().categories()).extracting("categoryId").containsExactly(own.getId());
@@ -183,15 +280,39 @@ class CategoryBoardApiIntegrationTests {
     }
 
     private Category category(Workspace workspace, Jar jar, String name, int order, boolean active, boolean archived) {
+        return category(workspace, jar, name, order, active, archived, CategoryType.EXPENSE);
+    }
+
+    private Category category(Workspace workspace, Jar jar, String name, int order, boolean active, boolean archived, CategoryType type) {
         return categoryRepository.save(Category.builder()
                 .workspace(workspace)
                 .jar(jar)
                 .name(name)
-                .categoryType(CategoryType.EXPENSE)
+                .categoryType(type)
                 .icon("folder")
                 .displayOrder(order)
                 .isActive(active)
                 .isArchived(archived)
+                .build());
+    }
+
+    private Transaction tx(
+            TestContext ctx,
+            Category category,
+            TransactionType type,
+            TransactionStatus status,
+            String amount,
+            String date,
+            boolean deleted) {
+        return transactionRepository.save(Transaction.builder()
+                .workspace(ctx.workspace())
+                .createdByUser(ctx.user())
+                .category(category)
+                .transactionType(type)
+                .transactionStatus(status)
+                .amount(new BigDecimal(amount))
+                .transactionDate(LocalDate.parse(date))
+                .deletedAt(deleted ? Instant.parse("2026-08-09T00:00:00Z") : null)
                 .build());
     }
 

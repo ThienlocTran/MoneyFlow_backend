@@ -1,6 +1,6 @@
 # Category/Jar Backend Release Plan 2.1.7
 
-Status: P14B grouped Jar Board read API implemented. P14C stats remains planned.
+Status: P14C Category/Jar stats implemented. P14D move/reorder remains planned.
 
 ## Theme
 
@@ -32,7 +32,7 @@ MoneyFlow 2.1.7 prepares Category/Jar as a backend product layer for a future Ja
 | --- | --- | --- | --- | --- | --- |
 | P14A | Category/Jar backend audit + contract | Docs, current model/API map, risks, contract, release plan, release stub | Runtime code | Docs validation only | Docs exist and do not claim board implementation. |
 | P14B | Jar board grouped read API | Complete: read-only `GET /category-board` with jars, categories, uncategorized group, metadata, warnings | Write APIs, deep stats | `*CategoryBoard*Tests,*JarCategory*Tests` | Frontend can fetch a grouped board without mutations or fake rows. |
-| P14C | Category/Jar stats query layer | Period stats: transaction count, totals, last used, jar totals, uncategorized totals | Chart/UI formatting | `*CategoryJarStats*Tests,*CategoryBoard*Tests` | Stats use posted, non-deleted, workspace/date-scoped transactions. |
+| P14C | Category/Jar stats query layer | Complete: period stats, transaction count, totals, last used, jar totals, uncategorized totals | Chart/UI formatting | `*CategoryJarStats*Tests,*CategoryBoard*Tests` | Stats use posted, non-deleted, workspace/date-scoped transactions. |
 | P14D | Move/reorder category and jar ordering | Dedicated move API, board reorder API, validation, historical warning | Merge, jar snapshot migration | `*CategoryMove*Tests,*CategoryReorder*Tests,*JarReorder*Tests` | Move keeps category id, does not rewrite transactions, reorder rejects duplicates/cross-workspace ids. |
 | P14E | Safe archive/delete behavior | Align archive/delete endpoints and error codes, block unsafe hard delete, expose usage warnings | Merge, bulk cleanup | `*CategoryArchive*Tests,*JarArchive*Tests,*CategoryDelete*Tests` | Used categories/jars are archived or blocked, never orphan history. |
 | P14F | Category/Jar backend release lock | Targeted tests, docs, scans, release status | Full frontend UAT | Targeted release validation | Backend status honestly marked locked/partial/blocked. |
@@ -127,6 +127,26 @@ Targeted validation:
 
 Result: targeted Category/Jar board tests passed.
 
+## P14C Delivered
+
+- Added Category/Jar stats DTOs for board period, board totals, jar stats, category stats, and uncategorized stats.
+- Added one workspace/date-scoped aggregate transaction query for board stats.
+- Integrated `includeStats=true` into `GET /api/workspaces/{workspaceId}/category-board`.
+- Added `from`, `to`, and `period` query params.
+- Default stats period is current month from injected `Clock`.
+- Date range is inclusive for `transactionDate`.
+- Included only posted, non-deleted `EXPENSE` and `INCOME` transactions.
+- Excluded transfers, debt movement types, drafts, planned, void, and deleted transactions from expense stats.
+- Added percent-of-total and last-used date.
+- Kept historical jar behavior based on current category->jar relation.
+- Preserved read-only behavior with no category, jar, or transaction mutation.
+
+Targeted validation:
+
+`.\mvnw.cmd "-Dtest=*CategoryJarStats*Tests,*CategoryStats*Tests,*JarStats*Tests,*CategoryBoard*Tests,*JarBoard*Tests" test`
+
+Result: 5 tests passed, 0 failures, 0 errors, 0 skipped.
+
 ## Next Queue Item
 
-P14C - Category/Jar stats query layer.
+P14D - Move/reorder category and jar ordering.

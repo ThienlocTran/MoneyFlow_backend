@@ -1,6 +1,6 @@
 # Category/Jar Backend Contract V1
 
-Status: P14B grouped Jar Board read API implemented. Stats, move/reorder, archive/delete alignment, and frontend UI remain deferred.
+Status: P14C Jar Board stats implemented. Move/reorder, archive/delete alignment, and frontend UI remain deferred.
 
 ## Concepts
 
@@ -59,8 +59,8 @@ JarBoard is a read model for UI. It does not need a table in v1.
 Response fields:
 
 - `workspaceId`
-- `from`
-- `to`
+- `period`
+- `boardStats`
 - `includeArchived`
 - `includeStats`
 - `jars`
@@ -106,6 +106,9 @@ Query:
 - `includeEmptyJars` optional, default `true`
 - `includeUncategorized` optional, default `true`
 - `includeStats` optional, default `false`
+- `from` optional, `YYYY-MM-DD`
+- `to` optional, `YYYY-MM-DD`
+- `period` optional: `today`, `week`, `month`, `custom`
 
 Returns:
 
@@ -114,7 +117,7 @@ Returns:
 - display metadata
 - warnings
 
-P14B behavior:
+P14B/P14C behavior:
 
 - groups categories under current workspace jars
 - puts categories without a visible jar into `uncategorizedGroup`
@@ -122,7 +125,10 @@ P14B behavior:
 - includes inactive/archived rows only when `includeArchived=true`
 - includes empty active jars by default
 - hides empty jars when `includeEmptyJars=false`
-- returns `CATEGORY_BOARD_STATS_NOT_IMPLEMENTED` when `includeStats=true`
+- `includeStats=false` keeps stats fields null
+- `includeStats=true` returns period, board, jar, category, and uncategorized stats
+- stats default to the current month when no range is passed
+- explicit `from` and `to` use inclusive `LocalDate` range and label `custom`
 - returns `HISTORICAL_JAR_SNAPSHOT_UNAVAILABLE` because transactions do not store jar snapshot
 - never mutates jars, categories, or transactions
 
@@ -227,8 +233,14 @@ Can flags:
 
 Stats:
 
-- no spending totals in P14B
-- `includeStats=true` returns `CATEGORY_BOARD_STATS_NOT_IMPLEMENTED`
+- one aggregate transaction query groups by category/jar for the selected period
+- stats include posted, non-deleted `EXPENSE` and `INCOME` only
+- transfers, debt movement types, drafts, planned, void, and deleted rows are excluded
+- category stats expose total expense/income, transaction counts, percent of board expense, and last used date
+- jar stats are summed from visible child category stats in memory
+- uncategorized stats include both `categoryId=null` expenses and categories whose current jar is null/not visible
+- percentages return `0` when board total expense is zero
+- no transaction-level jar snapshot exists; jar stats use current category->jar relation
 
 ## Historical Reporting Recommendation
 
