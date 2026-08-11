@@ -4,7 +4,10 @@ import com.moneyflowbackend.category.model.Category;
 import com.moneyflowbackend.category.repository.CategoryRepository;
 import com.moneyflowbackend.common.exception.BusinessException;
 import com.moneyflowbackend.planning.dto.CancelPlannedObligationRequest;
+import com.moneyflowbackend.planning.dto.LinkPlannedObligationTransactionRequest;
+import com.moneyflowbackend.planning.dto.MarkPlannedObligationPaidRequest;
 import com.moneyflowbackend.planning.dto.PlannedObligationListResponse;
+import com.moneyflowbackend.planning.dto.PlannedObligationMarkPaidResponse;
 import com.moneyflowbackend.planning.dto.PlannedObligationRequest;
 import com.moneyflowbackend.planning.dto.PlannedObligationResponse;
 import com.moneyflowbackend.planning.dto.PlannedObligationUpdateRequest;
@@ -14,6 +17,12 @@ import com.moneyflowbackend.planning.model.PlannedObligationPriority;
 import com.moneyflowbackend.planning.model.PlannedObligationStatus;
 import com.moneyflowbackend.planning.model.PlanningRecurrenceType;
 import com.moneyflowbackend.planning.repository.PlannedObligationRepository;
+import com.moneyflowbackend.transaction.dto.TransactionResponse;
+import com.moneyflowbackend.transaction.model.Transaction;
+import com.moneyflowbackend.transaction.model.TransactionStatus;
+import com.moneyflowbackend.transaction.model.TransactionType;
+import com.moneyflowbackend.transaction.repository.TransactionRepository;
+import com.moneyflowbackend.transaction.service.TransactionService;
 import com.moneyflowbackend.wallet.model.Wallet;
 import com.moneyflowbackend.wallet.repository.WalletRepository;
 import com.moneyflowbackend.workspace.model.WorkspaceMember;
@@ -38,17 +47,23 @@ public class PlannedObligationService {
     private final WorkspaceService workspaceService;
     private final WalletRepository walletRepository;
     private final CategoryRepository categoryRepository;
+    private final TransactionRepository transactionRepository;
+    private final TransactionService transactionService;
     private final Clock clock;
 
     public PlannedObligationService(PlannedObligationRepository obligationRepository,
                                     WorkspaceService workspaceService,
                                     WalletRepository walletRepository,
                                     CategoryRepository categoryRepository,
+                                    TransactionRepository transactionRepository,
+                                    TransactionService transactionService,
                                     Clock clock) {
         this.obligationRepository = obligationRepository;
         this.workspaceService = workspaceService;
         this.walletRepository = walletRepository;
         this.categoryRepository = categoryRepository;
+        this.transactionRepository = transactionRepository;
+        this.transactionService = transactionService;
         this.clock = clock;
     }
 
@@ -131,9 +146,103 @@ public class PlannedObligationService {
         return map(obligationRepository.saveAndFlush(obligation));
     }
 
+    @Transactional
+    public PlannedObligationResponse linkTransaction(UUID workspaceId, UUID obligationId, LinkPlannedObligationTransactionRequest request, UUID userId) {
+        workspaceService.requireWritableMember(workspaceId, userId);
+        PlannedObligation obligation = obligation(workspaceId, obligationId);
+        UUID transactionId = request == null ? null : request.transactionId();
+        if (transactionId == null) {
+            throw new BusinessException("PLANNING_OBLIGATION_TRANSACTION_REQUIRED", "Transaction id is required");
+        }
+        Transaction transaction = transactionRepository.findByIdAndWorkspaceId(transactionId, workspaceId)
+                .orElseThrow(() -> new BusinessException("PLANNING_OBLIGATION_TRANSACTION_NOT_FOUND", "Transaction not found", HttpStatus.NOT_FOUND));
+        if (obligation.getStatus() == PlannedObligationStatus.PAID) {
+            if (obligation.getLinkedTransaction() != null && obligation.getLinkedTransaction().getId().equals(transactionId)) {
+                return map(obligation);
+            }
+            throw new BusinessException("PLANNING_OBLIGATION_ALREADY_PAID", "Planned obligation is already paid");
+        }
+        validatePayable(obligation);
+        validateLinkableTransaction(workspaceId, obligation, transaction);
+        obligation.setStatus(PlannedObligationStatus.PAID);
+        obligation.setLinkedTransaction(transaction);
+        obligation.setPaidAt(request.paidAt() == null ? Instant.now(clock) : request.paidAt());
+        obligation.setPaidNote(note(request.note()));
+        return map(obligationRepository.saveAndFlush(obligation));
+    }
+
+    @Transactional
+    public PlannedObligationMarkPaidResponse markPaid(UUID workspaceId, UUID obligationId, MarkPlannedObligationPaidRequest request, UUID userId) {
+        workspaceService.requireWritableMember(workspaceId, userId);
+        PlannedObligation obligation = obligation(workspaceId, obligationId);
+        if (obligation.getStatus() == PlannedObligationStatus.PAID) {
+            Transaction existing = obligation.getLinkedTransaction();
+            return new PlannedObligationMarkPaidResponse(map(obligation), existing == null ? null : existing.getId(),
+                    existing == null ? null : transactionService.mapExistingToResponse(existing));
+        }
+        validatePayable(obligation);
+        if (request == null || request.walletId() == null) {
+            throw new BusinessException("PLANNING_OBLIGATION_WALLET_REQUIRED", "Wallet is required to mark obligation paid");
+        }
+        if (request.categoryId() == null) {
+            throw new BusinessException("PLANNING_OBLIGATION_CATEGORY_REQUIRED", "Category is required to mark obligation paid");
+        }
+        BigDecimal amount = request.amount() == null ? obligation.getAmount() : requiredAmount(request.amount());
+        Wallet paidWallet = wallet(workspaceId, request.walletId());
+        Category paidCategory = category(workspaceId, request.categoryId());
+        TransactionResponse transaction = transactionService.createConfirmedObligationTransaction(
+                workspaceId,
+                TransactionType.EXPENSE,
+                amount,
+                paidWallet.getId(),
+                paidCategory.getId(),
+                request.transactionDate() == null ? LocalDate.now(clock) : request.transactionDate(),
+                obligation.getName(),
+                note(request.note()),
+                userId);
+        Transaction linked = transactionRepository.findByIdAndWorkspaceId(transaction.getId(), workspaceId)
+                .orElseThrow(() -> new BusinessException("PLANNING_OBLIGATION_MARK_PAID_FAILED", "Created payment transaction could not be linked"));
+        obligation.setStatus(PlannedObligationStatus.PAID);
+        obligation.setLinkedTransaction(linked);
+        obligation.setPaidAt(Instant.now(clock));
+        obligation.setPaidNote(note(request.note()));
+        PlannedObligation saved = obligationRepository.saveAndFlush(obligation);
+        return new PlannedObligationMarkPaidResponse(map(saved), transaction.getId(), transaction);
+    }
+
     private PlannedObligation obligation(UUID workspaceId, UUID obligationId) {
         return obligationRepository.findByIdAndWorkspaceIdAndDeletedAtIsNull(obligationId, workspaceId)
                 .orElseThrow(() -> new BusinessException("PLANNED_OBLIGATION_NOT_FOUND", "Planned obligation not found", HttpStatus.NOT_FOUND));
+    }
+
+    private void validatePayable(PlannedObligation obligation) {
+        if (obligation.getStatus() == PlannedObligationStatus.CANCELLED) {
+            throw new BusinessException("PLANNING_OBLIGATION_CANCELLED", "Cancelled obligation cannot be paid");
+        }
+        if (obligation.getStatus() != PlannedObligationStatus.PLANNED) {
+            throw new BusinessException("PLANNING_OBLIGATION_INVALID_STATE", "Planned obligation cannot be paid from current state");
+        }
+    }
+
+    private void validateLinkableTransaction(UUID workspaceId, PlannedObligation obligation, Transaction transaction) {
+        if (transaction.getDeletedAt() != null) {
+            throw new BusinessException("PLANNING_OBLIGATION_TRANSACTION_DELETED", "Deleted transaction cannot be linked");
+        }
+        if (transaction.getTransactionStatus() != TransactionStatus.POSTED) {
+            throw new BusinessException("PLANNING_OBLIGATION_TRANSACTION_NOT_POSTED", "Only posted transactions can be linked");
+        }
+        if (transaction.getTransactionType() != TransactionType.EXPENSE) {
+            throw new BusinessException("PLANNING_OBLIGATION_TRANSACTION_TYPE_UNSUPPORTED", "Only expense transactions can be linked");
+        }
+        if (obligation.getAmount().compareTo(transaction.getAmount()) != 0) {
+            throw new BusinessException("PLANNING_OBLIGATION_AMOUNT_MISMATCH", "Transaction amount must match obligation amount");
+        }
+        if (!obligation.getCurrency().equals(transaction.getCurrency())) {
+            throw new BusinessException("PLANNING_OBLIGATION_CURRENCY_MISMATCH", "Transaction currency must match obligation currency");
+        }
+        if (obligationRepository.existsByWorkspaceIdAndLinkedTransactionIdAndDeletedAtIsNull(workspaceId, transaction.getId())) {
+            throw new BusinessException("PLANNING_OBLIGATION_DUPLICATE_LINK", "Transaction is already linked to another obligation");
+        }
     }
 
     private String requiredName(String raw) {
@@ -249,6 +358,8 @@ public class PlannedObligationService {
                 obligation.getNote(),
                 obligation.getRecurrenceType(),
                 obligation.getLinkedTransaction() == null ? null : obligation.getLinkedTransaction().getId(),
+                obligation.getPaidAt(),
+                obligation.getPaidNote(),
                 obligation.getCreatedAt(),
                 obligation.getUpdatedAt());
     }

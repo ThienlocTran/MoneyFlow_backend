@@ -15,6 +15,7 @@ import java.util.UUID;
 
 public interface PlannedObligationRepository extends JpaRepository<PlannedObligation, UUID> {
     Optional<PlannedObligation> findByIdAndWorkspaceIdAndDeletedAtIsNull(UUID id, UUID workspaceId);
+    boolean existsByWorkspaceIdAndLinkedTransactionIdAndDeletedAtIsNull(UUID workspaceId, UUID linkedTransactionId);
 
     @Query("""
             SELECT o FROM PlannedObligation o

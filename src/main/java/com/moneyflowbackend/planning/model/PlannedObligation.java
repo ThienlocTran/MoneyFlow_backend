@@ -78,6 +78,12 @@ public class PlannedObligation {
     @JoinColumn(name = "linked_transaction_id")
     private Transaction linkedTransaction;
 
+    @Column(name = "paid_at")
+    private Instant paidAt;
+
+    @Column(name = "paid_note", columnDefinition = "TEXT")
+    private String paidNote;
+
     @Column(columnDefinition = "TEXT")
     private String note;
 

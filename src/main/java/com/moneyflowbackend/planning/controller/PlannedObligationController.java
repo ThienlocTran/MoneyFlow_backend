@@ -2,7 +2,10 @@ package com.moneyflowbackend.planning.controller;
 
 import com.moneyflowbackend.dto.ApiResponse;
 import com.moneyflowbackend.planning.dto.CancelPlannedObligationRequest;
+import com.moneyflowbackend.planning.dto.LinkPlannedObligationTransactionRequest;
+import com.moneyflowbackend.planning.dto.MarkPlannedObligationPaidRequest;
 import com.moneyflowbackend.planning.dto.PlannedObligationListResponse;
+import com.moneyflowbackend.planning.dto.PlannedObligationMarkPaidResponse;
 import com.moneyflowbackend.planning.dto.PlannedObligationRequest;
 import com.moneyflowbackend.planning.dto.PlannedObligationResponse;
 import com.moneyflowbackend.planning.dto.PlannedObligationUpdateRequest;
@@ -75,6 +78,24 @@ public class PlannedObligationController {
             @RequestBody(required = false) CancelPlannedObligationRequest request) {
         return ResponseEntity.ok(ApiResponse.ok("Planned obligation cancelled",
                 plannedObligationService.cancel(workspaceId, obligationId, request, currentUserId())));
+    }
+
+    @PostMapping("/{obligationId}/link-transaction")
+    public ResponseEntity<ApiResponse<PlannedObligationResponse>> linkTransaction(
+            @PathVariable UUID workspaceId,
+            @PathVariable UUID obligationId,
+            @RequestBody(required = false) LinkPlannedObligationTransactionRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok("Planned obligation linked to transaction",
+                plannedObligationService.linkTransaction(workspaceId, obligationId, request, currentUserId())));
+    }
+
+    @PostMapping("/{obligationId}/mark-paid")
+    public ResponseEntity<ApiResponse<PlannedObligationMarkPaidResponse>> markPaid(
+            @PathVariable UUID workspaceId,
+            @PathVariable UUID obligationId,
+            @RequestBody(required = false) MarkPlannedObligationPaidRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok("Planned obligation marked paid",
+                plannedObligationService.markPaid(workspaceId, obligationId, request, currentUserId())));
     }
 
     private UUID currentUserId() {

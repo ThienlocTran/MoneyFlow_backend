@@ -1,6 +1,6 @@
 # Planning Backend Contract V1
 
-Status: P13D planning projection service implemented. Mark-paid/API overview phases remain planned.
+Status: P13E mark-paid/link-to-transaction implemented. API overview phase remains planned.
 
 ## Goals
 
@@ -171,7 +171,38 @@ Later behavior:
 - if creating a transaction, route through normal transaction service by explicit user action
 - no auto-posting from due date alone
 
-Status: deferred to P13E.
+Status: implemented in P13E.
+
+P13E implemented endpoints:
+
+- `POST /obligations/{obligationId}/link-transaction`
+- `POST /obligations/{obligationId}/mark-paid`
+
+Link existing transaction:
+
+- requires a same-workspace posted, non-deleted `EXPENSE` transaction
+- transaction amount and currency must match the obligation
+- marks obligation `PAID`
+- sets `linkedTransactionId`, `paidAt`, and optional `paidNote`
+- creates no transaction
+- repeated link with the same transaction returns the existing paid obligation
+- linking a different transaction after paid is blocked
+
+Mark paid:
+
+- requires a same-workspace wallet and category
+- creates a normal posted `EXPENSE` through `TransactionService`
+- links the created transaction to the obligation
+- repeated mark-paid returns the existing linked transaction and creates no duplicate
+- cancelled obligations cannot be paid
+
+Projection effect:
+
+- `PAID` obligations are excluded by P13D projection because projection only includes `PLANNED`.
+
+No auto-pay:
+
+- overdue obligations stay `PLANNED` until explicit link/mark-paid.
 
 ### Reserves
 
@@ -298,7 +329,8 @@ Fields implemented:
 - priority: `REQUIRED`, `IMPORTANT`, `OPTIONAL`
 - recurrence type: `NONE`, `WEEKLY`, `MONTHLY`, `YEARLY`
 - optional wallet/category references
-- optional linked transaction reference reserved for P13E
+- optional linked transaction reference
+- paid timestamp and paid note
 - note, cancel reason, cancelled timestamp, timestamps, soft-delete column, version
 
 Validation:
@@ -413,6 +445,45 @@ Read-only rule:
 - projection updates no wallet, reserve, or obligation state
 - overdue/upcoming classification is computed, not persisted
 
+## P13E Implemented Foundation
+
+Migration: `V33__planned_obligation_payments.sql`
+
+Fields added:
+
+- `paid_at`
+- `paid_note`
+- unique `linked_transaction_id` index
+- workspace/link lookup index
+
+Endpoints:
+
+- `POST /api/workspaces/{workspaceId}/planning/obligations/{obligationId}/link-transaction`
+- `POST /api/workspaces/{workspaceId}/planning/obligations/{obligationId}/mark-paid`
+
+Validation:
+
+- obligation must belong to workspace
+- transaction must belong to workspace
+- linked transaction must be posted, non-deleted, `EXPENSE`
+- linked transaction amount/currency must match obligation
+- duplicate transaction links are blocked
+- mark-paid requires wallet/category in same workspace
+- cancelled obligation payment is blocked
+- already-paid obligation cannot be re-linked to another transaction
+
+Idempotency:
+
+- same existing transaction link returns paid obligation
+- repeated mark-paid returns existing linked transaction
+- no duplicate payment transaction is created on repeat
+
+Ledger rule:
+
+- link existing transaction creates no transaction
+- mark-paid creates exactly one transaction through `TransactionService`
+- due date alone never creates a transaction
+
 ## Warning Codes
 
 - `PLANNING_OBLIGATION_MISSING_AMOUNT`
@@ -421,6 +492,19 @@ Read-only rule:
 - `PLANNING_OBLIGATION_DUE_SOON`
 - `PLANNING_OBLIGATION_ALREADY_PAID`
 - `PLANNING_OBLIGATION_LINKED_TRANSACTION_MISSING`
+- `PLANNING_OBLIGATION_CANCELLED`
+- `PLANNING_OBLIGATION_INVALID_STATE`
+- `PLANNING_OBLIGATION_TRANSACTION_REQUIRED`
+- `PLANNING_OBLIGATION_TRANSACTION_NOT_FOUND`
+- `PLANNING_OBLIGATION_TRANSACTION_NOT_POSTED`
+- `PLANNING_OBLIGATION_TRANSACTION_DELETED`
+- `PLANNING_OBLIGATION_TRANSACTION_TYPE_UNSUPPORTED`
+- `PLANNING_OBLIGATION_AMOUNT_MISMATCH`
+- `PLANNING_OBLIGATION_CURRENCY_MISMATCH`
+- `PLANNING_OBLIGATION_WALLET_REQUIRED`
+- `PLANNING_OBLIGATION_CATEGORY_REQUIRED`
+- `PLANNING_OBLIGATION_DUPLICATE_LINK`
+- `PLANNING_OBLIGATION_MARK_PAID_FAILED`
 - `RESERVE_AMOUNT_EXCEEDS_AVAILABLE`
 - `RESERVE_BALANCE_CHECK_UNAVAILABLE`
 - `RESERVE_ALREADY_RELEASED`

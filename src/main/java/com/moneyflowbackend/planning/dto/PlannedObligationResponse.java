@@ -29,6 +29,8 @@ public record PlannedObligationResponse(
         String note,
         PlanningRecurrenceType recurrenceType,
         UUID linkedTransactionId,
+        Instant paidAt,
+        String paidNote,
         Instant createdAt,
         Instant updatedAt
 ) {

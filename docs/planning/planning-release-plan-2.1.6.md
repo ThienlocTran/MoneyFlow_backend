@@ -1,6 +1,6 @@
 # Planning Backend Release Plan 2.1.6
 
-Status: P13D complete in backend code. P13E mark-paid/link remains planned.
+Status: P13E complete in backend code. P13F planning overview remains planned.
 
 ## Theme
 
@@ -36,7 +36,7 @@ MoneyFlow 2.1.6 should turn existing planning-adjacent backend pieces into a cle
 | P13B | Planned obligation model + CRUD foundation | Complete: one-off planned obligation table, workspace-scoped CRUD, validation, cancel flow | Projection and UI | `PlannedObligationApiIntegrationTests` | Planned obligation can be created, read, updated, cancelled without wallet balance effects. |
 | P13C | Reserve allocation model + CRUD foundation | Complete: planning reserve table, workspace-scoped CRUD, release/cancel flow | Projection and cross-module dedupe | `ReserveAllocationApiIntegrationTests` | Reserve allocation can be created, read, updated, released, cancelled without wallet balance effects. |
 | P13D | Planning projection service | Complete: read-only projection formula, wallet ledger, planning reserves, planned obligations, warnings | Public overview API and frontend UI | `PlanningProjectionServiceTests` | Available ledger, reserves, upcoming, overdue, expected incoming, shortfall calculated correctly. |
-| P13E | Mark-paid/link-to-transaction behavior | Link obligation to posted transaction or explicit transaction creation path | Auto-posting | Transaction/linking tests | Paid obligation links safely, same workspace only, no duplicate spend. |
+| P13E | Mark-paid/link-to-transaction behavior | Complete: link existing transaction and explicit mark-paid create flow | Auto-posting and undo paid | `PlannedObligationPaymentIntegrationTests` | Paid obligation links safely, same workspace only, no duplicate spend. |
 | P13F | Planning API overview + action item integration | `/planning/overview`, warnings/action items, stable DTOs | Notifications | Controller/API tests | Frontend can fetch projection, obligations, reserves, warnings. |
 | P13G | Planning backend release lock | Targeted tests, docs, scans, release status | Full frontend UAT | Targeted release validation | Backend status honestly marked locked/partial/blocked. |
 
@@ -73,7 +73,7 @@ Known P13B limitations:
 
 - No reserve allocation until P13C.
 - No projection engine integration until P13D.
-- No mark-paid/link-to-transaction until P13E.
+- Undo paid/reopen remains deferred.
 - No recurrence generation.
 - No frontend UI change.
 
@@ -99,7 +99,7 @@ Result: targeted projection tests passed.
 
 Known P13D limitations:
 
-- No mark-paid/link-to-transaction until P13E.
+- Undo paid/reopen remains deferred.
 - Public planning overview API waits until P13F.
 - Recurring obligation generation remains deferred.
 - Projection accuracy depends on user-entered obligations/reserves.
@@ -127,7 +127,32 @@ Result: targeted reserve allocation tests passed.
 Known P13C limitations:
 
 - No projection engine integration until P13D.
-- No mark-paid/link-to-transaction until P13E.
+- Undo paid/reopen remains deferred.
+
+## P13E Delivered
+
+- Added `paid_at` and `paid_note` to `planned_obligations`.
+- Added unique transaction link index.
+- Added `link-transaction` endpoint for existing posted expense transactions.
+- Added `mark-paid` endpoint that creates a posted expense via `TransactionService`.
+- Added idempotent repeated link/mark-paid behavior.
+- Added validation for same-workspace transaction/wallet/category, posted/non-deleted expense transactions, amount/currency match, duplicate links, cancelled obligations.
+- Preserved no-auto-pay rule: overdue status alone creates no transaction.
+- Projection excludes paid obligations through existing P13D `PLANNED`-only query.
+
+Targeted validation:
+
+`.\mvnw.cmd "-Dtest=*ObligationMarkPaid*Tests,*ObligationTransactionLink*Tests,*PlannedObligation*Tests" test`
+
+Result: 15 tests passed, 0 failures, 0 errors, 0 skipped.
+
+Known P13E limitations:
+
+- No recurring obligation generation.
+- No frontend UI.
+- Reserve usage workflow remains deferred.
+- Undo paid/reopen obligation remains deferred.
+- Amount mismatch is blocked in v1 and may be tuned later.
 - Reserve does not move money between wallets.
 - Reserve release does not create income.
 - Available balance check warns because no reliable reserve-specific source is used in P13C.
@@ -174,4 +199,4 @@ Existing reusable pieces:
 
 ## Next Queue Item
 
-P13E - mark-paid and link obligation to transaction.
+P13F - planning overview API and insight action integration.
