@@ -1,6 +1,6 @@
 # Category/Jar Backend Release Plan 2.1.7
 
-Status: P14C Category/Jar stats implemented. P14D move/reorder remains planned.
+Status: P14D move/reorder implemented. P14E archive/delete remains planned.
 
 ## Theme
 
@@ -33,7 +33,7 @@ MoneyFlow 2.1.7 prepares Category/Jar as a backend product layer for a future Ja
 | P14A | Category/Jar backend audit + contract | Docs, current model/API map, risks, contract, release plan, release stub | Runtime code | Docs validation only | Docs exist and do not claim board implementation. |
 | P14B | Jar board grouped read API | Complete: read-only `GET /category-board` with jars, categories, uncategorized group, metadata, warnings | Write APIs, deep stats | `*CategoryBoard*Tests,*JarCategory*Tests` | Frontend can fetch a grouped board without mutations or fake rows. |
 | P14C | Category/Jar stats query layer | Complete: period stats, transaction count, totals, last used, jar totals, uncategorized totals | Chart/UI formatting | `*CategoryJarStats*Tests,*CategoryBoard*Tests` | Stats use posted, non-deleted, workspace/date-scoped transactions. |
-| P14D | Move/reorder category and jar ordering | Dedicated move API, board reorder API, validation, historical warning | Merge, jar snapshot migration | `*CategoryMove*Tests,*CategoryReorder*Tests,*JarReorder*Tests` | Move keeps category id, does not rewrite transactions, reorder rejects duplicates/cross-workspace ids. |
+| P14D | Move/reorder category and jar ordering | Complete: dedicated move API, jar reorder API, category group reorder API, validation, historical warning | Merge, jar snapshot migration | `*CategoryMove*Tests,*CategoryReorder*Tests,*JarReorder*Tests` | Move keeps category id, does not rewrite transactions, reorder rejects duplicates/cross-workspace ids. |
 | P14E | Safe archive/delete behavior | Align archive/delete endpoints and error codes, block unsafe hard delete, expose usage warnings | Merge, bulk cleanup | `*CategoryArchive*Tests,*JarArchive*Tests,*CategoryDelete*Tests` | Used categories/jars are archived or blocked, never orphan history. |
 | P14F | Category/Jar backend release lock | Targeted tests, docs, scans, release status | Full frontend UAT | Targeted release validation | Backend status honestly marked locked/partial/blocked. |
 
@@ -147,6 +147,26 @@ Targeted validation:
 
 Result: 5 tests passed, 0 failures, 0 errors, 0 skipped.
 
+## P14D Delivered
+
+- Added `POST /api/workspaces/{workspaceId}/categories/{categoryId}/move`.
+- Added `POST /api/workspaces/{workspaceId}/jars/reorder`.
+- Added `POST /api/workspaces/{workspaceId}/categories/reorder`.
+- Added request DTOs for category move, jar reorder, and category group reorder.
+- Added `CategoryBoardMutationService` for owner-only board mutations.
+- Normalized jar/category `displayOrder` to zero-based sequential integers.
+- Move supports target jar or uncategorized group.
+- Move with no target position appends; too-large position appends; negative position is rejected.
+- Reorder requires a full active jar/group order and rejects duplicates, missing ids, wrong groups, and cross-workspace ids.
+- Mutation endpoints return updated `CategoryBoardResponse`.
+- Preserved transaction history: transactions keep the same `categoryId`; no transaction rows are created, updated, or deleted.
+
+Targeted validation:
+
+`.\mvnw.cmd "-Dtest=*CategoryMove*Tests,*CategoryReorder*Tests,*JarReorder*Tests,*CategoryBoard*Tests" test`
+
+Result: 8 tests passed, 0 failures, 0 errors, 0 skipped.
+
 ## Next Queue Item
 
-P14D - Move/reorder category and jar ordering.
+P14E - Safe archive/delete category and jar behavior.

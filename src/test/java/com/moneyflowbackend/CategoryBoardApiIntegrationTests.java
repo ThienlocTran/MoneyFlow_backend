@@ -11,6 +11,10 @@ import com.moneyflowbackend.category.model.Category;
 import com.moneyflowbackend.category.model.CategoryType;
 import com.moneyflowbackend.category.repository.CategoryRepository;
 import com.moneyflowbackend.categoryboard.dto.CategoryBoardResponse;
+import com.moneyflowbackend.categoryboard.dto.CategoryGroupReorderRequest;
+import com.moneyflowbackend.categoryboard.dto.CategoryMoveRequest;
+import com.moneyflowbackend.categoryboard.dto.JarBoardReorderRequest;
+import com.moneyflowbackend.categoryboard.service.CategoryBoardMutationService;
 import com.moneyflowbackend.categoryboard.service.CategoryBoardService;
 import com.moneyflowbackend.common.exception.BusinessException;
 import com.moneyflowbackend.jar.model.Jar;
@@ -40,6 +44,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -62,6 +67,7 @@ class CategoryBoardApiIntegrationTests {
     @Autowired CategoryRepository categoryRepository;
     @Autowired TransactionRepository transactionRepository;
     @Autowired CategoryBoardService categoryBoardService;
+    @Autowired CategoryBoardMutationService categoryBoardMutationService;
 
     @TestConfiguration
     static class FixedClockConfig {
@@ -208,6 +214,103 @@ class CategoryBoardApiIntegrationTests {
                 ctx.workspace().getId(), false, true, true, true, null, null, "forever", ctx.user().getId()))
                 .isInstanceOf(BusinessException.class)
                 .extracting("code").isEqualTo("INVALID_PERIOD");
+    }
+
+    @Test
+    void moveCategoryPersistsTargetGroupOrderAndKeepsHistoricalTransactions() {
+        TestContext ctx = context("board_move");
+        Jar food = jar(ctx.workspace(), "FOOD", "Ăn uống", 1, true);
+        Jar personal = jar(ctx.workspace(), "PERSONAL", "Cá nhân", 2, true);
+        Category coffee = category(ctx.workspace(), food, "Cà phê", 1, true, false);
+        Category a = category(ctx.workspace(), personal, "A", 0, true, false);
+        Category b = category(ctx.workspace(), personal, "B", 1, true, false);
+        Category c = category(ctx.workspace(), personal, "C", 2, true, false);
+        Transaction tx = tx(ctx, coffee, TransactionType.EXPENSE, TransactionStatus.POSTED, "25000", "2026-08-02", false);
+        long txCount = transactionRepository.count();
+
+        CategoryBoardResponse board = categoryBoardMutationService.moveCategory(
+                ctx.workspace().getId(), coffee.getId(), new CategoryMoveRequest(personal.getId(), 1, true), ctx.user().getId());
+
+        assertThat(categoryRepository.findById(coffee.getId()).orElseThrow().getJar().getId()).isEqualTo(personal.getId());
+        assertThat(transactionRepository.findById(tx.getId()).orElseThrow().getCategory().getId()).isEqualTo(coffee.getId());
+        assertThat(transactionRepository.count()).isEqualTo(txCount);
+        assertThat(board.jars().get(1).categories()).extracting("categoryId")
+                .containsExactly(a.getId(), coffee.getId(), b.getId(), c.getId());
+        assertThat(board.jars().get(1).stats().totalExpense()).isEqualByComparingTo("25000");
+        assertThat(board.warnings()).contains("HISTORICAL_JAR_SNAPSHOT_UNAVAILABLE");
+
+        CategoryBoardResponse uncategorized = categoryBoardMutationService.moveCategory(
+                ctx.workspace().getId(), coffee.getId(), new CategoryMoveRequest(null, null, false), ctx.user().getId());
+        assertThat(categoryRepository.findById(coffee.getId()).orElseThrow().getJar()).isNull();
+        assertThat(uncategorized.uncategorizedGroup().categories()).extracting("categoryId").contains(coffee.getId());
+    }
+
+    @Test
+    void reorderJarsAndCategoriesPersistBoardOrderWithoutChangingStats() {
+        TestContext ctx = context("board_reorder");
+        Jar first = jar(ctx.workspace(), "A", "A", 0, true);
+        Jar second = jar(ctx.workspace(), "B", "B", 1, true);
+        Jar third = jar(ctx.workspace(), "C", "C", 2, true);
+        Category a = category(ctx.workspace(), first, "A", 0, true, false);
+        Category b = category(ctx.workspace(), first, "B", 1, true, false);
+        Category c = category(ctx.workspace(), first, "C", 2, true, false);
+        Category u1 = category(ctx.workspace(), null, "U1", 0, true, false);
+        Category u2 = category(ctx.workspace(), null, "U2", 1, true, false);
+        tx(ctx, a, TransactionType.EXPENSE, TransactionStatus.POSTED, "10000", "2026-08-02", false);
+        tx(ctx, b, TransactionType.EXPENSE, TransactionStatus.POSTED, "20000", "2026-08-02", false);
+
+        CategoryBoardResponse jars = categoryBoardMutationService.reorderJars(
+                ctx.workspace().getId(), new JarBoardReorderRequest(List.of(third.getId(), first.getId(), second.getId()), true), ctx.user().getId());
+        assertThat(jars.jars()).extracting("jarId").containsExactly(third.getId(), first.getId(), second.getId());
+        assertThat(jars.boardStats().totalExpense()).isEqualByComparingTo("30000");
+
+        CategoryBoardResponse categories = categoryBoardMutationService.reorderCategories(
+                ctx.workspace().getId(), new CategoryGroupReorderRequest(first.getId(), List.of(b.getId(), c.getId(), a.getId()), true), ctx.user().getId());
+        assertThat(categories.jars().get(1).categories()).extracting("categoryId")
+                .containsExactly(b.getId(), c.getId(), a.getId());
+        assertThat(categories.boardStats().totalExpense()).isEqualByComparingTo("30000");
+
+        CategoryBoardResponse uncategorized = categoryBoardMutationService.reorderCategories(
+                ctx.workspace().getId(), new CategoryGroupReorderRequest(null, List.of(u2.getId(), u1.getId()), false), ctx.user().getId());
+        assertThat(uncategorized.uncategorizedGroup().categories()).extracting("categoryId")
+                .containsExactly(u2.getId(), u1.getId());
+    }
+
+    @Test
+    void moveAndReorderRejectUnsafeRequestsWithoutPartialUpdates() {
+        TestContext ctx = context("board_validation");
+        TestContext other = context("board_validation_other");
+        Jar food = jar(ctx.workspace(), "FOOD", "Food", 0, true);
+        Jar target = jar(ctx.workspace(), "TARGET", "Target", 1, true);
+        Jar inactive = jar(ctx.workspace(), "OLD", "Old", 2, false);
+        jar(ctx.workspace(), "EXTRA", "Extra", 3, true);
+        Jar otherJar = jar(other.workspace(), "OTHER", "Other", 0, true);
+        Category active = category(ctx.workspace(), food, "Active", 0, true, false);
+        Category archived = category(ctx.workspace(), food, "Archived", 1, false, true);
+        Category otherCategory = category(other.workspace(), otherJar, "Other", 0, true, false);
+        UUID originalJar = active.getJar().getId();
+
+        assertThatThrownBy(() -> categoryBoardMutationService.moveCategory(
+                ctx.workspace().getId(), archived.getId(), new CategoryMoveRequest(target.getId(), null, false), ctx.user().getId()))
+                .isInstanceOf(BusinessException.class).extracting("code").isEqualTo("CATEGORY_ARCHIVED");
+        assertThatThrownBy(() -> categoryBoardMutationService.moveCategory(
+                ctx.workspace().getId(), active.getId(), new CategoryMoveRequest(inactive.getId(), null, false), ctx.user().getId()))
+                .isInstanceOf(BusinessException.class).extracting("code").isEqualTo("JAR_ARCHIVED");
+        assertThatThrownBy(() -> categoryBoardMutationService.moveCategory(
+                ctx.workspace().getId(), active.getId(), new CategoryMoveRequest(otherJar.getId(), null, false), ctx.user().getId()))
+                .isInstanceOf(BusinessException.class).extracting("code").isEqualTo("CATEGORY_MOVE_TARGET_JAR_NOT_FOUND");
+        assertThat(categoryRepository.findById(active.getId()).orElseThrow().getJar().getId()).isEqualTo(originalJar);
+
+        assertThatThrownBy(() -> categoryBoardMutationService.reorderJars(
+                ctx.workspace().getId(), new JarBoardReorderRequest(List.of(food.getId(), food.getId(), target.getId()), false), ctx.user().getId()))
+                .isInstanceOf(BusinessException.class).extracting("code").isEqualTo("JAR_REORDER_DUPLICATE_JAR");
+        assertThatThrownBy(() -> categoryBoardMutationService.reorderJars(
+                ctx.workspace().getId(), new JarBoardReorderRequest(List.of(food.getId(), target.getId()), false), ctx.user().getId()))
+                .isInstanceOf(BusinessException.class).extracting("code").isEqualTo("JAR_REORDER_INCOMPLETE");
+        assertThatThrownBy(() -> categoryBoardMutationService.reorderCategories(
+                ctx.workspace().getId(), new CategoryGroupReorderRequest(food.getId(), List.of(active.getId(), otherCategory.getId()), false), ctx.user().getId()))
+                .isInstanceOf(BusinessException.class).extracting("code").isIn("CATEGORY_NOT_FOUND", "CATEGORY_REORDER_INCOMPLETE_GROUP");
+        assertThat(categoryRepository.findById(active.getId()).orElseThrow().getDisplayOrder()).isEqualTo(0);
     }
 
     @Test

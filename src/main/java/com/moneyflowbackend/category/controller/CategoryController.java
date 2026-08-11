@@ -4,6 +4,10 @@ import com.moneyflowbackend.category.dto.CategoryReorderRequest;
 import com.moneyflowbackend.category.dto.CategoryRequest;
 import com.moneyflowbackend.category.dto.CategoryResponse;
 import com.moneyflowbackend.category.service.CategoryService;
+import com.moneyflowbackend.categoryboard.dto.CategoryBoardResponse;
+import com.moneyflowbackend.categoryboard.dto.CategoryGroupReorderRequest;
+import com.moneyflowbackend.categoryboard.dto.CategoryMoveRequest;
+import com.moneyflowbackend.categoryboard.service.CategoryBoardMutationService;
 import com.moneyflowbackend.dto.ApiResponse;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
@@ -28,9 +32,11 @@ import java.util.UUID;
 public class CategoryController {
 
     private final CategoryService categoryService;
+    private final CategoryBoardMutationService categoryBoardMutationService;
 
-    public CategoryController(CategoryService categoryService) {
+    public CategoryController(CategoryService categoryService, CategoryBoardMutationService categoryBoardMutationService) {
         this.categoryService = categoryService;
+        this.categoryBoardMutationService = categoryBoardMutationService;
     }
 
     @GetMapping
@@ -139,6 +145,23 @@ public class CategoryController {
             @Valid @RequestBody CategoryReorderRequest req) {
         List<CategoryResponse> res = categoryService.reorder(workspaceId, req, currentUserId());
         return ResponseEntity.ok(ApiResponse.ok("Categories reordered", res));
+    }
+
+    @PostMapping("/{categoryId}/move")
+    public ResponseEntity<ApiResponse<CategoryBoardResponse>> move(
+            @PathVariable UUID workspaceId,
+            @PathVariable UUID categoryId,
+            @RequestBody(required = false) CategoryMoveRequest req) {
+        CategoryBoardResponse res = categoryBoardMutationService.moveCategory(workspaceId, categoryId, req, currentUserId());
+        return ResponseEntity.ok(ApiResponse.ok("Category moved", res));
+    }
+
+    @PostMapping("/reorder")
+    public ResponseEntity<ApiResponse<CategoryBoardResponse>> reorderGroup(
+            @PathVariable UUID workspaceId,
+            @Valid @RequestBody CategoryGroupReorderRequest req) {
+        CategoryBoardResponse res = categoryBoardMutationService.reorderCategories(workspaceId, req, currentUserId());
+        return ResponseEntity.ok(ApiResponse.ok("Category board categories reordered", res));
     }
 
     private UUID currentUserId() {

@@ -1,6 +1,6 @@
 # Category/Jar Backend Contract V1
 
-Status: P14C Jar Board stats implemented. Move/reorder, archive/delete alignment, and frontend UI remain deferred.
+Status: P14D move/reorder implemented. Archive/delete alignment and frontend UI remain deferred.
 
 ## Concepts
 
@@ -159,7 +159,8 @@ Request:
 ```json
 {
   "targetJarId": "uuid-or-null",
-  "position": 3
+  "targetPosition": 3,
+  "includeStats": false
 }
 ```
 
@@ -187,6 +188,47 @@ Request:
 
 Deferred. Merge rewrites transaction category ids and requires explicit confirmation, audit trail, idempotency, and tests.
 
+P14D implemented endpoints:
+
+- `POST /api/workspaces/{workspaceId}/categories/{categoryId}/move`
+- `POST /api/workspaces/{workspaceId}/categories/reorder`
+- `POST /api/workspaces/{workspaceId}/jars/reorder`
+
+Category reorder request:
+
+```json
+{
+  "jarId": "uuid-or-null",
+  "categoryIds": ["cat1", "cat2"],
+  "includeStats": false
+}
+```
+
+Jar reorder request:
+
+```json
+{
+  "jarIds": ["jar1", "jar2"],
+  "includeStats": false
+}
+```
+
+P14D behavior:
+
+- mutations return `CategoryBoardResponse`
+- category move updates `category.jarId` and `category.displayOrder`
+- jar reorder updates `jar.displayOrder`
+- category reorder updates `category.displayOrder`
+- ordering is normalized to zero-based sequential integers
+- `targetPosition=null` appends to the target group
+- `targetPosition` greater than group size appends
+- negative `targetPosition` returns `CATEGORY_MOVE_INVALID_POSITION`
+- reorder requests must include the full active group/order
+- duplicate ids are rejected before mutation
+- archived/inactive categories and inactive jars are blocked
+- owner role is required, matching current Jar/Category write policy
+- transactions are never created, updated, deleted, or reassigned
+
 ## Business Rules
 
 - Jar is not wallet and does not store money.
@@ -196,6 +238,7 @@ Deferred. Merge rewrites transaction category ids and requires explicit confirma
 - Moving a category updates `category.jarId`.
 - Transactions retain `transaction.categoryId`.
 - Moving category must not rewrite transactions.
+- Reordering jars/categories is presentation metadata only.
 - Historical jar reports use the current category->jar relation unless transaction-level jar snapshot is added later.
 - Archive is preferred for categories with transactions.
 - Hard delete is allowed only when unused and only if existing convention supports it.
@@ -205,6 +248,20 @@ Deferred. Merge rewrites transaction category ids and requires explicit confirma
 - Active duplicate names should be avoided in the same workspace/type. Current code blocks duplicates per workspace/type, regardless of jar.
 - Voice/OCR hints may resolve to active category by normalized name/keyword. If multiple matches exist, do not guess.
 - Workspace isolation applies to category, jar, wallet, transaction, keyword, and stats queries.
+
+Move/reorder error codes:
+
+- `CATEGORY_ARCHIVED`
+- `CATEGORY_MOVE_TARGET_JAR_NOT_FOUND`
+- `CATEGORY_MOVE_INVALID_POSITION`
+- `CATEGORY_REORDER_DUPLICATE_CATEGORY`
+- `CATEGORY_REORDER_INCOMPLETE_GROUP`
+- `CATEGORY_REORDER_GROUP_MISMATCH`
+- `JAR_ARCHIVED`
+- `JAR_REORDER_DUPLICATE_JAR`
+- `JAR_REORDER_INVALID_JAR`
+- `JAR_REORDER_INCOMPLETE`
+- `CATEGORY_BOARD_REORDER_INVALID_PAYLOAD`
 
 ## P14B Implemented Foundation
 
