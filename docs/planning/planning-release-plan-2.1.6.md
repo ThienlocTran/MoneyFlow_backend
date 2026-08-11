@@ -1,6 +1,6 @@
 # Planning Backend Release Plan 2.1.6
 
-Status: P13C complete in backend code. P13D planning projection remains planned.
+Status: P13D complete in backend code. P13E mark-paid/link remains planned.
 
 ## Theme
 
@@ -35,7 +35,7 @@ MoneyFlow 2.1.6 should turn existing planning-adjacent backend pieces into a cle
 | P13A | Planning backend audit + contract | Docs, model map, API proposal, risk register | Runtime code | Docs validation only | Audit/contract/plan/release docs exist and do not claim implementation. |
 | P13B | Planned obligation model + CRUD foundation | Complete: one-off planned obligation table, workspace-scoped CRUD, validation, cancel flow | Projection and UI | `PlannedObligationApiIntegrationTests` | Planned obligation can be created, read, updated, cancelled without wallet balance effects. |
 | P13C | Reserve allocation model + CRUD foundation | Complete: planning reserve table, workspace-scoped CRUD, release/cancel flow | Projection and cross-module dedupe | `ReserveAllocationApiIntegrationTests` | Reserve allocation can be created, read, updated, released, cancelled without wallet balance effects. |
-| P13D | Planning projection service | Projection formula, warnings, debt/obligation/reserve inputs | Frontend UI | Projection service tests | Available ledger, reserves, upcoming, overdue, expected incoming, shortfall calculated correctly. |
+| P13D | Planning projection service | Complete: read-only projection formula, wallet ledger, planning reserves, planned obligations, warnings | Public overview API and frontend UI | `PlanningProjectionServiceTests` | Available ledger, reserves, upcoming, overdue, expected incoming, shortfall calculated correctly. |
 | P13E | Mark-paid/link-to-transaction behavior | Link obligation to posted transaction or explicit transaction creation path | Auto-posting | Transaction/linking tests | Paid obligation links safely, same workspace only, no duplicate spend. |
 | P13F | Planning API overview + action item integration | `/planning/overview`, warnings/action items, stable DTOs | Notifications | Controller/API tests | Frontend can fetch projection, obligations, reserves, warnings. |
 | P13G | Planning backend release lock | Targeted tests, docs, scans, release status | Full frontend UAT | Targeted release validation | Backend status honestly marked locked/partial/blocked. |
@@ -75,6 +75,35 @@ Known P13B limitations:
 - No projection engine integration until P13D.
 - No mark-paid/link-to-transaction until P13E.
 - No recurrence generation.
+- No frontend UI change.
+
+## P13D Delivered
+
+- Added `PlanningProjectionService`.
+- Added `PlanningProjectionSnapshot`, `PlanningProjectionBreakdownItem`, and `PlanningProjectionWarning`.
+- Reused `WalletBalanceService` for available ledger balance.
+- Added repository projection queries for active P13C reserves and P13B planned obligations.
+- Implemented formula: `availableLedgerBalance - activeReserveAmount - upcomingRequiredOutflowAmount - overdueRequiredOutflowAmount`.
+- Implemented shortfall calculation without clamping negative spendable.
+- Included active reserves only; released/cancelled reserves are excluded.
+- Included planned required/important obligations only; paid/cancelled/optional obligations are excluded.
+- Separated overdue obligations from upcoming horizon obligations.
+- Kept expected income at zero with `EXPECTED_INCOME_DATA_UNAVAILABLE`.
+- Left Financial Insight P12D unchanged; duplicate logic can be unified later if needed.
+
+Targeted validation:
+
+`.\mvnw.cmd "-Dtest=*PlanningProjection*Tests,*ProjectionService*Tests,*PlanningSpendable*Tests" test`
+
+Result: targeted projection tests passed.
+
+Known P13D limitations:
+
+- No mark-paid/link-to-transaction until P13E.
+- Public planning overview API waits until P13F.
+- Recurring obligation generation remains deferred.
+- Projection accuracy depends on user-entered obligations/reserves.
+- Expected income is informational only and not wired in P13D.
 - No frontend UI change.
 
 ## P13C Delivered
@@ -145,4 +174,4 @@ Existing reusable pieces:
 
 ## Next Queue Item
 
-P13D - planning projection service.
+P13E - mark-paid and link obligation to transaction.

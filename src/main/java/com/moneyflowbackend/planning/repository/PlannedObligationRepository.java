@@ -44,4 +44,20 @@ public interface PlannedObligationRepository extends JpaRepository<PlannedObliga
             @Param("priority") PlannedObligationPriority priority,
             @Param("includeCancelled") boolean includeCancelled,
             Pageable pageable);
+
+    @Query("""
+            SELECT o FROM PlannedObligation o
+            WHERE o.workspace.id = :workspaceId
+              AND o.deletedAt IS NULL
+              AND o.status = com.moneyflowbackend.planning.model.PlannedObligationStatus.PLANNED
+              AND o.priority IN (
+                com.moneyflowbackend.planning.model.PlannedObligationPriority.REQUIRED,
+                com.moneyflowbackend.planning.model.PlannedObligationPriority.IMPORTANT
+              )
+              AND o.dueDate <= :to
+            ORDER BY o.dueDate ASC, o.createdAt ASC
+            """)
+    List<PlannedObligation> findProjectionObligations(
+            @Param("workspaceId") UUID workspaceId,
+            @Param("to") LocalDate to);
 }

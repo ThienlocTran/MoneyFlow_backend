@@ -40,4 +40,18 @@ public interface ReserveAllocationRepository extends JpaRepository<ReserveAlloca
             @Param("fromTargetDate") LocalDate fromTargetDate,
             @Param("toTargetDate") LocalDate toTargetDate,
             Pageable pageable);
+
+    @Query("""
+            SELECT r FROM ReserveAllocation r
+            LEFT JOIN FETCH r.wallet
+            LEFT JOIN FETCH r.category
+            LEFT JOIN FETCH r.jar
+            WHERE r.workspace.id = :workspaceId
+              AND r.deletedAt IS NULL
+              AND r.status = com.moneyflowbackend.planning.model.ReserveAllocationStatus.ACTIVE
+            ORDER BY CASE WHEN r.targetDate IS NULL THEN 1 ELSE 0 END ASC,
+                     r.targetDate ASC,
+                     r.createdAt DESC
+            """)
+    List<ReserveAllocation> findActiveForProjection(@Param("workspaceId") UUID workspaceId);
 }

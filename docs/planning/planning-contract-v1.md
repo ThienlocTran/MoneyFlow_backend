@@ -1,6 +1,6 @@
 # Planning Backend Contract V1
 
-Status: P13C reserve allocation CRUD foundation implemented. Projection/mark-paid phases remain planned.
+Status: P13D planning projection service implemented. Mark-paid/API overview phases remain planned.
 
 ## Goals
 
@@ -102,6 +102,15 @@ Formula:
 `actuallySpendable = availableLedgerBalance - activeReserveAmount - upcomingRequiredOutflowAmount - overdueRequiredOutflowAmount`
 
 `projectedShortfall = max(0, -actuallySpendable)`
+
+P13D implementation source rules:
+
+- `availableLedgerBalance`: active include-in-total wallets via `WalletBalanceService`
+- `activeReserveAmount`: P13C `reserve_allocations` with status `ACTIVE`
+- `upcomingRequiredOutflowAmount`: P13B planned obligations with status `PLANNED`, priority `REQUIRED` or `IMPORTANT`, due from `asOfDate` through `asOfDate + horizonDays`
+- `overdueRequiredOutflowAmount`: P13B planned obligations with status `PLANNED`, priority `REQUIRED` or `IMPORTANT`, due before `asOfDate`
+- `expectedIncomingAmount`: `0` in P13D because no safe planned-income source is wired
+- no-wallet income stays excluded from ledger through `WalletBalanceService`
 
 Expected incoming is informational and must not increase actually spendable.
 
@@ -356,6 +365,54 @@ Ledger rule:
 - release does not create income
 - wallet balance is unchanged by reserve CRUD
 
+## P13D Implemented Foundation
+
+Service: `PlanningProjectionService`
+
+DTOs:
+
+- `PlanningProjectionSnapshot`
+- `PlanningProjectionBreakdownItem`
+- `PlanningProjectionWarning`
+
+Formula:
+
+`actuallySpendable = availableLedgerBalance - activeReserveAmount - upcomingRequiredOutflowAmount - overdueRequiredOutflowAmount`
+
+`projectedShortfall = max(0, -actuallySpendable)`
+
+Data sources:
+
+- wallet ledger: `WalletBalanceService.calculateCurrentBalances` over active include-in-total wallets
+- reserves: P13C active planning reserves only
+- obligations: P13B planned required/important obligations only
+- expected incoming: not wired in P13D, shown as zero with `EXPECTED_INCOME_DATA_UNAVAILABLE`
+
+Included/excluded behavior:
+
+- active reserves reduce spendable
+- released/cancelled reserves do not reduce spendable
+- planned required/important obligations reduce spendable
+- optional obligations are excluded by default
+- paid/cancelled obligations are excluded
+- overdue obligations are separated from upcoming obligations
+- no-wallet income is excluded from available ledger by the wallet-balance source
+
+Warning behavior:
+
+- `NEGATIVE_ACTUALLY_SPENDABLE` when actually spendable is negative
+- `LOW_ACTUALLY_SPENDABLE` when actually spendable is below `500000 VND` and non-negative
+- `PROJECTED_SHORTFALL` when projected shortfall is positive
+- `WALLET_BALANCE_SOURCE_UNCLEAR` and `PARTIAL_PLANNING_DATA` when no active include-in-total wallets exist
+- `EXPECTED_INCOME_DATA_UNAVAILABLE` because P13D does not invent expected income
+- `MIXED_CURRENCY_UNSUPPORTED` when reserve/obligation currency differs from workspace currency
+
+Read-only rule:
+
+- projection creates no transactions
+- projection updates no wallet, reserve, or obligation state
+- overdue/upcoming classification is computed, not persisted
+
 ## Warning Codes
 
 - `PLANNING_OBLIGATION_MISSING_AMOUNT`
@@ -377,6 +434,10 @@ Ledger rule:
 - `RESERVE_CROSS_WORKSPACE_REFERENCE`
 - `RESERVE_DATA_UNAVAILABLE`
 - `EXPECTED_INCOME_NOT_SPENDABLE`
+- `EXPECTED_INCOME_DATA_UNAVAILABLE`
+- `NEGATIVE_ACTUALLY_SPENDABLE`
+- `LOW_ACTUALLY_SPENDABLE`
+- `WALLET_BALANCE_SOURCE_UNCLEAR`
 - `RECEIVABLE_NOT_SPENDABLE`
 - `PROJECTED_SHORTFALL`
 - `PARTIAL_PLANNING_DATA`
