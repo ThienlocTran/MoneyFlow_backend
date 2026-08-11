@@ -49,6 +49,11 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID>,
         LocalDate getLastUsedAt();
     }
 
+    interface MerchantCategoryHistoryRow {
+        UUID getCategoryId();
+        long getTransactionCount();
+    }
+
     long countByWorkspaceIdAndCategoryId(UUID workspaceId, UUID categoryId);
     boolean existsByWorkspaceIdAndVoiceRecordIdAndSourceType(UUID workspaceId, UUID voiceRecordId, TransactionSourceType sourceType);
     Optional<Transaction> findByWorkspaceIdAndVoiceRecordIdAndSourceType(UUID workspaceId, UUID voiceRecordId, TransactionSourceType sourceType);
@@ -135,6 +140,31 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID>,
     List<SuggestionHistoryRow> findSuggestionHistory(
             @Param("workspaceId") UUID workspaceId,
             @Param("transactionType") com.moneyflowbackend.transaction.model.TransactionType transactionType,
+            Pageable pageable);
+
+    @Query("""
+            SELECT c.id AS categoryId,
+                   COUNT(t.id) AS transactionCount
+            FROM Transaction t
+            JOIN t.category c
+            WHERE t.workspace.id = :workspaceId
+              AND t.transactionType = com.moneyflowbackend.transaction.model.TransactionType.EXPENSE
+              AND t.transactionStatus = com.moneyflowbackend.transaction.model.TransactionStatus.POSTED
+              AND t.deletedAt IS NULL
+              AND c.isActive = true
+              AND c.isArchived = false
+              AND (
+                    LOWER(t.description) = LOWER(:merchantName)
+                    OR LOWER(t.note) = LOWER(:merchantName)
+                    OR LOWER(t.description) LIKE LOWER(CONCAT('%', :merchantName, '%'))
+                    OR LOWER(t.note) LIKE LOWER(CONCAT('%', :merchantName, '%'))
+              )
+            GROUP BY c.id
+            ORDER BY COUNT(t.id) DESC
+            """)
+    List<MerchantCategoryHistoryRow> findReceiptMerchantCategoryHistory(
+            @Param("workspaceId") UUID workspaceId,
+            @Param("merchantName") String merchantName,
             Pageable pageable);
 
     @Query("""

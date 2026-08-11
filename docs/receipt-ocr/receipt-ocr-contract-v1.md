@@ -279,9 +279,47 @@ Bách Hóa Xanh regression target:
 - `Mã tra cứu: 6359148EDC` is excluded as `RECEIPT_CODE`.
 - `Góp ý: 18001067` is excluded as `PHONE_OR_HOTLINE`.
 
+## R-OCR-3 Merchant, Date, Category Confidence
+
+Receipt review now returns confidence and evidence for merchant, date, and category suggestions.
+
+Merchant rules:
+
+- High-confidence Azure structured `MerchantName` wins.
+- Low-confidence structured merchant falls back to text candidates.
+- Header and known merchant lines can be selected.
+- Time, date, amount, receipt code, phone, hotline, VAT, staff, QR, and footer contexts are rejected.
+- Bach Hoa Xanh header text normalizes to `Bách Hóa Xanh`; garbage such as `16:29 G` must not be selected.
+
+Date rules:
+
+- High-confidence Azure structured `TransactionDate` wins.
+- Low-confidence structured date falls back to text patterns.
+- Supported text formats include `dd/MM/yyyy`, `dd-MM-yyyy`, `yyyy-MM-dd`, and `dd.MM.yyyy`.
+- Phone, hotline, receipt code, amount, and impossible dates are rejected.
+- Far-future dates emit `RECEIPT_DATE_FUTURE_SUSPICIOUS` evidence but remain reviewable.
+
+Category suggestion rules:
+
+- Merchant history is checked first against posted, non-deleted expense transactions in the same workspace.
+- If history has exactly one category for the merchant, that category is suggested.
+- If no history applies, strong grocery merchant or item evidence can suggest a category only when the workspace has one unique active matching category.
+- Multiple active matches leave `categoryId=null` with `CATEGORY_AMBIGUOUS_MATCH`.
+- Archived categories and other workspace categories/history are ignored.
+- No category is guessed from random OCR text.
+- Shipper/delivery categories require explicit delivery evidence such as `shipper`, `giao hang`, `phi ship`, `van chuyen`, or `delivery`.
+
+Bach Hoa Xanh expected behavior:
+
+- Amount remains `67463`.
+- Merchant is `Bách Hóa Xanh`.
+- Date is `2026-07-30` when present in OCR text.
+- Category remains null unless a unique active grocery/food category or merchant history exists.
+- Shipper category is never selected without delivery evidence.
+- `needsReview=true` when wallet/category is missing or confidence is low.
+
 Known limitations:
 
-- Merchant/date/category confidence remains R-OCR-3.
 - Frontend candidate picker remains R-OCR-4.
 - More real receipt fixtures remain R-OCR-5.
 

@@ -243,7 +243,8 @@ public class ReceiptSessionService {
             session.setWarningsJson(writeWarnings(List.of(warning("OCR_EMPTY_TEXT"))));
             return detail(receiptSessionRepository.save(session));
         }
-        ReceiptTextParser.ParsedReceipt parsed = receiptTextParser.parse(normalized, result.totalAmount(), totalConfidence(result));
+        ReceiptTextParser.ParsedReceipt parsed = receiptTextParser.parse(normalized, result.totalAmount(), totalConfidence(result),
+                result.merchantName(), totalConfidence(result), result.receiptDate(), totalConfidence(result));
         session.setOcrStatus(ReceiptSessionOcrStatus.SUCCEEDED);
         session.setRawOcrText(result.text());
         session.setNormalizedOcrText(normalized);

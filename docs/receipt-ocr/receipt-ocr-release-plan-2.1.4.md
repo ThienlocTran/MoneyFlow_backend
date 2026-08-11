@@ -221,8 +221,23 @@ Known limitations:
 - Kept receipt OCR draft-first; no receipt endpoint auto-posts a transaction.
 - Exposed backend amount candidate evidence in the stateless receipt review extracted payload for later frontend work.
 
+## R-OCR-3 Delivered
+
+- Added merchant confidence and candidate evidence.
+- Added date confidence and candidate evidence.
+- Added category suggestion confidence and candidate evidence.
+- Azure structured merchant/date fields are preferred only when confidence is high enough; low-confidence fields fall back to OCR text.
+- Merchant extraction rejects time, date, amount, receipt code, phone, hotline, staff, VAT, QR, and footer contexts.
+- Date extraction supports common receipt date formats and rejects phone/hotline/code contexts.
+- Category suggestion uses same-workspace merchant history first, then unique active grocery/food category rules.
+- No random category is auto-selected.
+- Shipper/delivery categories require explicit delivery evidence.
+- Bach Hoa Xanh behavior: amount `67463`, merchant `Bách Hóa Xanh`, date `2026-07-30`, no shipper category unless delivery evidence exists.
+- Archived categories and cross-workspace history/categories are ignored.
+- Receipt review responses expose `needsReview` when wallet/category is missing or confidence is low.
+
 Known limitations:
 
-- Merchant/date/category confidence remains R-OCR-3.
 - Frontend candidate picker remains R-OCR-4.
 - Real receipt fixture pack remains R-OCR-5.
+- Category learning can be improved later with more confirmed receipt data.

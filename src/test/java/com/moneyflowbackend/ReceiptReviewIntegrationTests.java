@@ -13,6 +13,8 @@ import com.moneyflowbackend.receipt.dto.ReceiptReviewParseResponse;
 import com.moneyflowbackend.receipt.dto.ReceiptReviewSource;
 import com.moneyflowbackend.receipt.service.ReceiptReviewService;
 import com.moneyflowbackend.transaction.model.TransactionType;
+import com.moneyflowbackend.transaction.model.Transaction;
+import com.moneyflowbackend.transaction.model.TransactionStatus;
 import com.moneyflowbackend.transaction.repository.TransactionRepository;
 import com.moneyflowbackend.wallet.model.Wallet;
 import com.moneyflowbackend.wallet.model.WalletType;
@@ -133,6 +135,7 @@ class ReceiptReviewIntegrationTests {
 
         assertThat(response.getCandidate().getAmount()).isEqualByComparingTo("67463");
         assertThat(response.getCandidate().getMerchantName()).isEqualTo("Bách Hóa Xanh");
+        assertThat(response.getCandidate().getOccurredAt().toLocalDate()).hasToString("2026-07-30");
         assertThat(response.getCandidate().getCategoryName()).isNotEqualTo("Dua/nhan do cho shipper");
         assertThat(response.getExtracted().getLineAmounts()).doesNotContain(new BigDecimal("6359148"), new BigDecimal("18001067"), new BigDecimal("200000"), new BigDecimal("135000"), new BigDecimal("2463"));
         assertThat(response.getExtracted().getAmountCandidates()).anySatisfy(candidate -> {
@@ -143,6 +146,87 @@ class ReceiptReviewIntegrationTests {
             assertThat(candidate.getValue()).isEqualByComparingTo("6359148");
             assertThat(candidate.getExcludedReason()).isEqualTo("RECEIPT_CODE");
         });
+        assertThat(response.getExtracted().getMerchantConfidence()).isIn("HIGH", "MEDIUM");
+        assertThat(response.getExtracted().getDateConfidence()).isIn("HIGH", "MEDIUM");
+    }
+
+    @Test
+    void groceryReceiptDoesNotSelectShipperCategoryWithoutDeliveryEvidence() {
+        TestContext ctx = context("rr_no_shipper", WorkspaceRole.OWNER);
+        category(ctx, "Dua/nhan do cho shipper");
+
+        ReceiptReviewParseResponse response = receiptReviewService.parse(ctx.workspace().getId(), request("""
+                PHIEU THANH TOAN BACH HOA XANH
+                Phai thanh toan: 67.463
+                """, null), ctx.user().getId());
+
+        assertThat(response.getCandidate().getCategoryId()).isNull();
+        assertThat(response.getWarnings()).extracting("code").contains("CATEGORY_SHIPPER_MATCH_REJECTED", "RECEIPT_CATEGORY_NOT_SELECTED");
+    }
+
+    @Test
+    void uniqueGroceryCategoryIsSelected() {
+        TestContext ctx = context("rr_grocery_unique", WorkspaceRole.OWNER);
+        Category grocery = category(ctx, "Di cho");
+
+        ReceiptReviewParseResponse response = receiptReviewService.parse(ctx.workspace().getId(), request("""
+                PHIEU THANH TOAN BACH HOA XANH
+                Phai thanh toan: 67.463
+                """, null), ctx.user().getId());
+
+        assertThat(response.getCandidate().getCategoryId()).isEqualTo(grocery.getId());
+        assertThat(response.getExtracted().getCategoryConfidence()).isEqualTo("HIGH");
+        assertThat(response.getWarnings()).extracting("code").contains("CATEGORY_MERCHANT_RULE_MATCH_USED");
+    }
+
+    @Test
+    void ambiguousGroceryCategoriesAreNotGuessed() {
+        TestContext ctx = context("rr_grocery_amb", WorkspaceRole.OWNER);
+        category(ctx, "Di cho");
+        category(ctx, "An uong");
+
+        ReceiptReviewParseResponse response = receiptReviewService.parse(ctx.workspace().getId(), request("""
+                PHIEU THANH TOAN BACH HOA XANH
+                Phai thanh toan: 67.463
+                """, null), ctx.user().getId());
+
+        assertThat(response.getCandidate().getCategoryId()).isNull();
+        assertThat(response.getWarnings()).extracting("code").contains("CATEGORY_AMBIGUOUS_MATCH");
+    }
+
+    @Test
+    void merchantHistoryWinsCategorySuggestion() {
+        TestContext ctx = context("receipt_review_history", WorkspaceRole.OWNER);
+        Category grocery = category(ctx, "Di cho");
+        category(ctx, "An uong");
+        transaction(ctx, grocery, "Bách Hóa Xanh");
+        transaction(ctx, grocery, "Bách Hóa Xanh");
+        transaction(ctx, grocery, "Bách Hóa Xanh");
+
+        ReceiptReviewParseResponse response = receiptReviewService.parse(ctx.workspace().getId(), request("""
+                PHIEU THANH TOAN BACH HOA XANH
+                Phai thanh toan: 67.463
+                """, null), ctx.user().getId());
+
+        assertThat(response.getCandidate().getCategoryId()).isEqualTo(grocery.getId());
+        assertThat(response.getWarnings()).extracting("code").contains("CATEGORY_HISTORY_MATCH_USED");
+    }
+
+    @Test
+    void archivedAndCrossWorkspaceCategoriesAreIgnored() {
+        TestContext ctx = context("receipt_review_archived", WorkspaceRole.OWNER);
+        TestContext other = context("rr_archived_other", WorkspaceRole.OWNER);
+        category(ctx, "Di cho", true);
+        Category otherGrocery = category(other, "Di cho");
+        transaction(other, otherGrocery, "Bách Hóa Xanh");
+
+        ReceiptReviewParseResponse response = receiptReviewService.parse(ctx.workspace().getId(), request("""
+                PHIEU THANH TOAN BACH HOA XANH
+                Phai thanh toan: 67.463
+                """, null), ctx.user().getId());
+
+        assertThat(response.getCandidate().getCategoryId()).isNull();
+        assertThat(response.getWarnings()).extracting("code").contains("CATEGORY_NO_ACTIVE_MATCH");
     }
 
     @Test
@@ -232,12 +316,31 @@ class ReceiptReviewIntegrationTests {
     }
 
     private Category category(TestContext ctx, String name) {
+        return category(ctx, name, false);
+    }
+
+    private Category category(TestContext ctx, String name, boolean archived) {
         return categoryRepository.saveAndFlush(Category.builder()
                 .workspace(ctx.workspace())
                 .name(name)
                 .categoryType(CategoryType.EXPENSE)
-                .isActive(true)
-                .isArchived(false)
+                .isActive(!archived)
+                .isArchived(archived)
+                .build());
+    }
+
+    private void transaction(TestContext ctx, Category category, String merchant) {
+        transactionRepository.saveAndFlush(Transaction.builder()
+                .workspace(ctx.workspace())
+                .createdByUser(ctx.user())
+                .category(category)
+                .transactionType(TransactionType.EXPENSE)
+                .transactionStatus(TransactionStatus.POSTED)
+                .amount(new BigDecimal("10000"))
+                .currency("VND")
+                .transactionDate(java.time.LocalDate.of(2026, 7, 1))
+                .description(merchant)
+                .note(merchant)
                 .build());
     }
 

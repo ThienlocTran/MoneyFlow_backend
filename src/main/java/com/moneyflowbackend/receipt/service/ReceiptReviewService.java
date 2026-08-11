@@ -1,12 +1,6 @@
 package com.moneyflowbackend.receipt.service;
 
-import com.moneyflowbackend.category.model.Category;
-import com.moneyflowbackend.category.model.CategoryKeyword;
-import com.moneyflowbackend.category.model.CategoryType;
-import com.moneyflowbackend.category.repository.CategoryKeywordRepository;
-import com.moneyflowbackend.category.repository.CategoryRepository;
 import com.moneyflowbackend.common.exception.BusinessException;
-import com.moneyflowbackend.quickentry.parser.VietnameseTextNormalizer;
 import com.moneyflowbackend.receipt.dto.ReceiptReviewParseRequest;
 import com.moneyflowbackend.receipt.dto.ReceiptReviewParseResponse;
 import com.moneyflowbackend.receipt.dto.ReceiptReviewSource;
@@ -35,7 +29,6 @@ import java.time.LocalTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -46,40 +39,39 @@ public class ReceiptReviewService {
     private static final Set<String> ALLOWED_IMAGE_TYPES = Set.of("image/jpeg", "image/png", "image/webp");
 
     private final ReceiptTextParser parser;
+    private final ReceiptCategorySuggestor categorySuggestor;
     private final ReceiptOcrService ocrService;
     private final WorkspaceRepository workspaceRepository;
     private final WorkspaceMemberRepository workspaceMemberRepository;
     private final WalletRepository walletRepository;
-    private final CategoryRepository categoryRepository;
-    private final CategoryKeywordRepository categoryKeywordRepository;
     private final Clock clock;
 
     public ReceiptReviewService(
             ReceiptTextParser parser,
+            ReceiptCategorySuggestor categorySuggestor,
             ReceiptOcrService ocrService,
             WorkspaceRepository workspaceRepository,
             WorkspaceMemberRepository workspaceMemberRepository,
             WalletRepository walletRepository,
-            CategoryRepository categoryRepository,
-            CategoryKeywordRepository categoryKeywordRepository,
             Clock clock) {
         this.parser = parser;
+        this.categorySuggestor = categorySuggestor;
         this.ocrService = ocrService;
         this.workspaceRepository = workspaceRepository;
         this.workspaceMemberRepository = workspaceMemberRepository;
         this.walletRepository = walletRepository;
-        this.categoryRepository = categoryRepository;
-        this.categoryKeywordRepository = categoryKeywordRepository;
         this.clock = clock;
     }
 
     @Transactional(readOnly = true)
     public ReceiptReviewParseResponse parse(UUID workspaceId, ReceiptReviewParseRequest req, UUID userId) {
-        return parse(workspaceId, req, userId, null, null);
+        return parse(workspaceId, req, userId, null, null, null, null, null, null);
     }
 
     private ReceiptReviewParseResponse parse(UUID workspaceId, ReceiptReviewParseRequest req, UUID userId,
-                                             BigDecimal structuredTotal, Double structuredTotalConfidence) {
+                                             BigDecimal structuredTotal, Double structuredTotalConfidence,
+                                             String structuredMerchant, Double structuredMerchantConfidence,
+                                             LocalDate structuredDate, Double structuredDateConfidence) {
         Workspace workspace = requireMember(workspaceId, userId).getWorkspace();
         ReceiptReviewSource source = req == null || req.getSource() == null ? ReceiptReviewSource.MANUAL_TEXT : req.getSource();
         String rawText = normalize(req == null ? null : req.getRawText());
@@ -90,34 +82,34 @@ public class ReceiptReviewService {
             return response(source, rawText, 0, List.of(), skippedOcr(), null, null, null, warnings, "UNSUPPORTED");
         }
 
-        ReceiptTextParser.ParsedReceipt parsed = parser.parse(rawText, structuredTotal, structuredTotalConfidence);
+        ReceiptTextParser.ParsedReceipt parsed = parser.parse(rawText, structuredTotal, structuredTotalConfidence,
+                structuredMerchant, structuredMerchantConfidence, structuredDate, structuredDateConfidence);
         parsed.amountWarnings().forEach(code -> warnings.add(warning(code, "amount")));
         if (parsed.totalAmount() == null) {
             warnings.add(warning("RECEIPT_TOTAL_NOT_FOUND", "amount"));
         } else if (parsed.totalInferred()) {
             warnings.add(warning("RECEIPT_TOTAL_INFERRED", "amount"));
         }
-        if (parsed.merchantName() == null) {
-            warnings.add(warning("RECEIPT_MERCHANT_UNCERTAIN", "merchantName"));
-        }
+        parsed.merchantWarnings().forEach(code -> warnings.add(warning(code, "merchantName")));
         LocalDate date = parsed.receiptDate();
         if (date == null && req != null && req.getOccurredAtHint() != null) {
             date = req.getOccurredAtHint().toLocalDate();
         }
         if (date == null) {
             date = LocalDate.now(clock.withZone(zone(workspace)));
-            warnings.add(warning("RECEIPT_DATE_INFERRED", "occurredAt"));
+            warnings.add(warning("RECEIPT_DATE_NOT_FOUND", "occurredAt"));
         }
 
         Wallet wallet = wallet(req == null ? null : req.getWalletId(), workspaceId);
-        Category category = category(workspaceId, rawText);
+        ReceiptCategorySuggestion categorySuggestion = categorySuggestor.suggest(workspaceId, parsed.merchantName(), rawText);
+        categorySuggestion.warnings().forEach(code -> warnings.add(warning(code, "categoryId")));
         List<String> needs = new ArrayList<>();
         if (parsed.totalAmount() == null) needs.add("amount");
         if (wallet == null) {
             needs.add("walletId");
             warnings.add(warning("RECEIPT_WALLET_NOT_SELECTED", "walletId"));
         }
-        if (category == null) {
+        if (categorySuggestion.categoryId() == null) {
             needs.add("categoryId");
             warnings.add(warning("RECEIPT_CATEGORY_NOT_SELECTED", "categoryId"));
         }
@@ -129,20 +121,36 @@ public class ReceiptReviewService {
                 .currency(currency(workspace))
                 .occurredAt(occurredAt)
                 .walletId(wallet == null ? null : wallet.getId())
-                .categoryId(category == null ? null : category.getId())
-                .categoryName(category == null ? null : category.getName())
+                .categoryId(categorySuggestion.categoryId())
+                .categoryName(categorySuggestion.categoryName())
                 .merchantName(parsed.merchantName())
                 .note(parsed.merchantName() == null ? "Receipt" : parsed.merchantName())
                 .affectsWalletBalance(true)
+                .needsReview(!needs.isEmpty() || warnings.stream().anyMatch(w -> w.getCode().contains("LOW_CONFIDENCE") || w.getCode().contains("AMBIGUOUS")))
                 .needsFields(needs.stream().distinct().toList())
                 .build();
         ReceiptReviewParseResponse.Extracted extracted = ReceiptReviewParseResponse.Extracted.builder()
                 .merchantName(parsed.merchantName())
                 .receiptDate(parsed.receiptDate())
                 .totalAmount(parsed.totalAmount())
+                .merchantConfidence(confidence(parsed.merchantCandidates()))
+                .merchantEvidence(evidence(parsed.merchantCandidates()))
+                .dateConfidence(confidenceDate(parsed.dateCandidates()))
+                .dateEvidence(evidenceDate(parsed.dateCandidates()))
+                .categoryConfidence(categorySuggestion.confidence().name())
+                .categoryEvidence(categorySuggestion.evidence())
                 .lineAmounts(parsed.lineAmounts())
                 .amountCandidates(parsed.amountCandidates().stream()
                         .map(this::amountCandidate)
+                        .toList())
+                .merchantCandidates(parsed.merchantCandidates().stream()
+                        .map(this::merchantCandidate)
+                        .toList())
+                .dateCandidates(parsed.dateCandidates().stream()
+                        .map(this::dateCandidate)
+                        .toList())
+                .categoryCandidates(categorySuggestion.candidates().stream()
+                        .map(this::categoryCandidate)
                         .toList())
                 .build();
         return response(source, rawText, 0, List.of(), skippedOcr(), candidate, extracted, parsed.totalAmount(), warnings, "NEEDS_REVIEW");
@@ -192,7 +200,7 @@ public class ReceiptReviewService {
                     null, null, null, warnings, "OCR_TEXT_EMPTY");
         }
         return withImageData(parse(workspaceId, request(ocrText, ReceiptReviewSource.PHOTO_OCR, occurredAtHint, walletId), userId,
-                ocr.totalAmount(), totalConfidence(ocr)), attachments, ocrDto);
+                ocr.totalAmount(), totalConfidence(ocr), ocr.merchantName(), totalConfidence(ocr), ocr.receiptDate(), totalConfidence(ocr)), attachments, ocrDto);
     }
 
     private Double totalConfidence(ReceiptOcrResult ocr) {
@@ -214,6 +222,66 @@ public class ReceiptReviewService {
                 .confidence(candidate.confidence().name())
                 .evidence(candidate.evidence())
                 .build();
+    }
+
+    private ReceiptReviewParseResponse.MerchantCandidate merchantCandidate(ReceiptMerchantCandidate candidate) {
+        return ReceiptReviewParseResponse.MerchantCandidate.builder()
+                .value(candidate.value())
+                .rawText(candidate.rawText())
+                .normalizedValue(candidate.normalizedValue())
+                .source(candidate.source().name())
+                .score(candidate.score())
+                .confidence(candidate.confidence().name())
+                .selected(candidate.selected())
+                .rejected(candidate.rejected())
+                .rejectedReason(candidate.rejectedReason())
+                .evidence(candidate.evidence())
+                .build();
+    }
+
+    private ReceiptReviewParseResponse.DateCandidate dateCandidate(ReceiptDateCandidate candidate) {
+        return ReceiptReviewParseResponse.DateCandidate.builder()
+                .value(candidate.value())
+                .rawText(candidate.rawText())
+                .lineText(candidate.lineText())
+                .source(candidate.source().name())
+                .score(candidate.score())
+                .confidence(candidate.confidence().name())
+                .selected(candidate.selected())
+                .rejected(candidate.rejected())
+                .rejectedReason(candidate.rejectedReason())
+                .evidence(candidate.evidence())
+                .build();
+    }
+
+    private ReceiptReviewParseResponse.CategoryCandidate categoryCandidate(ReceiptCategorySuggestion.CategoryCandidate candidate) {
+        return ReceiptReviewParseResponse.CategoryCandidate.builder()
+                .categoryId(candidate.categoryId())
+                .categoryName(candidate.categoryName())
+                .source(candidate.source())
+                .score(candidate.score())
+                .confidence(candidate.confidence().name())
+                .selected(candidate.selected())
+                .rejected(candidate.rejected())
+                .rejectedReason(candidate.rejectedReason())
+                .evidence(candidate.evidence())
+                .build();
+    }
+
+    private String confidence(List<ReceiptMerchantCandidate> candidates) {
+        return candidates.stream().filter(ReceiptMerchantCandidate::selected).map(candidate -> candidate.confidence().name()).findFirst().orElse("LOW");
+    }
+
+    private String evidence(List<ReceiptMerchantCandidate> candidates) {
+        return candidates.stream().filter(ReceiptMerchantCandidate::selected).map(ReceiptMerchantCandidate::evidence).findFirst().orElse(null);
+    }
+
+    private String confidenceDate(List<ReceiptDateCandidate> candidates) {
+        return candidates.stream().filter(ReceiptDateCandidate::selected).map(candidate -> candidate.confidence().name()).findFirst().orElse("LOW");
+    }
+
+    private String evidenceDate(List<ReceiptDateCandidate> candidates) {
+        return candidates.stream().filter(ReceiptDateCandidate::selected).map(ReceiptDateCandidate::evidence).findFirst().orElse(null);
     }
 
     private ReceiptReviewParseResponse response(
@@ -334,40 +402,6 @@ public class ReceiptReviewService {
                 .build();
     }
 
-    private Category category(UUID workspaceId, String rawText) {
-        String comparable = VietnameseTextNormalizer.comparable(rawText);
-        List<String> preferredNames = preferredCategoryNames(comparable);
-        if (preferredNames.isEmpty()) return null;
-        return categoryRepository.findList(workspaceId, CategoryType.EXPENSE, null, true, false, null, false, false).stream()
-                .filter(category -> preferredNames.stream().anyMatch(name -> contains(VietnameseTextNormalizer.comparable(category.getName()), name)))
-                .min(Comparator.comparingInt(Category::getDisplayOrder))
-                .orElse(null);
-    }
-
-    private List<String> preferredCategoryNames(String text) {
-        if (hasAny(text, "xang", "petrol", "fuel", "grab", "taxi")) return List.of("xang", "di lai", "di chuyen", "transport");
-        if (hasAny(text, "cafe", "coffee", "tra sua", "ca phe")) return List.of("an uong", "do uong", "cafe", "coffee");
-        if (hasAny(text, "sieu thi", "coopmart", "bach hoa", "bach hoa xanh", "cua hang")) return List.of("di cho", "groceries", "an uong");
-        if (hasAny(text, "thuoc", "pharmacy")) return List.of("y te", "health");
-        return List.of();
-    }
-
-    private boolean hasAny(String text, String... values) {
-        for (String value : values) {
-            if (contains(text, value)) return true;
-        }
-        return false;
-    }
-
-    private boolean contains(String text, String value) {
-        String needle = VietnameseTextNormalizer.comparable(value);
-        return !needle.isBlank() && (" " + text + " ").contains(" " + needle + " ");
-    }
-
-    private boolean usable(Category category) {
-        return category.isActive() && !category.isArchived();
-    }
-
     private Wallet wallet(UUID walletId, UUID workspaceId) {
         if (walletId == null) return null;
         Wallet wallet = walletRepository.findByIdAndWorkspaceId(walletId, workspaceId)
@@ -399,14 +433,25 @@ public class ReceiptReviewService {
             case "RECEIPT_EXCLUDED_LOYALTY_POINTS" -> "Loyalty points amount was excluded.";
             case "RECEIPT_EXCLUDED_RECEIPT_CODE" -> "Receipt code number was excluded.";
             case "RECEIPT_EXCLUDED_PHONE_OR_HOTLINE" -> "Phone or hotline number was excluded.";
-            case "RECEIPT_MERCHANT_UNCERTAIN" -> "Merchant could not be detected confidently.";
-            case "RECEIPT_DATE_INFERRED" -> "Receipt date was inferred.";
+            case "RECEIPT_MERCHANT_UNCERTAIN", "RECEIPT_MERCHANT_LOW_CONFIDENCE" -> "Merchant could not be detected confidently.";
+            case "RECEIPT_MERCHANT_NOT_FOUND" -> "Receipt merchant was not found.";
+            case "RECEIPT_MERCHANT_REJECTED_CONTEXT" -> "Some merchant candidates were rejected as receipt metadata.";
+            case "RECEIPT_DATE_INFERRED", "RECEIPT_DATE_LOW_CONFIDENCE" -> "Receipt date confidence is low.";
+            case "RECEIPT_DATE_NOT_FOUND" -> "Receipt date was not found.";
+            case "RECEIPT_DATE_IMPOSSIBLE" -> "Receipt date could not be parsed.";
+            case "RECEIPT_DATE_FUTURE_SUSPICIOUS" -> "Receipt date is in the future.";
             case "RECEIPT_CATEGORY_NOT_SELECTED" -> "Choose a category before saving.";
             case "RECEIPT_WALLET_NOT_SELECTED" -> "Choose a wallet before saving.";
             case "RECEIPT_CATEGORY_LOW_CONFIDENCE" -> "Receipt category confidence is low.";
+            case "CATEGORY_AMBIGUOUS_MATCH" -> "Receipt category match is ambiguous.";
+            case "CATEGORY_HISTORY_MATCH_USED" -> "Receipt category was suggested from merchant history.";
+            case "CATEGORY_MERCHANT_RULE_MATCH_USED" -> "Receipt category was suggested from merchant evidence.";
+            case "CATEGORY_ITEM_RULE_MATCH_USED" -> "Receipt category was suggested from item evidence.";
+            case "CATEGORY_NO_ACTIVE_MATCH" -> "No active matching receipt category was found.";
+            case "CATEGORY_SHIPPER_MATCH_REJECTED" -> "Shipper category was rejected because delivery evidence is missing.";
             case "RECEIPT_TEXT_TOO_SHORT" -> "Receipt text is too short.";
-            case "RECEIPT_TEXT_REQUIRED_WHEN_OCR_DISABLED" -> "OCR hóa đơn chưa được bật. Hãy dán nội dung hóa đơn để tạo bản nháp.";
-            case "RECEIPT_OCR_TEXT_EMPTY" -> "OCR không đọc được nội dung hóa đơn.";
+            case "RECEIPT_TEXT_REQUIRED_WHEN_OCR_DISABLED" -> "OCR hoa don chua duoc bat. Hay dan noi dung hoa don de tao ban nhap.";
+            case "RECEIPT_OCR_TEXT_EMPTY" -> "OCR khong doc duoc noi dung hoa don.";
             default -> "Receipt text is not supported yet.";
         };
     }
