@@ -1,6 +1,6 @@
 # Receipt OCR Release Plan 2.1.4
 
-Status: planned. P11F receipt draft confirm is implemented.
+Status: backend locked; live Azure UAT pending.
 
 ## Product Guardrail
 
@@ -90,7 +90,7 @@ Deferred:
 
 ## Next Queue Item
 
-P11G - Receipt OCR 2.1.4 backend release lock.
+P12A - Financial Insight backend spec + metric audit.
 
 ## P11B Delivered
 
@@ -192,3 +192,12 @@ Known limitations:
 - Azure OCR quality still requires user review.
 - Storage disabled means transaction can save without image playback.
 - Category and wallet must be supplied by the client/user before confirm.
+
+## P11G Delivered
+
+- Verified P11A through P11F docs/code/test evidence.
+- Locked backend scope as Receipt OCR Backend Foundation.
+- Release status: `BACKEND LOCKED / LIVE AZURE UAT PENDING`.
+- Automated receipt/transaction and receipt/voice validation passed.
+- Live Azure OCR UAT not executed because it requires a local Azure Document Intelligence resource/key.
+- Frontend UI remains deferred and is not claimed by this backend release.

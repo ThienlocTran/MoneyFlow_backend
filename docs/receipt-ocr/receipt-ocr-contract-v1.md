@@ -1,6 +1,6 @@
 # Receipt OCR Contract V1
 
-Status: backend contract for 2.1.4. P11F receipt draft confirm is implemented.
+Status: backend contract for 2.1.4. Backend locked; live Azure UAT pending.
 
 ## Product Guardrail
 
