@@ -115,6 +115,22 @@ public class JarController {
         return ResponseEntity.ok(ApiResponse.ok("Jar deactivated", null));
     }
 
+    @PostMapping("/{jarId}/archive")
+    public ResponseEntity<ApiResponse<JarResponse>> archive(
+            @PathVariable UUID workspaceId,
+            @PathVariable UUID jarId) {
+        JarResponse res = jarService.archive(workspaceId, jarId, currentUserId());
+        return ResponseEntity.ok(ApiResponse.ok("Jar archived", res));
+    }
+
+    @PostMapping("/{jarId}/restore")
+    public ResponseEntity<ApiResponse<JarResponse>> restore(
+            @PathVariable UUID workspaceId,
+            @PathVariable UUID jarId) {
+        JarResponse res = jarService.restore(workspaceId, jarId, currentUserId());
+        return ResponseEntity.ok(ApiResponse.ok("Jar restored", res));
+    }
+
     @DeleteMapping("/{jarId}")
     public ResponseEntity<ApiResponse<Void>> delete(
             @PathVariable UUID workspaceId,

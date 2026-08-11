@@ -1,6 +1,6 @@
 # Category/Jar Backend Contract V1
 
-Status: P14D move/reorder implemented. Archive/delete alignment and frontend UI remain deferred.
+Status: P14E archive/delete implemented. Frontend UI remains deferred.
 
 ## Concepts
 
@@ -150,6 +150,23 @@ Existing endpoints to preserve:
 - `DELETE /api/workspaces/{workspaceId}/categories/{categoryId}`
 - `PUT /api/workspaces/{workspaceId}/categories/reorder`
 
+P14E lifecycle endpoints:
+
+- `POST /api/workspaces/{workspaceId}/categories/{categoryId}/archive`
+- `POST /api/workspaces/{workspaceId}/categories/{categoryId}/restore`
+- `POST /api/workspaces/{workspaceId}/jars/{jarId}/archive`
+- `POST /api/workspaces/{workspaceId}/jars/{jarId}/restore`
+
+P14E behavior:
+
+- Category archive is idempotent, sets `isArchived=true`, `isActive=false`, clears quick action, and keeps transactions linked.
+- Category restore is idempotent when the parent jar is active or missing; it blocks with `CATEGORY_CANNOT_RESTORE_PARENT_JAR_ARCHIVED` when the parent jar is inactive.
+- Category delete hard-deletes only unused categories. Used categories block with `CATEGORY_DELETE_BLOCKED_HAS_TRANSACTIONS`.
+- Jar archive maps to `isActive=false` because the current jar schema has no `isArchived` field. It is idempotent and blocks active child categories with `JAR_ARCHIVE_BLOCKED_HAS_ACTIVE_CATEGORIES`.
+- Jar restore maps to `isActive=true` and reuses the existing allocation guard.
+- Jar delete hard-deletes only jars with no categories. Jars with categories block with `JAR_DELETE_BLOCKED_HAS_CATEGORIES`.
+- Lifecycle mutations do not create, update, delete, or reassign transactions.
+
 New endpoint proposals for later phases:
 
 `POST /api/workspaces/{workspaceId}/categories/{categoryId}/move`
@@ -248,6 +265,13 @@ P14D behavior:
 - Active duplicate names should be avoided in the same workspace/type. Current code blocks duplicates per workspace/type, regardless of jar.
 - Voice/OCR hints may resolve to active category by normalized name/keyword. If multiple matches exist, do not guess.
 - Workspace isolation applies to category, jar, wallet, transaction, keyword, and stats queries.
+
+Archive/delete rules:
+
+- Default board reads hide archived categories and inactive jars.
+- `includeArchived=true` includes archived categories and inactive jars with conservative action flags.
+- Hard delete never runs when transaction/category usage would orphan history.
+- Archive is the safe path for historical categories and empty jars.
 
 Move/reorder error codes:
 
@@ -348,6 +372,7 @@ Filters:
 - `CATEGORY_ARCHIVED`
 - `CATEGORY_HAS_TRANSACTIONS`
 - `CATEGORY_DELETE_BLOCKED_HAS_TRANSACTIONS`
+- `CATEGORY_CANNOT_RESTORE_PARENT_JAR_ARCHIVED`
 - `CATEGORY_CROSS_WORKSPACE_REFERENCE`
 - `CATEGORY_DUPLICATE_ACTIVE_NAME`
 - `CATEGORY_AMBIGUOUS_MATCH`
@@ -358,6 +383,7 @@ Filters:
 - `JAR_NOT_FOUND`
 - `JAR_ARCHIVED`
 - `JAR_HAS_ACTIVE_CATEGORIES`
+- `JAR_ARCHIVE_BLOCKED_HAS_ACTIVE_CATEGORIES`
 - `JAR_DELETE_BLOCKED_HAS_CATEGORIES`
 - `JAR_CROSS_WORKSPACE_REFERENCE`
 - `JAR_DUPLICATE_ACTIVE_NAME`

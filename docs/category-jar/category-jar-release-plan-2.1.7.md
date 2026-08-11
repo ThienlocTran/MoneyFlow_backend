@@ -1,6 +1,6 @@
 # Category/Jar Backend Release Plan 2.1.7
 
-Status: P14D move/reorder implemented. P14E archive/delete remains planned.
+Status: P14E safe archive/delete implemented. P14F release lock remains planned.
 
 ## Theme
 
@@ -34,7 +34,7 @@ MoneyFlow 2.1.7 prepares Category/Jar as a backend product layer for a future Ja
 | P14B | Jar board grouped read API | Complete: read-only `GET /category-board` with jars, categories, uncategorized group, metadata, warnings | Write APIs, deep stats | `*CategoryBoard*Tests,*JarCategory*Tests` | Frontend can fetch a grouped board without mutations or fake rows. |
 | P14C | Category/Jar stats query layer | Complete: period stats, transaction count, totals, last used, jar totals, uncategorized totals | Chart/UI formatting | `*CategoryJarStats*Tests,*CategoryBoard*Tests` | Stats use posted, non-deleted, workspace/date-scoped transactions. |
 | P14D | Move/reorder category and jar ordering | Complete: dedicated move API, jar reorder API, category group reorder API, validation, historical warning | Merge, jar snapshot migration | `*CategoryMove*Tests,*CategoryReorder*Tests,*JarReorder*Tests` | Move keeps category id, does not rewrite transactions, reorder rejects duplicates/cross-workspace ids. |
-| P14E | Safe archive/delete behavior | Align archive/delete endpoints and error codes, block unsafe hard delete, expose usage warnings | Merge, bulk cleanup | `*CategoryArchive*Tests,*JarArchive*Tests,*CategoryDelete*Tests` | Used categories/jars are archived or blocked, never orphan history. |
+| P14E | Safe archive/delete behavior | Complete: lifecycle endpoints, safe delete guards, board filtering coverage, workspace isolation | Merge, bulk cleanup | `*CategoryArchive*Tests,*JarArchive*Tests,*CategoryDelete*Tests,*CategoryBoard*Tests` | Used categories/jars are archived or blocked, never orphan history. |
 | P14F | Category/Jar backend release lock | Targeted tests, docs, scans, release status | Full frontend UAT | Targeted release validation | Backend status honestly marked locked/partial/blocked. |
 
 ## Validation Strategy
@@ -167,6 +167,28 @@ Targeted validation:
 
 Result: 8 tests passed, 0 failures, 0 errors, 0 skipped.
 
+## P14E Delivered
+
+- Added category lifecycle endpoints:
+  - `POST /api/workspaces/{workspaceId}/categories/{categoryId}/archive`
+  - `POST /api/workspaces/{workspaceId}/categories/{categoryId}/restore`
+- Added jar lifecycle endpoints:
+  - `POST /api/workspaces/{workspaceId}/jars/{jarId}/archive`
+  - `POST /api/workspaces/{workspaceId}/jars/{jarId}/restore`
+- Category archive reuses `isArchived=true`, sets `isActive=false`, clears quick action, and keeps transactions linked.
+- Category restore reuses `isArchived=false` and `isActive=true`; restore blocks with `CATEGORY_CANNOT_RESTORE_PARENT_JAR_ARCHIVED` when its parent jar is inactive.
+- Category delete blocks used categories with `CATEGORY_DELETE_BLOCKED_HAS_TRANSACTIONS` and hard-deletes only unused categories.
+- Jar archive reuses `isActive=false`; it blocks active child categories with `JAR_ARCHIVE_BLOCKED_HAS_ACTIVE_CATEGORIES`.
+- Jar restore reuses `isActive=true` and existing allocation validation.
+- Jar delete blocks jars with categories using `JAR_DELETE_BLOCKED_HAS_CATEGORIES` and hard-deletes only empty jars.
+- Default board filtering hides archived categories and inactive jars; `includeArchived=true` includes them.
+- Workspace isolation is enforced by workspace-scoped lookups before lifecycle mutation.
+- No transaction rows are created, updated, deleted, or reassigned.
+
+Targeted validation:
+
+`.\mvnw.cmd "-Dtest=*CategoryArchive*Tests,*CategoryDelete*Tests,*JarArchive*Tests,*JarDelete*Tests,*CategoryBoard*Tests,*JarBoard*Tests" test`
+
 ## Next Queue Item
 
-P14E - Safe archive/delete category and jar behavior.
+P14F - Category/Jar backend release lock.

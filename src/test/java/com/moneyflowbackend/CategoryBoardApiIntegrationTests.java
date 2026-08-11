@@ -10,6 +10,7 @@ import com.moneyflowbackend.auth.service.AuthService;
 import com.moneyflowbackend.category.model.Category;
 import com.moneyflowbackend.category.model.CategoryType;
 import com.moneyflowbackend.category.repository.CategoryRepository;
+import com.moneyflowbackend.category.service.CategoryService;
 import com.moneyflowbackend.categoryboard.dto.CategoryBoardResponse;
 import com.moneyflowbackend.categoryboard.dto.CategoryGroupReorderRequest;
 import com.moneyflowbackend.categoryboard.dto.CategoryMoveRequest;
@@ -19,6 +20,7 @@ import com.moneyflowbackend.categoryboard.service.CategoryBoardService;
 import com.moneyflowbackend.common.exception.BusinessException;
 import com.moneyflowbackend.jar.model.Jar;
 import com.moneyflowbackend.jar.repository.JarRepository;
+import com.moneyflowbackend.jar.service.JarService;
 import com.moneyflowbackend.transaction.model.Transaction;
 import com.moneyflowbackend.transaction.model.TransactionStatus;
 import com.moneyflowbackend.transaction.model.TransactionType;
@@ -68,6 +70,8 @@ class CategoryBoardApiIntegrationTests {
     @Autowired TransactionRepository transactionRepository;
     @Autowired CategoryBoardService categoryBoardService;
     @Autowired CategoryBoardMutationService categoryBoardMutationService;
+    @Autowired CategoryService categoryService;
+    @Autowired JarService jarService;
 
     @TestConfiguration
     static class FixedClockConfig {
@@ -346,6 +350,104 @@ class CategoryBoardApiIntegrationTests {
         assertThat(jarRepository.countByWorkspaceId(owner.workspace().getId())).isEqualTo(jarCount);
         assertThat(transactionRepository.count()).isEqualTo(transactionCount);
         assertThat(categoryRepository.findById(broken.getId()).orElseThrow().getJar().getId()).isEqualTo(otherJar.getId());
+    }
+
+    @Test
+    void categoryArchiveRestoreAndDeletePreserveTransactionHistory() {
+        TestContext ctx = context("category_archive");
+        Jar jar = jar(ctx.workspace(), "FOOD", "Food", 1, true);
+        Category used = category(ctx.workspace(), jar, "Used", 1, true, false);
+        Category unused = category(ctx.workspace(), jar, "Unused", 2, true, false);
+        Transaction tx = tx(ctx, used, TransactionType.EXPENSE, TransactionStatus.POSTED, "25000", "2026-08-02", false);
+        long txCount = transactionRepository.count();
+
+        categoryService.archive(ctx.workspace().getId(), used.getId(), ctx.user().getId());
+        categoryService.archive(ctx.workspace().getId(), used.getId(), ctx.user().getId());
+
+        Category archived = categoryRepository.findById(used.getId()).orElseThrow();
+        assertThat(archived.isArchived()).isTrue();
+        assertThat(archived.isActive()).isFalse();
+        assertThat(categoryBoardService.getBoard(ctx.workspace().getId(), false, true, true, false, null, null, null, ctx.user().getId())
+                .jars().getFirst().categories()).extracting("categoryId").doesNotContain(used.getId());
+        assertThat(categoryBoardService.getBoard(ctx.workspace().getId(), true, true, true, false, null, null, null, ctx.user().getId())
+                .jars().getFirst().categories()).extracting("categoryId").contains(used.getId());
+
+        assertThatThrownBy(() -> categoryService.delete(ctx.workspace().getId(), used.getId(), ctx.user().getId()))
+                .isInstanceOf(BusinessException.class)
+                .extracting("code").isEqualTo("CATEGORY_DELETE_BLOCKED_HAS_TRANSACTIONS");
+        assertThat(transactionRepository.findById(tx.getId()).orElseThrow().getCategory().getId()).isEqualTo(used.getId());
+        assertThat(transactionRepository.count()).isEqualTo(txCount);
+
+        categoryService.restore(ctx.workspace().getId(), used.getId(), ctx.user().getId());
+        assertThat(categoryRepository.findById(used.getId()).orElseThrow().isActive()).isTrue();
+        categoryService.delete(ctx.workspace().getId(), unused.getId(), ctx.user().getId());
+        assertThat(categoryRepository.findById(unused.getId())).isEmpty();
+    }
+
+    @Test
+    void categoryRestoreBlocksInactiveParentJar() {
+        TestContext ctx = context("category_restore_parent");
+        Jar inactive = jar(ctx.workspace(), "OLD", "Old", 1, false);
+        Category archived = category(ctx.workspace(), inactive, "Archived", 1, false, true);
+
+        assertThatThrownBy(() -> categoryService.restore(ctx.workspace().getId(), archived.getId(), ctx.user().getId()))
+                .isInstanceOf(BusinessException.class)
+                .extracting("code").isEqualTo("CATEGORY_CANNOT_RESTORE_PARENT_JAR_ARCHIVED");
+    }
+
+    @Test
+    void jarArchiveRestoreAndDeleteRespectCategoryUsage() {
+        TestContext ctx = context("jar_archive");
+        Jar used = jar(ctx.workspace(), "USED", "Used", 1, true);
+        Jar empty = jar(ctx.workspace(), "EMPTY", "Empty", 2, true);
+        category(ctx.workspace(), used, "Category", 1, true, false);
+
+        assertThatThrownBy(() -> jarService.archive(ctx.workspace().getId(), used.getId(), ctx.user().getId()))
+                .isInstanceOf(BusinessException.class)
+                .extracting("code").isEqualTo("JAR_ARCHIVE_BLOCKED_HAS_ACTIVE_CATEGORIES");
+        assertThatThrownBy(() -> jarService.delete(ctx.workspace().getId(), used.getId(), ctx.user().getId()))
+                .isInstanceOf(BusinessException.class)
+                .extracting("code").isEqualTo("JAR_DELETE_BLOCKED_HAS_CATEGORIES");
+
+        jarService.archive(ctx.workspace().getId(), empty.getId(), ctx.user().getId());
+        jarService.archive(ctx.workspace().getId(), empty.getId(), ctx.user().getId());
+        assertThat(jarRepository.findById(empty.getId()).orElseThrow().isActive()).isFalse();
+        assertThat(categoryBoardService.getBoard(ctx.workspace().getId(), false, true, true, false, null, null, null, ctx.user().getId())
+                .jars()).extracting("jarId").doesNotContain(empty.getId());
+        assertThat(categoryBoardService.getBoard(ctx.workspace().getId(), true, true, true, false, null, null, null, ctx.user().getId())
+                .jars()).extracting("jarId").contains(empty.getId());
+
+        jarService.restore(ctx.workspace().getId(), empty.getId(), ctx.user().getId());
+        assertThat(jarRepository.findById(empty.getId()).orElseThrow().isActive()).isTrue();
+        jarService.delete(ctx.workspace().getId(), empty.getId(), ctx.user().getId());
+        assertThat(jarRepository.findById(empty.getId())).isEmpty();
+    }
+
+    @Test
+    void archiveRestoreDeleteAreWorkspaceScoped() {
+        TestContext owner = context("archive_scope_owner");
+        TestContext other = context("archive_scope_other");
+        Jar otherJar = jar(other.workspace(), "OTHER", "Other", 1, true);
+        Category otherCategory = category(other.workspace(), otherJar, "Other category", 1, true, false);
+
+        assertThatThrownBy(() -> categoryService.archive(owner.workspace().getId(), otherCategory.getId(), owner.user().getId()))
+                .isInstanceOf(BusinessException.class)
+                .extracting("code").isEqualTo("CATEGORY_NOT_FOUND");
+        assertThatThrownBy(() -> categoryService.restore(owner.workspace().getId(), otherCategory.getId(), owner.user().getId()))
+                .isInstanceOf(BusinessException.class)
+                .extracting("code").isEqualTo("CATEGORY_NOT_FOUND");
+        assertThatThrownBy(() -> categoryService.delete(owner.workspace().getId(), otherCategory.getId(), owner.user().getId()))
+                .isInstanceOf(BusinessException.class)
+                .extracting("code").isEqualTo("CATEGORY_NOT_FOUND");
+        assertThatThrownBy(() -> jarService.archive(owner.workspace().getId(), otherJar.getId(), owner.user().getId()))
+                .isInstanceOf(BusinessException.class)
+                .extracting("code").isEqualTo("JAR_NOT_FOUND");
+        assertThatThrownBy(() -> jarService.restore(owner.workspace().getId(), otherJar.getId(), owner.user().getId()))
+                .isInstanceOf(BusinessException.class)
+                .extracting("code").isEqualTo("JAR_NOT_FOUND");
+        assertThatThrownBy(() -> jarService.delete(owner.workspace().getId(), otherJar.getId(), owner.user().getId()))
+                .isInstanceOf(BusinessException.class)
+                .extracting("code").isEqualTo("JAR_NOT_FOUND");
     }
 
     private TestContext context(String prefix) {

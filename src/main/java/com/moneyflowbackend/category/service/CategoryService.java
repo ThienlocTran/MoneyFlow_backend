@@ -177,13 +177,30 @@ public class CategoryService {
     public void toggleArchived(UUID workspaceId, UUID categoryId, boolean archived, UUID userId) {
         requireWritableMember(workspaceId, userId);
         Category category = findCategoryInWorkspace(workspaceId, categoryId);
+        if (!archived && category.getJar() != null && !category.getJar().isActive()) {
+            throw new BusinessException("CATEGORY_CANNOT_RESTORE_PARENT_JAR_ARCHIVED", "Restore the parent jar before restoring this category");
+        }
         category.setArchived(archived);
         if (archived) {
             category.setActive(false);
             category.setQuickAction(false);
+        } else {
+            category.setActive(true);
         }
         category.setUpdatedAt(Instant.now());
         categoryRepository.save(category);
+    }
+
+    @Transactional
+    public CategoryResponse archive(UUID workspaceId, UUID categoryId, UUID userId) {
+        toggleArchived(workspaceId, categoryId, true, userId);
+        return get(workspaceId, categoryId, userId);
+    }
+
+    @Transactional
+    public CategoryResponse restore(UUID workspaceId, UUID categoryId, UUID userId) {
+        toggleArchived(workspaceId, categoryId, false, userId);
+        return get(workspaceId, categoryId, userId);
     }
 
     @Transactional
@@ -203,7 +220,7 @@ public class CategoryService {
         requireWritableMember(workspaceId, userId);
         Category category = findCategoryInWorkspace(workspaceId, categoryId);
         if (transactionRepository.countByWorkspaceIdAndCategoryId(workspaceId, categoryId) > 0) {
-            throw new BusinessException("CATEGORY_IN_USE", "Category has transactions; deactivate it instead");
+            throw new BusinessException("CATEGORY_DELETE_BLOCKED_HAS_TRANSACTIONS", "Category has transactions; archive it instead");
         }
         categoryRepository.delete(category);
     }

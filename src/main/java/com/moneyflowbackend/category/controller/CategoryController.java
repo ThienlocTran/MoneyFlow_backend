@@ -113,6 +113,22 @@ public class CategoryController {
         return ResponseEntity.ok(ApiResponse.ok("Category archive status updated", null));
     }
 
+    @PostMapping("/{categoryId}/archive")
+    public ResponseEntity<ApiResponse<CategoryResponse>> archive(
+            @PathVariable UUID workspaceId,
+            @PathVariable UUID categoryId) {
+        CategoryResponse res = categoryService.archive(workspaceId, categoryId, currentUserId());
+        return ResponseEntity.ok(ApiResponse.ok("Category archived", res));
+    }
+
+    @PostMapping("/{categoryId}/restore")
+    public ResponseEntity<ApiResponse<CategoryResponse>> restore(
+            @PathVariable UUID workspaceId,
+            @PathVariable UUID categoryId) {
+        CategoryResponse res = categoryService.restore(workspaceId, categoryId, currentUserId());
+        return ResponseEntity.ok(ApiResponse.ok("Category restored", res));
+    }
+
     @PatchMapping("/{categoryId}/quick-action")
     public ResponseEntity<ApiResponse<Void>> setQuickAction(
             @PathVariable UUID workspaceId,

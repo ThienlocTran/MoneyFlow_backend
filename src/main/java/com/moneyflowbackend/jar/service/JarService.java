@@ -229,12 +229,29 @@ public class JarService {
     }
 
     @Transactional
+    public JarResponse archive(UUID workspaceId, UUID jarId, UUID userId) {
+        requireWritableMember(workspaceId, userId);
+        Jar jar = findJarInWorkspace(workspaceId, jarId);
+        if (jar.isActive() && categoryRepository.countByWorkspaceIdAndJarIdAndIsActiveTrue(workspaceId, jarId) > 0) {
+            throw new BusinessException("JAR_ARCHIVE_BLOCKED_HAS_ACTIVE_CATEGORIES", "Archive or move active categories before archiving this jar");
+        }
+        jar.setActive(false);
+        jar.setUpdatedAt(Instant.now());
+        return mapToResponse(jarRepository.save(jar));
+    }
+
+    @Transactional
+    public JarResponse restore(UUID workspaceId, UUID jarId, UUID userId) {
+        toggleStatus(workspaceId, jarId, true, userId);
+        return get(workspaceId, jarId, userId);
+    }
+
+    @Transactional
     public void delete(UUID workspaceId, UUID jarId, UUID userId) {
         requireOwner(workspaceId, userId);
         Jar jar = findJarInWorkspace(workspaceId, jarId);
-        if (categoryRepository.countByWorkspaceIdAndJarId(workspaceId, jarId) > 0
-                || transactionRepository.countJarUsage(workspaceId, jarId) > 0) {
-            throw new BusinessException("JAR_IN_USE", "Jar is used by categories or transactions");
+        if (categoryRepository.countByWorkspaceIdAndJarId(workspaceId, jarId) > 0) {
+            throw new BusinessException("JAR_DELETE_BLOCKED_HAS_CATEGORIES", "Jar has categories; archive it instead");
         }
         jarRepository.delete(jar);
     }
