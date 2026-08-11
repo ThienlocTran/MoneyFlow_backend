@@ -1,6 +1,6 @@
 # Receipt OCR Contract V1
 
-Status: backend contract for 2.1.4. P11D Azure Document Intelligence OCR provider is implemented; draft builder and confirm are not implemented yet.
+Status: backend contract for 2.1.4. P11E receipt review drafts are implemented; confirm is not implemented yet.
 
 ## Product Guardrail
 
@@ -154,6 +154,70 @@ Security and privacy:
 - Workspace membership remains enforced before OCR.
 - OCR still does not build drafts and does not create transactions.
 
+## P11E Implemented Draft Builder
+
+`POST /api/workspaces/{workspaceId}/receipt-sessions/{sessionId}/drafts`
+
+- Requires auth and active workspace membership.
+- Requires `ocrStatus=SUCCEEDED` and non-empty normalized OCR text.
+- Builds one primary `EXPENSE` review draft.
+- Persists draft rows in `receipt_session_drafts`.
+- Returns drafts in `ReceiptSessionDetailResponse`.
+- Rebuild behavior: deletes and replaces current receipt session drafts, so repeated `POST /drafts` does not duplicate unconfirmed drafts.
+- Does not create transactions.
+
+Draft model fields:
+
+- `draftId`
+- `draftIndex`
+- `type`
+- `status`
+- `amount`
+- `currency`
+- `transactionDate`
+- `walletId`
+- `categoryId`
+- `categoryHint`
+- `merchantName`
+- `note`
+- `sourceText`
+- `confidence`
+- `warnings`
+- `createdAt`
+- `updatedAt`
+
+Builder rules:
+
+- Type defaults to `EXPENSE`.
+- Amount prefers structured `ReceiptSession.totalAmount`, then parses `normalizedOcrText`.
+- If no total marker exists, the largest plausible amount is used with `RECEIPT_TOTAL_INFERRED`.
+- Date prefers structured `receiptDate`, then parses simple OCR dates.
+- Merchant prefers structured `merchantName`, then the first safe OCR merchant line.
+- Note is `Hoa don: <merchant>` or `Hoa don OCR`.
+- Source text stores a concise OCR excerpt, not the full raw OCR payload.
+- Wallet is never guessed and remains `null`.
+- Category ID is never guessed; category hint is derived from keywords only.
+
+Category hints:
+
+- Fuel/petrol/xang: `Xăng xe`.
+- Coffee/cafe/tra sua: `Cà phê`.
+- Restaurant/food/quan: `Ăn uống`.
+- Grocery/mart/sieu thi: `Mua sắm`.
+- Pharmacy/thuoc: `Y tế`.
+- Utilities/internet/dien/nuoc: `Tiện ích`.
+
+Draft warnings:
+
+- `RECEIPT_DRAFT_MISSING_AMOUNT`
+- `RECEIPT_DRAFT_MISSING_WALLET`
+- `RECEIPT_DRAFT_MISSING_CATEGORY`
+- `RECEIPT_DATE_NOT_FOUND`
+- `RECEIPT_TOTAL_INFERRED`
+- `RECEIPT_CATEGORY_HINT_ONLY`
+- `RECEIPT_OCR_REQUIRED`
+- `RECEIPT_MERCHANT_NOT_FOUND`
+
 ## Session DTO
 
 Likely `ReceiptSession` fields:
@@ -179,7 +243,7 @@ Likely `ReceiptSession` fields:
 
 ## Draft DTO
 
-Likely `ReceiptDraft` fields:
+`ReceiptDraft` fields:
 
 - `id`
 - `sessionId`
@@ -321,6 +385,12 @@ Preferred future shape:
 
 - Live Azure UAT requires a real configured Azure Document Intelligence resource and was not part of automated tests.
 - Session OCR depends on the stored receipt URL when image bytes are unavailable.
-- Receipt drafts are not implemented until P11E.
+
+## P11E Known Limitations
+
 - Confirm executor is not implemented until P11F.
 - UI is not implemented in this phase.
+- Category is hint-only; no category ID is guessed or created.
+- Wallet is not guessed.
+- Line-item split into multiple transactions is deferred.
+- OCR drafts still require user review before ledger mutation.

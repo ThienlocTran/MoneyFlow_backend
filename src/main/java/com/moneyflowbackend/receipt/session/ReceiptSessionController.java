@@ -46,6 +46,13 @@ public class ReceiptSessionController {
         return ResponseEntity.ok(ApiResponse.ok("Receipt OCR completed", receiptSessionService.runOcr(workspaceId, sessionId, currentUserId())));
     }
 
+    @PostMapping("/{sessionId}/drafts")
+    public ResponseEntity<ApiResponse<ReceiptSessionDetailResponse>> buildDrafts(
+            @PathVariable UUID workspaceId,
+            @PathVariable UUID sessionId) {
+        return ResponseEntity.ok(ApiResponse.ok("Receipt drafts built", receiptSessionService.buildDrafts(workspaceId, sessionId, currentUserId())));
+    }
+
     @GetMapping("/{sessionId}")
     public ResponseEntity<ApiResponse<ReceiptSessionDetailResponse>> get(
             @PathVariable UUID workspaceId,

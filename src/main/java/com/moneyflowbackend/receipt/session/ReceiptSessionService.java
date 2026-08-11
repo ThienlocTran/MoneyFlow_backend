@@ -44,6 +44,8 @@ public class ReceiptSessionService {
     private final ReceiptImageStorageService storageService;
     private final ReceiptOcrService ocrService;
     private final ReceiptTextParser receiptTextParser;
+    private final ReceiptSessionDraftRepository receiptSessionDraftRepository;
+    private final ReceiptSessionDraftBuilder receiptSessionDraftBuilder;
     private final Clock clock;
     private final long maxImageBytes;
     private static final Pattern MANY_BLANK_LINES = Pattern.compile("\\n{3,}");
@@ -56,6 +58,8 @@ public class ReceiptSessionService {
             ReceiptImageStorageService storageService,
             ReceiptOcrService ocrService,
             ReceiptTextParser receiptTextParser,
+            ReceiptSessionDraftRepository receiptSessionDraftRepository,
+            ReceiptSessionDraftBuilder receiptSessionDraftBuilder,
             Clock clock,
             @Value("${MONEYFLOW_RECEIPT_MAX_IMAGE_BYTES:8388608}") long maxImageBytes) {
         this.receiptSessionRepository = receiptSessionRepository;
@@ -65,6 +69,8 @@ public class ReceiptSessionService {
         this.storageService = storageService;
         this.ocrService = ocrService;
         this.receiptTextParser = receiptTextParser;
+        this.receiptSessionDraftRepository = receiptSessionDraftRepository;
+        this.receiptSessionDraftBuilder = receiptSessionDraftBuilder;
         this.clock = clock;
         this.maxImageBytes = Math.max(1, maxImageBytes);
     }
@@ -82,6 +88,25 @@ public class ReceiptSessionService {
                 .currency(currency(member.getWorkspace()))
                 .warningsJson(writeWarnings(List.of(warning("OCR_NOT_REQUESTED"))))
                 .build();
+        return detail(receiptSessionRepository.save(session));
+    }
+
+    @Transactional
+    public ReceiptSessionDetailResponse buildDrafts(UUID workspaceId, UUID sessionId, UUID userId) {
+        requireActiveMember(workspaceId, userId);
+        ReceiptSession session = session(workspaceId, sessionId);
+        String normalized = normalizeOcrText(session.getNormalizedOcrText());
+        if (session.getOcrStatus() != ReceiptSessionOcrStatus.SUCCEEDED || normalized == null) {
+            session.setWarningsJson(writeWarnings(List.of(warning("RECEIPT_OCR_REQUIRED"))));
+            return detail(receiptSessionRepository.save(session));
+        }
+        receiptSessionDraftRepository.deleteByReceiptSessionId(session.getId());
+        ReceiptSessionDraft draft = receiptSessionDraftBuilder.build(session);
+        receiptSessionDraftRepository.save(draft);
+        session.setStatus(draft.getStatus() == ReceiptSessionDraftStatus.NEEDS_REVIEW
+                ? ReceiptSessionStatus.NEEDS_REVIEW
+                : ReceiptSessionStatus.DRAFTED);
+        session.setWarningsJson(writeWarnings(readWarnings(draft.getWarningsJson())));
         return detail(receiptSessionRepository.save(session));
     }
 
@@ -214,6 +239,9 @@ public class ReceiptSessionService {
 
     private ReceiptSessionDetailResponse detail(ReceiptSession session) {
         List<ReceiptSessionWarningResponse> warnings = readWarnings(session.getWarningsJson());
+        List<ReceiptSessionDraftResponse> drafts = receiptSessionDraftRepository.findAllByReceiptSessionIdOrderByDraftIndexAsc(session.getId()).stream()
+                .map(this::draftResponse)
+                .toList();
         return ReceiptSessionDetailResponse.builder()
                 .id(session.getId())
                 .workspaceId(session.getWorkspace().getId())
@@ -231,15 +259,39 @@ public class ReceiptSessionService {
                 .receiptDate(session.getReceiptDate())
                 .totalAmount(session.getTotalAmount())
                 .currency(session.getCurrency())
+                .drafts(drafts)
                 .warnings(warnings)
-                .nextActions(nextActions(session))
+                .nextActions(nextActions(session, drafts))
                 .createdAt(session.getCreatedAt())
                 .updatedAt(session.getUpdatedAt())
                 .build();
     }
 
-    private List<String> nextActions(ReceiptSession session) {
+    private ReceiptSessionDraftResponse draftResponse(ReceiptSessionDraft draft) {
+        return ReceiptSessionDraftResponse.builder()
+                .draftId(draft.getId())
+                .draftIndex(draft.getDraftIndex())
+                .type(draft.getType())
+                .status(draft.getStatus())
+                .amount(draft.getAmount())
+                .currency(draft.getCurrency())
+                .transactionDate(draft.getTransactionDate())
+                .walletId(draft.getWalletId())
+                .categoryId(draft.getCategoryId())
+                .categoryHint(draft.getCategoryHint())
+                .merchantName(draft.getMerchantName())
+                .note(draft.getNote())
+                .sourceText(draft.getSourceText())
+                .confidence(draft.getConfidence())
+                .warnings(readWarnings(draft.getWarningsJson()))
+                .createdAt(draft.getCreatedAt())
+                .updatedAt(draft.getUpdatedAt())
+                .build();
+    }
+
+    private List<String> nextActions(ReceiptSession session, List<ReceiptSessionDraftResponse> drafts) {
         if (session.getImageContentType() == null) return List.of("UPLOAD_IMAGE");
+        if (!drafts.isEmpty()) return List.of("REVIEW_DRAFT");
         if (session.getOcrStatus() == ReceiptSessionOcrStatus.SUCCEEDED) return List.of("BUILD_DRAFT");
         if (session.getImageStorageStatus() == ReceiptImageStorageStatus.STORAGE_FAILED) return List.of("RETRY_UPLOAD", "RUN_OCR");
         return List.of("RUN_OCR");
@@ -360,6 +412,16 @@ public class ReceiptSessionService {
             case "OCR_DATE_NOT_FOUND" -> "Receipt date was not found.";
             case "OCR_FILE_TOO_LARGE" -> "Receipt image is too large.";
             case "OCR_NOT_REQUESTED" -> "OCR has not been requested.";
+            case "RECEIPT_OCR_REQUIRED" -> "Receipt OCR is required before building drafts.";
+            case "RECEIPT_OCR_EMPTY_TEXT" -> "Receipt OCR text is empty.";
+            case "RECEIPT_DRAFT_MISSING_AMOUNT" -> "Receipt draft is missing amount.";
+            case "RECEIPT_DRAFT_MISSING_WALLET" -> "Receipt draft needs a wallet before confirm.";
+            case "RECEIPT_DRAFT_MISSING_CATEGORY" -> "Receipt draft needs a category before confirm.";
+            case "RECEIPT_DATE_NOT_FOUND" -> "Receipt date was not found.";
+            case "RECEIPT_DATE_AMBIGUOUS" -> "Receipt date is ambiguous.";
+            case "RECEIPT_TOTAL_INFERRED" -> "Receipt total was inferred from OCR text.";
+            case "RECEIPT_CATEGORY_HINT_ONLY" -> "Receipt category is a hint only.";
+            case "RECEIPT_MERCHANT_NOT_FOUND" -> "Receipt merchant was not found.";
             default -> "Receipt session needs review.";
         };
     }

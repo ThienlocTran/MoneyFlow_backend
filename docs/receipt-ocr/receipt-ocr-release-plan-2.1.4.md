@@ -1,6 +1,6 @@
 # Receipt OCR Release Plan 2.1.4
 
-Status: planned. P11D Azure Document Intelligence OCR provider is implemented.
+Status: planned. P11E receipt review drafts are implemented.
 
 ## Product Guardrail
 
@@ -62,7 +62,7 @@ Deferred:
 - P11B: session repository/service/controller integration tests; receipt and transaction targeted Maven tests.
 - P11C: provider selection, disabled/mock/Azure-placeholder behavior, OCR persistence, workspace isolation, no transaction side effect.
 - P11D: Azure provider tests using mocked HTTP/fake local HTTP server, no real provider call.
-- P11E: parser/draft builder tests for Vietnamese receipts, missing fields, category hints.
+- P11E: parser/draft builder tests for receipts, missing OCR, category hints, workspace isolation, idempotent rebuild, no transaction side effect.
 - P11F: confirm integration tests for success, missing required fields, idempotent replay, source traceability.
 - P11G: release checklist and targeted test suite.
 
@@ -90,7 +90,7 @@ Deferred:
 
 ## Next Queue Item
 
-P11E - Receipt OCR draft builder/parser.
+P11F - Receipt draft confirm executor.
 
 ## P11B Delivered
 
@@ -149,3 +149,25 @@ Known limitations:
 - Confirm executor not implemented yet.
 - UI not implemented in this phase.
 - OCR may miss totals/date/merchant; backend stores raw text and warnings, not fake values.
+
+## P11E Delivered
+
+- Added `receipt_session_drafts` table.
+- Added receipt draft entity/repository/response.
+- Added `POST /api/workspaces/{workspaceId}/receipt-sessions/{sessionId}/drafts`.
+- Receipt detail now includes draft list.
+- Draft builder creates one primary expense review draft from OCR fields/text.
+- Amount parsing prefers structured total, then total-marker OCR text, then largest plausible amount with `RECEIPT_TOTAL_INFERRED`.
+- Date parsing uses structured date, then simple OCR date formats.
+- Category is hint-only.
+- Wallet is never guessed.
+- Rebuild is idempotent for P11E: current session drafts are replaced, not duplicated.
+- Added integration tests for structured OCR, raw total parsing, multiple amounts, inferred totals, date parse, missing OCR, category/wallet behavior, workspace isolation, and no transaction side effect.
+
+Known limitations:
+
+- Confirm executor not implemented yet.
+- UI not implemented yet.
+- Category ID resolution is deferred.
+- Wallet remains null until user/client supplies it.
+- Line-item split into multiple transactions is deferred.

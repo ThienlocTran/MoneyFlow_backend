@@ -28,6 +28,7 @@ public class ReceiptSessionDetailResponse {
     private LocalDate receiptDate;
     private BigDecimal totalAmount;
     private String currency;
+    private List<ReceiptSessionDraftResponse> drafts;
     private List<ReceiptSessionWarningResponse> warnings;
     private List<String> nextActions;
     private Instant createdAt;
