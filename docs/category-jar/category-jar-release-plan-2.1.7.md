@@ -1,6 +1,6 @@
 # Category/Jar Backend Release Plan 2.1.7
 
-Status: P14E safe archive/delete implemented. P14F release lock remains planned.
+Status: COMPLETE / BACKEND LOCKED for 2.1.7 backend/API scope. Frontend UI remains deferred.
 
 ## Theme
 
@@ -35,7 +35,7 @@ MoneyFlow 2.1.7 prepares Category/Jar as a backend product layer for a future Ja
 | P14C | Category/Jar stats query layer | Complete: period stats, transaction count, totals, last used, jar totals, uncategorized totals | Chart/UI formatting | `*CategoryJarStats*Tests,*CategoryBoard*Tests` | Stats use posted, non-deleted, workspace/date-scoped transactions. |
 | P14D | Move/reorder category and jar ordering | Complete: dedicated move API, jar reorder API, category group reorder API, validation, historical warning | Merge, jar snapshot migration | `*CategoryMove*Tests,*CategoryReorder*Tests,*JarReorder*Tests` | Move keeps category id, does not rewrite transactions, reorder rejects duplicates/cross-workspace ids. |
 | P14E | Safe archive/delete behavior | Complete: lifecycle endpoints, safe delete guards, board filtering coverage, workspace isolation | Merge, bulk cleanup | `*CategoryArchive*Tests,*JarArchive*Tests,*CategoryDelete*Tests,*CategoryBoard*Tests` | Used categories/jars are archived or blocked, never orphan history. |
-| P14F | Category/Jar backend release lock | Targeted tests, docs, scans, release status | Full frontend UAT | Targeted release validation | Backend status honestly marked locked/partial/blocked. |
+| P14F | Category/Jar backend release lock | Complete: targeted tests, docs, scans, release status | Full frontend UAT | Targeted release validation | Backend status marked COMPLETE / BACKEND LOCKED. |
 
 ## Validation Strategy
 
@@ -189,6 +189,30 @@ Targeted validation:
 
 `.\mvnw.cmd "-Dtest=*CategoryArchive*Tests,*CategoryDelete*Tests,*JarArchive*Tests,*JarDelete*Tests,*CategoryBoard*Tests,*JarBoard*Tests" test`
 
+## P14F Delivered
+
+- Verified P14A-P14E docs, endpoints, behavior, and targeted test evidence.
+- Locked backend/API status as `COMPLETE / BACKEND LOCKED`.
+- Kept frontend UI, drag-drop UI, category merge, bulk operations, and transaction-level jar snapshot deferred.
+- Re-ran targeted Category/Jar release validation only.
+
+Targeted validation:
+
+`.\mvnw.cmd "-Dtest=*CategoryBoard*Tests,*JarBoard*Tests,*CategoryJar*Tests,*CategoryStats*Tests,*JarStats*Tests,*CategoryMove*Tests,*CategoryReorder*Tests,*JarReorder*Tests,*CategoryArchive*Tests,*CategoryDelete*Tests,*JarArchive*Tests,*JarDelete*Tests" test`
+
+Result: 12 tests passed, 0 failures, 0 errors, 0 skipped.
+
+## UI Handoff
+
+- Board endpoint: `GET /api/workspaces/{workspaceId}/category-board`.
+- Use `includeStats=true` for period chips and totals; default period is the current month.
+- Use `includeArchived=true` only for archive management views.
+- Move endpoint: `POST /api/workspaces/{workspaceId}/categories/{categoryId}/move`.
+- Reorder endpoints: `POST /api/workspaces/{workspaceId}/jars/reorder`, `POST /api/workspaces/{workspaceId}/categories/reorder`.
+- Archive/restore endpoints: category and jar `POST /archive`, `POST /restore`.
+- Delete endpoints are safe hard-delete only; show archive as the normal user action when usage exists.
+- Recommended mobile UI: jar board cards, uncategorized group, drag category between jars, quick archive, stats chips, friendly wording.
+
 ## Next Queue Item
 
-P14F - Category/Jar backend release lock.
+UI-M0 - Mobile UX audit and design system lock.

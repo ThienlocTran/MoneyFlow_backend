@@ -1,6 +1,6 @@
 # Category/Jar Backend Contract V1
 
-Status: P14E archive/delete implemented. Frontend UI remains deferred.
+Status: COMPLETE / BACKEND LOCKED for 2.1.7 backend/API scope. Frontend UI remains deferred.
 
 ## Concepts
 
