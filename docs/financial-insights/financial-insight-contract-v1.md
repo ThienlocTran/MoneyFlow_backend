@@ -1,6 +1,6 @@
 # Financial Insight Contract V1
 
-Status: P12C internal spending insight rules implemented. Public insight APIs are not implemented yet.
+Status: P12D internal actually-spendable snapshot calculation implemented. Public insight APIs are not implemented yet.
 
 ## Guardrails
 
@@ -75,6 +75,36 @@ Every card includes:
 - optional action metadata for cleanup-style cards
 
 No public controller is added in P12C.
+
+## P12D Actually Spendable Service
+
+`ActuallySpendableService` calculates an internal snapshot:
+
+`actuallySpendable = availableLedgerBalance - activeReserveAmount - upcomingRequiredOutflowAmount - overdueRequiredOutflowAmount`
+
+Snapshot fields:
+
+- workspace id, as-of date, horizon days, currency
+- available ledger balance
+- active reserve amount
+- upcoming required outflow amount
+- overdue required outflow amount
+- actually spendable amount
+- expected incoming amount
+- source breakdown items
+- data quality warnings
+- generated timestamp
+
+Data sources:
+
+- Wallet balances: active, include-in-total wallets through `WalletBalanceService`.
+- Reserves: active sinking fund, savings goal, and emergency fund aggregates.
+- Required outflows: pending payable obligation occurrences within horizon.
+- Overdue outflows: pending payable obligation occurrences before `asOfDate`.
+- Expected incoming: pending receivable obligations within horizon, informational only.
+- No-wallet income: current-month no-wallet income metric, warning only.
+
+No public controller is added in P12D.
 
 ## Metric Formulas
 
@@ -179,6 +209,17 @@ Ranking and dedup:
 - Zero-value cards are skipped.
 - Category and jar cards are allowed together when both have separate evidence.
 
+## P12D Spendable Rules
+
+- Default horizon is 30 days when caller passes zero or negative days.
+- Caller-provided `asOfDate` drives the calculation; null falls back to `Clock`.
+- Expected incoming money does not increase actually spendable.
+- No-wallet income does not increase actually spendable.
+- Zero or negative actually spendable is returned as-is and gets `NEGATIVE_SPENDABLE`.
+- Missing reserve data yields `RESERVE_DATA_UNAVAILABLE` and `PARTIAL_DATA`.
+- Missing payable obligation data yields `UPCOMING_OBLIGATION_DATA_UNAVAILABLE` and `PARTIAL_DATA`.
+- Obligations without expected amount are excluded and reported through partial-data warnings.
+
 ## Security Rules
 
 - Metric service methods are internal and filter by `workspaceId`.
@@ -192,6 +233,7 @@ Ranking and dedup:
 - No public insight API endpoints.
 - No public insight API endpoints yet.
 - No anomaly detection beyond deterministic P12C spending spike rules.
-- No final actually-spendable insight wrapper until P12D.
+- No public actually-spendable insight endpoint until P12F.
 - Metrics depend on existing transaction classification correctness.
 - Jar budget comparison is deferred because jars do not have a monthly budget amount.
+- Calculation quality depends on reserve and obligation data completeness.

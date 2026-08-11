@@ -1,6 +1,6 @@
 # Financial Insight Release Plan 2.1.5
 
-Status: P12C complete in backend code. Public insight APIs remain planned.
+Status: P12D complete in backend code. Public insight APIs remain planned.
 
 ## Theme
 
@@ -33,7 +33,7 @@ Deferred:
 | P12A | Spec and metric audit | Complete | Docs identify formulas, gaps, risks, and P12B-P12G plan. |
 | P12B | Insight metric query layer | Complete | Queries are workspace-scoped, date-range aware, exclude deleted/draft/planned/void, preserve debt/transfer rules. |
 | P12C | Spending/category/jar insight rules | Complete | Cards include evidence, severity, confidence, thresholds, and exclusions. |
-| P12D | Actually spendable calculation backend | Planned | Uses existing planning service and states exclusions. |
+| P12D | Actually spendable calculation backend | Complete | Uses wallet balance, reserve, and obligation sources and states exclusions. |
 | P12E | Action items/data quality insights | Planned | Action items route to existing modules and never mutate data. |
 | P12F | Insight API endpoints | Planned | Endpoints return stable DTOs, membership checked, no writes, no fake data. |
 | P12G | Release lock | Planned | Targeted suites and release scans pass or limitations are documented. |
@@ -94,11 +94,38 @@ Deferred:
 - workspace metric-service isolation
 - empty metrics
 
+## P12D Delivered
+
+- Added `ActuallySpendableService`.
+- Added internal snapshot, breakdown, warning, and source DTOs/enums.
+- Added pending payable/receivable obligation queries for spendable snapshots.
+- Calculates available ledger minus active reserves, upcoming required outflows, and overdue required outflows.
+- Reports expected incoming separately without adding it to spendable.
+- Reports no-wallet income as excluded from spendable.
+- Adds partial-data and negative-spendable warnings.
+- Kept public API work deferred.
+
+## P12D Test Coverage
+
+`FinancialInsightActuallySpendableServiceTests` covers:
+
+- basic formula
+- missing reserve data warnings
+- missing upcoming obligation warnings
+- negative spendable warning
+- no-wallet income exclusion
+- expected incoming informational behavior
+- overdue obligation split
+- horizon date handling
+- workspace-scoped dependency calls
+- empty data
+- VND currency convention
+
 ## Validation Strategy
 
 - P12B: `FinancialInsightMetricQueryServiceTests` plus transaction regression suite.
 - P12C: `FinancialInsightRuleServiceTests`.
-- P12D: planning and actually-spendable integration tests.
+- P12D: `FinancialInsightActuallySpendableServiceTests`.
 - P12E: action item tests for missing fields and stale data.
 - P12F: controller integration tests for membership, no writes, and empty states.
 - P12G: targeted insight, dashboard, planning, transaction, voice, and receipt smoke suites.
@@ -116,4 +143,4 @@ Deferred:
 
 ## Next Queue Item
 
-P12D - actually spendable calculation backend.
+P12E - action items and data quality insights.
