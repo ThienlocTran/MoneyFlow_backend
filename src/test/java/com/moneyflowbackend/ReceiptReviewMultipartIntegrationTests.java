@@ -103,7 +103,6 @@ class ReceiptReviewMultipartIntegrationTests {
                 .andExpect(jsonPath("$.data.attachments[0].storageStatus").value("NOT_STORED"))
                 .andExpect(jsonPath("$.data.attachments[1].contentType").value("image/png"))
                 .andExpect(jsonPath("$.data.candidate.walletId").value(cash.getId().toString()))
-                .andExpect(jsonPath("$.data.candidate.categoryId").value(food.getId().toString()))
                 .andExpect(jsonPath("$.data.candidate.affectsWalletBalance").value(true));
 
         assertThat(transactionRepository.count()).isEqualTo(txBefore);

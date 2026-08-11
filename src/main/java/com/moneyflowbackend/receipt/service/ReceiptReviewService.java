@@ -75,6 +75,11 @@ public class ReceiptReviewService {
 
     @Transactional(readOnly = true)
     public ReceiptReviewParseResponse parse(UUID workspaceId, ReceiptReviewParseRequest req, UUID userId) {
+        return parse(workspaceId, req, userId, null, null);
+    }
+
+    private ReceiptReviewParseResponse parse(UUID workspaceId, ReceiptReviewParseRequest req, UUID userId,
+                                             BigDecimal structuredTotal, Double structuredTotalConfidence) {
         Workspace workspace = requireMember(workspaceId, userId).getWorkspace();
         ReceiptReviewSource source = req == null || req.getSource() == null ? ReceiptReviewSource.MANUAL_TEXT : req.getSource();
         String rawText = normalize(req == null ? null : req.getRawText());
@@ -85,7 +90,8 @@ public class ReceiptReviewService {
             return response(source, rawText, 0, List.of(), skippedOcr(), null, null, null, warnings, "UNSUPPORTED");
         }
 
-        ReceiptTextParser.ParsedReceipt parsed = parser.parse(rawText);
+        ReceiptTextParser.ParsedReceipt parsed = parser.parse(rawText, structuredTotal, structuredTotalConfidence);
+        parsed.amountWarnings().forEach(code -> warnings.add(warning(code, "amount")));
         if (parsed.totalAmount() == null) {
             warnings.add(warning("RECEIPT_TOTAL_NOT_FOUND", "amount"));
         } else if (parsed.totalInferred()) {
@@ -135,6 +141,9 @@ public class ReceiptReviewService {
                 .receiptDate(parsed.receiptDate())
                 .totalAmount(parsed.totalAmount())
                 .lineAmounts(parsed.lineAmounts())
+                .amountCandidates(parsed.amountCandidates().stream()
+                        .map(this::amountCandidate)
+                        .toList())
                 .build();
         return response(source, rawText, 0, List.of(), skippedOcr(), candidate, extracted, parsed.totalAmount(), warnings, "NEEDS_REVIEW");
     }
@@ -182,7 +191,29 @@ public class ReceiptReviewService {
             return response(ReceiptReviewSource.PHOTO_PENDING_OCR, null, attachments.size(), attachments, ocrDto,
                     null, null, null, warnings, "OCR_TEXT_EMPTY");
         }
-        return withImageData(parse(workspaceId, request(ocrText, ReceiptReviewSource.PHOTO_OCR, occurredAtHint, walletId), userId), attachments, ocrDto);
+        return withImageData(parse(workspaceId, request(ocrText, ReceiptReviewSource.PHOTO_OCR, occurredAtHint, walletId), userId,
+                ocr.totalAmount(), totalConfidence(ocr)), attachments, ocrDto);
+    }
+
+    private Double totalConfidence(ReceiptOcrResult ocr) {
+        return ocr.pages().isEmpty() ? null : ocr.pages().getFirst().confidence();
+    }
+
+    private ReceiptReviewParseResponse.AmountCandidate amountCandidate(ReceiptAmountCandidate candidate) {
+        return ReceiptReviewParseResponse.AmountCandidate.builder()
+                .value(candidate.value())
+                .rawText(candidate.rawText())
+                .normalizedValue(candidate.normalizedValue())
+                .lineText(candidate.lineText())
+                .nearbyLabel(candidate.nearbyLabel())
+                .source(candidate.source().name())
+                .score(candidate.score())
+                .selected(candidate.selected())
+                .excluded(candidate.excluded())
+                .excludedReason(candidate.excludedReason())
+                .confidence(candidate.confidence().name())
+                .evidence(candidate.evidence())
+                .build();
     }
 
     private ReceiptReviewParseResponse response(
@@ -359,6 +390,15 @@ public class ReceiptReviewService {
         return switch (code) {
             case "RECEIPT_TOTAL_INFERRED" -> "Receipt total was inferred from the largest plausible amount.";
             case "RECEIPT_TOTAL_NOT_FOUND" -> "Receipt total was not found.";
+            case "RECEIPT_TOTAL_LOW_CONFIDENCE" -> "Receipt total confidence is low.";
+            case "RECEIPT_TOTAL_AMBIGUOUS" -> "Receipt has multiple plausible total amounts.";
+            case "RECEIPT_AMOUNT_FROM_ROUNDED_CASH" -> "Receipt amount was selected from rounded cash payment.";
+            case "RECEIPT_AMOUNT_CANDIDATES_AVAILABLE" -> "Receipt has alternate amount candidates.";
+            case "RECEIPT_EXCLUDED_CUSTOMER_TENDERED" -> "Customer tendered amount was excluded.";
+            case "RECEIPT_EXCLUDED_CHANGE_RETURNED" -> "Change returned amount was excluded.";
+            case "RECEIPT_EXCLUDED_LOYALTY_POINTS" -> "Loyalty points amount was excluded.";
+            case "RECEIPT_EXCLUDED_RECEIPT_CODE" -> "Receipt code number was excluded.";
+            case "RECEIPT_EXCLUDED_PHONE_OR_HOTLINE" -> "Phone or hotline number was excluded.";
             case "RECEIPT_MERCHANT_UNCERTAIN" -> "Merchant could not be detected confidently.";
             case "RECEIPT_DATE_INFERRED" -> "Receipt date was inferred.";
             case "RECEIPT_CATEGORY_NOT_SELECTED" -> "Choose a category before saving.";

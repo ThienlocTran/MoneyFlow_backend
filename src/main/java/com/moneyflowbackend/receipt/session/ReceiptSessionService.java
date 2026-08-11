@@ -243,7 +243,7 @@ public class ReceiptSessionService {
             session.setWarningsJson(writeWarnings(List.of(warning("OCR_EMPTY_TEXT"))));
             return detail(receiptSessionRepository.save(session));
         }
-        ReceiptTextParser.ParsedReceipt parsed = receiptTextParser.parse(normalized);
+        ReceiptTextParser.ParsedReceipt parsed = receiptTextParser.parse(normalized, result.totalAmount(), totalConfidence(result));
         session.setOcrStatus(ReceiptSessionOcrStatus.SUCCEEDED);
         session.setRawOcrText(result.text());
         session.setNormalizedOcrText(normalized);
@@ -546,6 +546,10 @@ public class ReceiptSessionService {
     private BigDecimal safeTotal(BigDecimal ocrTotal, ReceiptTextParser.ParsedReceipt parsed) {
         if (parsed.totalAmount() != null && !parsed.totalInferred()) return parsed.totalAmount();
         return ocrTotal == null ? parsed.totalAmount() : ocrTotal;
+    }
+
+    private Double totalConfidence(ReceiptOcrResult result) {
+        return result.pages().isEmpty() ? null : result.pages().getFirst().confidence();
     }
 
     private String safeMerchant(String ocrMerchant, String parsedMerchant) {

@@ -97,6 +97,27 @@ public class ReceiptReviewParseResponse {
         private BigDecimal totalAmount;
         @Builder.Default
         private List<BigDecimal> lineAmounts = new ArrayList<>();
+        @Builder.Default
+        private List<AmountCandidate> amountCandidates = new ArrayList<>();
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    public static class AmountCandidate {
+        private BigDecimal value;
+        private String rawText;
+        private String normalizedValue;
+        private String lineText;
+        private String nearbyLabel;
+        private String source;
+        private int score;
+        private boolean selected;
+        private boolean excluded;
+        private String excludedReason;
+        private String confidence;
+        private String evidence;
     }
 
     @Data

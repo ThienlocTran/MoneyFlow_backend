@@ -189,8 +189,13 @@ Draft model fields:
 Builder rules:
 
 - Type defaults to `EXPENSE`.
-- Amount prefers structured `ReceiptSession.totalAmount`, then parses `normalizedOcrText`.
-- If no total marker exists, the largest plausible amount is used with `RECEIPT_TOTAL_INFERRED`.
+- Amount uses the Java receipt amount candidate ranker.
+- Azure structured `Total` with good confidence is preferred.
+- Vietnamese high-priority total labels beat larger numeric tokens.
+- Rounded cash/payment labels are secondary candidates.
+- Customer tendered, change returned, loyalty points, receipt codes, phones/hotlines, dates/times, quantities, VAT, and percent values are excluded from primary selection.
+- Largest-number selection is forbidden.
+- If no safe amount exists, amount remains missing and review warnings explain the reason.
 - Date prefers structured `receiptDate`, then parses simple OCR dates.
 - Merchant prefers structured `merchantName`, then the first safe OCR merchant line.
 - Note is `Hóa đơn: <merchant>` or `Hóa đơn OCR`.
@@ -214,9 +219,71 @@ Draft warnings:
 - `RECEIPT_DRAFT_MISSING_CATEGORY`
 - `RECEIPT_DATE_NOT_FOUND`
 - `RECEIPT_TOTAL_INFERRED`
+- `RECEIPT_TOTAL_NOT_FOUND`
+- `RECEIPT_TOTAL_LOW_CONFIDENCE`
+- `RECEIPT_TOTAL_AMBIGUOUS`
+- `RECEIPT_AMOUNT_FROM_ROUNDED_CASH`
+- `RECEIPT_AMOUNT_CANDIDATES_AVAILABLE`
+- `RECEIPT_EXCLUDED_CUSTOMER_TENDERED`
+- `RECEIPT_EXCLUDED_CHANGE_RETURNED`
+- `RECEIPT_EXCLUDED_LOYALTY_POINTS`
+- `RECEIPT_EXCLUDED_RECEIPT_CODE`
+- `RECEIPT_EXCLUDED_PHONE_OR_HOTLINE`
 - `RECEIPT_CATEGORY_HINT_ONLY`
 - `RECEIPT_OCR_REQUIRED`
 - `RECEIPT_MERCHANT_NOT_FOUND`
+
+## R-OCR-2 Amount Candidate Ranker
+
+Receipt amount extraction is label-aware and review-first.
+
+High-priority total labels:
+
+- `Phải thanh toán`
+- `Tổng thanh toán`
+- `Tổng cộng`
+- `Cần thanh toán`
+- `Thành tiền`
+- `Tổng tiền`
+- `Total`
+- `Grand total`
+- `Amount due`
+
+Secondary payment labels:
+
+- `Tiền mặt`
+- `Đã làm tròn`
+- `Thanh toán`
+- `Khách thanh toán`
+
+Excluded labels/contexts:
+
+- `Tiền khách đưa`, `Khách đưa`
+- `Tiền thối lại`, `Tiền trả lại`, `Trả lại`
+- `Điểm sử dụng`, `Điểm tích lũy`
+- `VAT`, `Thuế`, `%`
+- `Số CT`, `Số chứng từ`
+- `Mã tra cứu`, `Mã đơn hàng`, `Mã hóa đơn`, `mã`, `code`, `order`
+- `SĐT`, `Điện thoại`, `Hotline`, `Góp ý`, `phone`, `tel`
+- `QR`
+- date/time text
+- quantity/weight text such as `kg`, `g`, `SL`
+
+Bách Hóa Xanh regression target:
+
+- `Phải thanh toán: 67.463` selects primary `67463`.
+- `Tiền mặt (Đã làm tròn): 65.000` remains a secondary candidate.
+- `Tiền khách đưa: 200.000` is excluded as `CUSTOMER_TENDERED`.
+- `Tiền thối lại: 135.000` is excluded as `CHANGE_RETURNED`.
+- `Điểm sử dụng: 2.463` is excluded as `LOYALTY_POINTS`.
+- `Mã tra cứu: 6359148EDC` is excluded as `RECEIPT_CODE`.
+- `Góp ý: 18001067` is excluded as `PHONE_OR_HOTLINE`.
+
+Known limitations:
+
+- Merchant/date/category confidence remains R-OCR-3.
+- Frontend candidate picker remains R-OCR-4.
+- More real receipt fixtures remain R-OCR-5.
 
 ## P11F Implemented Confirm Executor
 

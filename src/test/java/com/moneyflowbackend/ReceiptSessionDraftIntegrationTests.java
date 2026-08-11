@@ -95,7 +95,7 @@ class ReceiptSessionDraftIntegrationTests {
     }
 
     @Test
-    void buildDraftInfersLargestAmountWhenNoTotalMarker() throws Exception {
+    void buildDraftRequiresAmountWhenNoSafeTotalMarker() throws Exception {
         TestUser owner = registerAndLogin("receipt_draft_infer");
         UUID sessionId = createSession(owner);
         setOcr(owner, sessionId, """
@@ -105,10 +105,10 @@ class ReceiptSessionDraftIntegrationTests {
                 """, null, null, null);
 
         mockMvc.perform(post("/api/workspaces/{workspaceId}/receipt-sessions/{sessionId}/drafts", owner.workspace().getId(), sessionId)
-                        .header("Authorization", bearer(owner.token())))
+                .header("Authorization", bearer(owner.token())))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.drafts[0].amount").value(35000))
-                .andExpect(jsonPath("$.data.drafts[0].warnings[?(@.code == 'RECEIPT_TOTAL_INFERRED')]").exists());
+                .andExpect(jsonPath("$.data.drafts[0].amount").doesNotExist())
+                .andExpect(jsonPath("$.data.drafts[0].warnings[?(@.code == 'RECEIPT_DRAFT_MISSING_AMOUNT')]").exists());
     }
 
     @Test

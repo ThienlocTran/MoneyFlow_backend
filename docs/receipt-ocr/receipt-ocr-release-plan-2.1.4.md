@@ -209,3 +209,20 @@ Known limitations:
 - Local `.env` can use resource endpoint `https://moneyflow-doc-intelligence.cognitiveservices.azure.com`.
 - Defaults: model `prebuilt-receipt`, API version `2024-11-30`, timeout `45s`, poll interval `1500ms`, max poll attempts `20`.
 - Real smoke remains manual and requires a local key plus a reachable uploaded receipt image URL.
+
+## R-OCR-2 Delivered
+
+- Added a Java receipt amount candidate ranker for Vietnamese receipt text.
+- Added label-aware total selection: high-priority total labels beat larger numeric tokens.
+- Added secondary rounded-cash/payment candidates for review/debug evidence.
+- Added exclusions for customer tendered, change returned, loyalty points, receipt codes, phones/hotlines, dates/times, quantities, VAT, and percent contexts.
+- Added Bách Hóa Xanh regression behavior: primary `67463`, secondary `65000`, excluded `200000`, `135000`, `2463`, `6359148`, and `18001067`.
+- Removed safe primary fallback to largest unlabeled amount.
+- Kept receipt OCR draft-first; no receipt endpoint auto-posts a transaction.
+- Exposed backend amount candidate evidence in the stateless receipt review extracted payload for later frontend work.
+
+Known limitations:
+
+- Merchant/date/category confidence remains R-OCR-3.
+- Frontend candidate picker remains R-OCR-4.
+- Real receipt fixture pack remains R-OCR-5.

@@ -79,15 +79,15 @@ class ReceiptReviewIntegrationTests {
     }
 
     @Test
-    void amountFormatsAndInferredTotalAreSupported() {
+    void amountFormatsAndUnlabeledTotalsNeedReview() {
         TestContext ctx = context("receipt_review_amounts", WorkspaceRole.OWNER);
 
         ReceiptReviewParseResponse comma = receiptReviewService.parse(ctx.workspace().getId(), request("Shop\nTotal 1,250,000", null), ctx.user().getId());
         ReceiptReviewParseResponse kilo = receiptReviewService.parse(ctx.workspace().getId(), request("Cafe\nTra sua 40k", null), ctx.user().getId());
 
         assertThat(comma.getCandidate().getAmount()).isEqualByComparingTo("1250000");
-        assertThat(kilo.getCandidate().getAmount()).isEqualByComparingTo("40000");
-        assertThat(kilo.getWarnings()).extracting("code").contains("RECEIPT_TOTAL_INFERRED");
+        assertThat(kilo.getStatus()).isEqualTo("UNSUPPORTED");
+        assertThat(kilo.getWarnings()).extracting("code").contains("RECEIPT_TOTAL_NOT_FOUND");
     }
 
     @Test
@@ -135,6 +135,14 @@ class ReceiptReviewIntegrationTests {
         assertThat(response.getCandidate().getMerchantName()).isEqualTo("Bách Hóa Xanh");
         assertThat(response.getCandidate().getCategoryName()).isNotEqualTo("Dua/nhan do cho shipper");
         assertThat(response.getExtracted().getLineAmounts()).doesNotContain(new BigDecimal("6359148"), new BigDecimal("18001067"), new BigDecimal("200000"), new BigDecimal("135000"), new BigDecimal("2463"));
+        assertThat(response.getExtracted().getAmountCandidates()).anySatisfy(candidate -> {
+            assertThat(candidate.getValue()).isEqualByComparingTo("65000");
+            assertThat(candidate.isExcluded()).isFalse();
+        });
+        assertThat(response.getExtracted().getAmountCandidates()).anySatisfy(candidate -> {
+            assertThat(candidate.getValue()).isEqualByComparingTo("6359148");
+            assertThat(candidate.getExcludedReason()).isEqualTo("RECEIPT_CODE");
+        });
     }
 
     @Test
