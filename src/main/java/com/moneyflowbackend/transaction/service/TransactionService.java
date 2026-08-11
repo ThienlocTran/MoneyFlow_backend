@@ -508,6 +508,27 @@ public class TransactionService {
 
     @Transactional
     public TransactionResponse createWithSource(UUID workspaceId, TransactionRequest req, UUID userId, TransactionSourceType sourceType, String rawInput, UUID voiceRecordId, String sourceReference) {
+        return createWithSource(workspaceId, req, userId, sourceType, rawInput, voiceRecordId, sourceReference, null, null);
+    }
+
+    @Transactional
+    public TransactionResponse createWithReceiptSource(UUID workspaceId, TransactionRequest req, UUID userId,
+                                                       String rawInput, String sourceReference,
+                                                       UUID receiptSessionId, UUID receiptSessionDraftId) {
+        return createWithSource(workspaceId, req, userId, TransactionSourceType.RECEIPT, rawInput, null,
+                sourceReference, null, null, receiptSessionId, receiptSessionDraftId);
+    }
+
+    @Transactional
+    public TransactionResponse createWithSource(UUID workspaceId, TransactionRequest req, UUID userId, TransactionSourceType sourceType, String rawInput,
+                                                UUID voiceRecordId, String sourceReference, UUID voiceSessionId, UUID voiceSessionDraftId) {
+        return createWithSource(workspaceId, req, userId, sourceType, rawInput, voiceRecordId, sourceReference,
+                voiceSessionId, voiceSessionDraftId, null, null);
+    }
+
+    private TransactionResponse createWithSource(UUID workspaceId, TransactionRequest req, UUID userId, TransactionSourceType sourceType, String rawInput,
+                                                UUID voiceRecordId, String sourceReference, UUID voiceSessionId, UUID voiceSessionDraftId,
+                                                UUID receiptSessionId, UUID receiptSessionDraftId) {
         requireWritableMember(workspaceId, userId);
         Workspace workspace = findWorkspace(workspaceId);
         User user = userRepository.findById(userId)
@@ -519,6 +540,7 @@ public class TransactionService {
         BigDecimal amount = requireAmount(req.getAmount());
         WorkspacePerson person = resolvePersonForWrite(workspaceId, req.getAttributedPersonId(), true);
 
+        boolean affectsWalletBalance = affectsWalletBalance(type, req.getWalletId(), req.getAffectsWalletBalance());
         Transaction tx = Transaction.builder()
                 .workspace(workspace)
                 .createdByUser(user)
@@ -536,9 +558,13 @@ public class TransactionService {
                 .sourceType(normalizedSourceType)
                 .rawInput(normalizeText(rawInput))
                 .sourceReference(normalizeText(sourceReference))
+                .voiceSessionId(voiceSessionId)
+                .voiceSessionDraftId(voiceSessionDraftId)
+                .receiptSessionId(receiptSessionId)
+                .receiptSessionDraftId(receiptSessionDraftId)
                 .walletUnknown(false)
                 .historical(false)
-                .affectsWalletBalance(req.getAffectsWalletBalance() == null ? true : req.getAffectsWalletBalance())
+                .affectsWalletBalance(affectsWalletBalance)
                 .build();
         if (voiceRecordId != null) {
             voiceRecordRepository.findByIdAndWorkspaceId(voiceRecordId, workspaceId)
@@ -568,7 +594,7 @@ public class TransactionService {
             return mapToResponse(tx);
         }
 
-        boolean walletRequired = type != TransactionType.INCOME || !Boolean.FALSE.equals(req.getAffectsWalletBalance());
+        boolean walletRequired = type != TransactionType.INCOME || affectsWalletBalance;
         Wallet wallet = resolveWallet(workspaceId, req.getWalletId(), walletRequired, true, "WALLET_NOT_FOUND");
         Category category = resolveCategory(workspaceId, req.getCategoryId(), type, false, true);
         tx.setSpendingScope(resolveSpendingScopeForCreate(type, normalizedSourceType, req, category));
@@ -683,10 +709,12 @@ public class TransactionService {
             return mapToResponse(tx);
         }
 
-        Wallet wallet = resolveWalletForUpdate(workspaceId, tx.getWallet(), req.getWalletId(), true, newStatus, postingNow);
+        boolean affectsWalletBalance = affectsWalletBalance(requestedType, req.getWalletId(), req.getAffectsWalletBalance());
+        Wallet wallet = resolveWalletForUpdate(workspaceId, tx.getWallet(), req.getWalletId(), requestedType != TransactionType.INCOME || affectsWalletBalance, newStatus, postingNow);
         Category category = resolveCategoryForUpdate(workspaceId, tx.getCategory(), req.getCategoryId(), tx.getTransactionType(), true, newStatus, postingNow);
         tx.setWallet(wallet);
         tx.setCategory(category);
+        tx.setAffectsWalletBalance(affectsWalletBalance);
         tx.setSpendingScope(resolveSpendingScopeForUpdate(requestedType, req, tx));
         tx = transactionRepository.save(tx);
         transactionAuditService.record(tx, userId, TransactionAuditAction.UPDATE, before, transactionAuditService.snapshot(tx));
@@ -789,6 +817,13 @@ public class TransactionService {
             throw new BusinessException("INVALID_AMOUNT", "Amount must be greater than 0");
         }
         return amount;
+    }
+
+    private boolean affectsWalletBalance(TransactionType type, UUID walletId, Boolean requested) {
+        if (type == TransactionType.INCOME) {
+            return walletId != null;
+        }
+        return requested == null || requested;
     }
 
     private LocalDate today(Workspace workspace) {
@@ -1112,6 +1147,10 @@ public class TransactionService {
                 .sourceLabel(sourceLabel(tx.getSourceType().name()))
                 .sourceReference(tx.getSourceReference())
                 .voiceRecordId(tx.getVoiceRecordId())
+                .voiceSessionId(tx.getVoiceSessionId())
+                .voiceSessionDraftId(tx.getVoiceSessionDraftId())
+                .receiptSessionId(tx.getReceiptSessionId())
+                .receiptSessionDraftId(tx.getReceiptSessionDraftId())
                 .hasVoiceAudio(false)
                 .voiceAudioAvailable(false)
                 .playbackAvailable(false)

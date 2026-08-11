@@ -133,8 +133,8 @@ class VoiceCommandIntegrationTests {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(Map.of("text", "hom nay kiem duoc 800"))))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.mode").value("INCOME_FACT_REVIEW"))
-                .andExpect(jsonPath("$.data.review.candidate.type").value("INCOME_FACT"))
+                .andExpect(jsonPath("$.data.mode").value("TRANSACTION_REVIEW"))
+                .andExpect(jsonPath("$.data.review.candidate.type").value("INCOME"))
                 .andExpect(jsonPath("$.data.review.candidate.walletId").doesNotExist())
                 .andExpect(jsonPath("$.data.review.candidate.affectsWalletBalance").value(false));
 
@@ -163,7 +163,7 @@ class VoiceCommandIntegrationTests {
                         .content(json(Map.of("text", "hom nay kiem duoc 800, MB con 4tr8, toi an 50k"))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.mode").value("MULTI_DRAFT_REVIEW"))
-                .andExpect(jsonPath("$.data.drafts[0].candidate.type").value("INCOME_FACT"))
+                .andExpect(jsonPath("$.data.drafts[0].candidate.type").value("INCOME"))
                 .andExpect(jsonPath("$.data.drafts[1].candidate.type").value("WALLET_SNAPSHOT"))
                 .andExpect(jsonPath("$.data.drafts[1].candidate.walletId").value(mb.getId().toString()))
                 .andExpect(jsonPath("$.data.drafts[2].candidate.type").value("EXPENSE"));
@@ -201,7 +201,7 @@ class VoiceCommandIntegrationTests {
                 .andExpect(jsonPath("$.data.status").value("NEEDS_REVIEW"))
                 .andExpect(jsonPath("$.data.commandType").value("LEDGER_DRAFT"))
                 .andExpect(jsonPath("$.data.drafts.length()").value(4))
-                .andExpect(jsonPath("$.data.drafts[0].candidate.type").value("INCOME_FACT"))
+                .andExpect(jsonPath("$.data.drafts[0].candidate.type").value("INCOME"))
                 .andExpect(jsonPath("$.data.drafts[0].candidate.amount").value(800000))
                 .andExpect(jsonPath("$.data.drafts[0].candidate.walletRequired").value(false))
                 .andExpect(jsonPath("$.data.drafts[0].candidate.affectsWalletBalance").value(false))

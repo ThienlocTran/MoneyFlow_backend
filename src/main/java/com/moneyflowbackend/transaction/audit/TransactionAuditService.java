@@ -123,6 +123,8 @@ public class TransactionAuditService {
         data.put("attributedPersonId", tx.getAttributedPerson() != null ? tx.getAttributedPerson().getId() : null);
         data.put("attributedPersonName", tx.getAttributedPerson() != null ? tx.getAttributedPerson().getDisplayName() : null);
         data.put("voiceRecordId", tx.getVoiceRecordId());
+        data.put("voiceSessionId", tx.getVoiceSessionId());
+        data.put("voiceSessionDraftId", tx.getVoiceSessionDraftId());
         data.put("deletedAt", tx.getDeletedAt() != null ? tx.getDeletedAt().toString() : null);
         if (tx.getTransactionType().name().equals("TRANSFER")) {
             transferDetailRepository.findById(tx.getId()).ifPresent(detail -> addTransfer(data, detail));

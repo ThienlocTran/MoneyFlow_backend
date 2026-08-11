@@ -1,5 +1,8 @@
 package com.moneyflowbackend.jar.controller;
 
+import com.moneyflowbackend.categoryboard.dto.CategoryBoardResponse;
+import com.moneyflowbackend.categoryboard.dto.JarBoardReorderRequest;
+import com.moneyflowbackend.categoryboard.service.CategoryBoardMutationService;
 import com.moneyflowbackend.common.exception.BusinessException;
 import com.moneyflowbackend.dto.ApiResponse;
 import com.moneyflowbackend.jar.dto.JarAllocationRequest;
@@ -33,9 +36,11 @@ import java.util.UUID;
 public class JarController {
 
     private final JarService jarService;
+    private final CategoryBoardMutationService categoryBoardMutationService;
 
-    public JarController(JarService jarService) {
+    public JarController(JarService jarService, CategoryBoardMutationService categoryBoardMutationService) {
         this.jarService = jarService;
+        this.categoryBoardMutationService = categoryBoardMutationService;
     }
 
     @GetMapping
@@ -110,6 +115,22 @@ public class JarController {
         return ResponseEntity.ok(ApiResponse.ok("Jar deactivated", null));
     }
 
+    @PostMapping("/{jarId}/archive")
+    public ResponseEntity<ApiResponse<JarResponse>> archive(
+            @PathVariable UUID workspaceId,
+            @PathVariable UUID jarId) {
+        JarResponse res = jarService.archive(workspaceId, jarId, currentUserId());
+        return ResponseEntity.ok(ApiResponse.ok("Jar archived", res));
+    }
+
+    @PostMapping("/{jarId}/restore")
+    public ResponseEntity<ApiResponse<JarResponse>> restore(
+            @PathVariable UUID workspaceId,
+            @PathVariable UUID jarId) {
+        JarResponse res = jarService.restore(workspaceId, jarId, currentUserId());
+        return ResponseEntity.ok(ApiResponse.ok("Jar restored", res));
+    }
+
     @DeleteMapping("/{jarId}")
     public ResponseEntity<ApiResponse<Void>> delete(
             @PathVariable UUID workspaceId,
@@ -124,6 +145,14 @@ public class JarController {
             @Valid @RequestBody JarReorderRequest req) {
         JarListResponse res = jarService.reorder(workspaceId, req, currentUserId());
         return ResponseEntity.ok(ApiResponse.ok("Jars reordered", res));
+    }
+
+    @PostMapping("/reorder")
+    public ResponseEntity<ApiResponse<CategoryBoardResponse>> reorderBoard(
+            @PathVariable UUID workspaceId,
+            @Valid @RequestBody JarBoardReorderRequest req) {
+        CategoryBoardResponse res = categoryBoardMutationService.reorderJars(workspaceId, req, currentUserId());
+        return ResponseEntity.ok(ApiResponse.ok("Category board jars reordered", res));
     }
 
     @PutMapping("/allocations")

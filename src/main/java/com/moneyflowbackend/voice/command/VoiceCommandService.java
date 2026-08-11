@@ -1,6 +1,7 @@
 package com.moneyflowbackend.voice.command;
 
 import com.moneyflowbackend.common.exception.BusinessException;
+import com.moneyflowbackend.quickentry.parser.VietnameseTextNormalizer;
 import com.moneyflowbackend.voice.dto.VoiceQueryRequest;
 import com.moneyflowbackend.voice.dto.VoiceQueryResponse;
 import com.moneyflowbackend.voice.dto.VoiceReviewDraftResponse;
@@ -48,6 +49,18 @@ public class VoiceCommandService {
         };
     }
 
+    public VoiceCommandInterpretResponse interpretSession(UUID workspaceId, VoiceCommandInterpretRequest req, UUID userId) {
+        String text = text(req);
+        return switch (classifier.route(text)) {
+            case QUERY -> query(workspaceId, req, userId, text);
+            case REVIEW -> reviewPreview(workspaceId, userId, text);
+            case MIXED -> simple(VoiceCommandMode.NEEDS_CLARIFICATION, "NEEDS_CLARIFICATION", "NEEDS_CLARIFICATION", text,
+                    MIXED_MESSAGE, "VOICE_COMMAND_MIXED_QUERY_AND_DRAFT");
+            case NEEDS_CLARIFICATION -> simple(VoiceCommandMode.NEEDS_CLARIFICATION, "NEEDS_CLARIFICATION", "NEEDS_CLARIFICATION", text,
+                    CLARIFY_MESSAGE, "VOICE_COMMAND_NEEDS_CLARIFICATION");
+        };
+    }
+
     private VoiceCommandInterpretResponse query(UUID workspaceId, VoiceCommandInterpretRequest req, UUID userId, String text) {
         VoiceQueryRequest queryReq = VoiceQueryRequest.builder()
                 .text(text)
@@ -72,6 +85,15 @@ public class VoiceCommandService {
         parseReq.setTranscript(text);
         parseReq.setRawInput(text);
         VoiceReviewDraftResponse review = voiceReviewService.parse(workspaceId, parseReq, userId);
+        return reviewResponse(text, review);
+    }
+
+    private VoiceCommandInterpretResponse reviewPreview(UUID workspaceId, UUID userId, String text) {
+        VoiceReviewDraftResponse review = voiceReviewService.preview(workspaceId, text, userId);
+        return reviewResponse(text, review);
+    }
+
+    private VoiceCommandInterpretResponse reviewResponse(String text, VoiceReviewDraftResponse review) {
         VoiceCommandMode mode = mode(review);
         boolean unsupported = mode == VoiceCommandMode.UNSUPPORTED;
         return VoiceCommandInterpretResponse.builder()
@@ -150,6 +172,6 @@ public class VoiceCommandService {
         if (text.length() > 500) {
             throw new BusinessException("VOICE_COMMAND_TEXT_TOO_LONG", "Voice command text is too long", HttpStatus.BAD_REQUEST);
         }
-        return text.trim().replaceAll("\\s+", " ");
+        return VietnameseTextNormalizer.compact(text);
     }
 }

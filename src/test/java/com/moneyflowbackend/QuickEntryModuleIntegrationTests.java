@@ -152,6 +152,30 @@ class QuickEntryModuleIntegrationTests {
     }
 
     @Test
+    void incomeWithoutWalletCanBeReadyAndSavedWithoutChangingWalletBalance() {
+        TestContext ctx = createContext("qe_income_no_wallet", WorkspaceRole.OWNER);
+        setUserIdentity(ctx, "Thien Loc", "thien.loc@example.com");
+        Wallet cash = wallet(ctx, "Tien mat", WalletType.CASH, true, "1000");
+        incomeSource(ctx, "Thu nhập của anh");
+
+        QuickEntryPreviewResponse preview = quickEntryService.parse(ctx.workspace().getId(), "Hom nay da kiem duoc 300", ctx.user().getId());
+
+        assertThat(preview.getType()).isEqualTo(TransactionType.INCOME);
+        assertThat(preview.getWalletId()).isNull();
+        assertThat(preview.getMissingFields()).doesNotContain("walletId");
+        assertThat(preview.getAmount()).isNotNull();
+        assertThat(preview.getAmount()).isNotEqualByComparingTo("299956");
+
+        QuickEntryConfirmRequest req = confirm(preview);
+        req.setIdempotencyKey("income-no-wallet");
+        var saved = quickEntryService.confirmVoice(ctx.workspace().getId(), req, ctx.user().getId());
+        Transaction tx = transactionRepository.findById(saved.getId()).orElseThrow();
+        assertThat(tx.getWallet()).isNull();
+        assertThat(tx.isAffectsWalletBalance()).isFalse();
+        assertThat(walletService.calculateCurrentBalance(cash.getId())).isEqualByComparingTo("1000");
+    }
+
+    @Test
     void spendingScopeIsManualOnlyAndConfirmDelegatesToTransactionService() throws Exception {
         TestContext ctx = createContext("qe_scope", WorkspaceRole.OWNER);
         setUserIdentity(ctx, "Thiên Lộc", "thien.loc@example.com");
@@ -249,10 +273,10 @@ class QuickEntryModuleIntegrationTests {
         assertThat(anhOwnIncome.getCategoryId()).isNull();
         assertThat(anhOwnIncome.getIncomeSourceId()).isEqualTo(anh.getId());
         assertThat(anhOwnIncome.getIncomeSourceName()).isEqualTo("Thu nhập của anh");
-        assertThat(anhOwnIncome.isReadyToConfirm()).isFalse();
-        assertThat(anhOwnIncome.getCandidateStatus()).isEqualTo(VoiceCandidateStatus.NEEDS_REVIEW);
-        assertThat(anhOwnIncome.getMissingFields()).contains("walletId");
-        assertThat(anhOwnIncome.getLedgerEffect()).isEqualTo(VoiceLedgerEffect.NEEDS_WALLET_REVIEW);
+        assertThat(anhOwnIncome.isReadyToConfirm()).isTrue();
+        assertThat(anhOwnIncome.getCandidateStatus()).isEqualTo(VoiceCandidateStatus.READY);
+        assertThat(anhOwnIncome.getMissingFields()).doesNotContain("walletId", "incomeSourceId");
+        assertThat(anhOwnIncome.getLedgerEffect()).isEqualTo(VoiceLedgerEffect.DOES_NOT_AFFECT_WALLET);
 
         QuickEntryPreviewResponse anhSaidEm = quickEntryService.parse(anhCtx.workspace().getId(), "Em nhận lương 12 triệu", anhCtx.user().getId());
         assertThat(anhSaidEm.getAmount()).isEqualByComparingTo("12000000");
@@ -287,7 +311,8 @@ class QuickEntryModuleIntegrationTests {
         assertThat(preview.getCategoryId()).isNull();
         assertThat(preview.getIncomeSourceId()).isNull();
         assertThat(preview.getCandidateStatus()).isEqualTo(VoiceCandidateStatus.NEEDS_REVIEW);
-        assertThat(preview.getMissingFields()).contains("incomeSourceId", "walletId");
+        assertThat(preview.getMissingFields()).contains("incomeSourceId");
+        assertThat(preview.getMissingFields()).doesNotContain("walletId");
     }
 
     @Test

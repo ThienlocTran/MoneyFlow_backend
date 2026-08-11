@@ -38,9 +38,27 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID>,
         String getRawInput();
     }
 
+    interface CategoryBoardStatsRow {
+        UUID getCategoryId();
+        UUID getJarId();
+        BigDecimal getTotalExpense();
+        BigDecimal getTotalIncome();
+        long getTransactionCount();
+        long getExpenseTransactionCount();
+        long getIncomeTransactionCount();
+        LocalDate getLastUsedAt();
+    }
+
+    interface MerchantCategoryHistoryRow {
+        UUID getCategoryId();
+        long getTransactionCount();
+    }
+
     long countByWorkspaceIdAndCategoryId(UUID workspaceId, UUID categoryId);
     boolean existsByWorkspaceIdAndVoiceRecordIdAndSourceType(UUID workspaceId, UUID voiceRecordId, TransactionSourceType sourceType);
     Optional<Transaction> findByWorkspaceIdAndVoiceRecordIdAndSourceType(UUID workspaceId, UUID voiceRecordId, TransactionSourceType sourceType);
+    Optional<Transaction> findByWorkspaceIdAndVoiceSessionDraftIdAndSourceType(UUID workspaceId, UUID voiceSessionDraftId, TransactionSourceType sourceType);
+    Optional<Transaction> findByWorkspaceIdAndReceiptSessionDraftIdAndSourceType(UUID workspaceId, UUID receiptSessionDraftId, TransactionSourceType sourceType);
     List<Transaction> findAllByWorkspaceIdAndVoiceRecordIdAndSourceTypeOrderByCreatedAtAsc(
             UUID workspaceId,
             UUID voiceRecordId,
@@ -125,6 +143,31 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID>,
             Pageable pageable);
 
     @Query("""
+            SELECT c.id AS categoryId,
+                   COUNT(t.id) AS transactionCount
+            FROM Transaction t
+            JOIN t.category c
+            WHERE t.workspace.id = :workspaceId
+              AND t.transactionType = com.moneyflowbackend.transaction.model.TransactionType.EXPENSE
+              AND t.transactionStatus = com.moneyflowbackend.transaction.model.TransactionStatus.POSTED
+              AND t.deletedAt IS NULL
+              AND c.isActive = true
+              AND c.isArchived = false
+              AND (
+                    LOWER(t.description) = LOWER(:merchantName)
+                    OR LOWER(t.note) = LOWER(:merchantName)
+                    OR LOWER(t.description) LIKE LOWER(CONCAT('%', :merchantName, '%'))
+                    OR LOWER(t.note) LIKE LOWER(CONCAT('%', :merchantName, '%'))
+              )
+            GROUP BY c.id
+            ORDER BY COUNT(t.id) DESC
+            """)
+    List<MerchantCategoryHistoryRow> findReceiptMerchantCategoryHistory(
+            @Param("workspaceId") UUID workspaceId,
+            @Param("merchantName") String merchantName,
+            Pageable pageable);
+
+    @Query("""
             SELECT COUNT(t) FROM Transaction t
             LEFT JOIN TransferDetail td ON td.transaction.id = t.id
             WHERE t.workspace.id = :workspaceId
@@ -157,6 +200,34 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID>,
     List<Object[]> countByWorkspaceIdAndCategoryIds(
             @Param("workspaceId") UUID workspaceId,
             @Param("categoryIds") Collection<UUID> categoryIds);
+
+    @Query("""
+            SELECT c.id AS categoryId,
+                   j.id AS jarId,
+                   COALESCE(SUM(CASE WHEN t.transactionType = com.moneyflowbackend.transaction.model.TransactionType.EXPENSE THEN t.amount ELSE 0 END), 0) AS totalExpense,
+                   COALESCE(SUM(CASE WHEN t.transactionType = com.moneyflowbackend.transaction.model.TransactionType.INCOME THEN t.amount ELSE 0 END), 0) AS totalIncome,
+                   COUNT(t) AS transactionCount,
+                   SUM(CASE WHEN t.transactionType = com.moneyflowbackend.transaction.model.TransactionType.EXPENSE THEN 1 ELSE 0 END) AS expenseTransactionCount,
+                   SUM(CASE WHEN t.transactionType = com.moneyflowbackend.transaction.model.TransactionType.INCOME THEN 1 ELSE 0 END) AS incomeTransactionCount,
+                   MAX(t.transactionDate) AS lastUsedAt
+            FROM Transaction t
+            LEFT JOIN t.category c
+            LEFT JOIN c.jar j
+            WHERE t.workspace.id = :workspaceId
+              AND t.transactionStatus = com.moneyflowbackend.transaction.model.TransactionStatus.POSTED
+              AND t.deletedAt IS NULL
+              AND t.transactionType IN (
+                  com.moneyflowbackend.transaction.model.TransactionType.EXPENSE,
+                  com.moneyflowbackend.transaction.model.TransactionType.INCOME
+              )
+              AND t.transactionDate >= :from
+              AND t.transactionDate <= :to
+            GROUP BY c.id, j.id
+            """)
+    List<CategoryBoardStatsRow> categoryBoardStats(
+            @Param("workspaceId") UUID workspaceId,
+            @Param("from") LocalDate from,
+            @Param("to") LocalDate to);
 
     @Query("""
             SELECT COALESCE(SUM(t.amount), 0) FROM Transaction t

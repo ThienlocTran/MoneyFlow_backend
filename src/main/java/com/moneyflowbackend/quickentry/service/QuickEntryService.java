@@ -453,15 +453,10 @@ public class QuickEntryService {
         }
         IncomeSource source = defaultIncomeSource(userId, member, text, sources, people);
         if (source == null) {
-            if (preview.getWalletId() != null) {
-                addMissing(preview.getMissingFields(), "incomeSourceId");
-                preview.setCandidateStatus(VoiceCandidateStatus.NEEDS_REVIEW);
-                preview.setReadyToConfirm(false);
-            } else {
-                markIncomeReady(preview.getMissingFields(), preview.getWarnings());
-                preview.setCandidateStatus(preview.getAmount() != null && preview.getTransactionDate() != null ? VoiceCandidateStatus.READY : VoiceCandidateStatus.NEEDS_REVIEW);
-                preview.setReadyToConfirm(preview.getCandidateStatus() == VoiceCandidateStatus.READY);
-            }
+            markIncomeReady(preview.getMissingFields(), preview.getWarnings());
+            addMissing(preview.getMissingFields(), "incomeSourceId");
+            preview.setCandidateStatus(VoiceCandidateStatus.NEEDS_REVIEW);
+            preview.setReadyToConfirm(false);
             preview.setCommitSupported(true);
             preview.setAffectsWalletBalance(false);
             return;
@@ -492,15 +487,10 @@ public class QuickEntryService {
         }
         IncomeSource source = defaultIncomeSource(userId, member, text, sources, people);
         if (source == null) {
-            if (candidate.getWalletId() != null) {
-                addMissing(candidate.getMissingFields(), "incomeSourceId");
-                candidate.setCandidateStatus(VoiceCandidateStatus.NEEDS_REVIEW);
-                candidate.setReadyToConfirm(false);
-            } else {
-                markIncomeReady(candidate.getMissingFields(), candidate.getWarnings());
-                candidate.setCandidateStatus(candidate.getAmount() != null && candidate.getTransactionDate() != null ? VoiceCandidateStatus.READY : VoiceCandidateStatus.NEEDS_REVIEW);
-                candidate.setReadyToConfirm(candidate.getCandidateStatus() == VoiceCandidateStatus.READY);
-            }
+            markIncomeReady(candidate.getMissingFields(), candidate.getWarnings());
+            addMissing(candidate.getMissingFields(), "incomeSourceId");
+            candidate.setCandidateStatus(VoiceCandidateStatus.NEEDS_REVIEW);
+            candidate.setReadyToConfirm(false);
             candidate.setCommitSupported(true);
             candidate.setValidationStatus(candidate.getCandidateStatus() == VoiceCandidateStatus.READY ? "READY" : "NEEDS_REVIEW");
             candidate.setAffectsWalletBalance(false);

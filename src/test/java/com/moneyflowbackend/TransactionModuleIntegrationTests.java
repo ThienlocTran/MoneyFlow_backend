@@ -256,7 +256,10 @@ class TransactionModuleIntegrationTests {
         assertBusinessCode(() -> transactionService.create(ctx.workspace().getId(), expenseReq("1", otherWallet, expenseCategory, "Bad", TransactionStatus.POSTED), ctx.user().getId()), "WALLET_NOT_FOUND");
         TransactionRequest noWalletIncome = incomeReq("1", cash, incomeCategory, "No wallet");
         noWalletIncome.setWalletId(null);
-        assertBusinessCode(() -> transactionService.create(ctx.workspace().getId(), noWalletIncome, ctx.user().getId()), "WALLET_NOT_FOUND");
+        TransactionResponse savedNoWalletIncome = transactionService.create(ctx.workspace().getId(), noWalletIncome, ctx.user().getId());
+        assertThat(savedNoWalletIncome.getWalletId()).isNull();
+        assertThat(savedNoWalletIncome.isAffectsWalletBalance()).isFalse();
+        assertThat(walletService.calculateCurrentBalance(cash.getId())).isEqualByComparingTo("0");
         TransactionRequest plannedNoWallet = expenseReq("1", cash, expenseCategory, "Planned no wallet", TransactionStatus.PLANNED);
         plannedNoWallet.setWalletId(null);
         assertBusinessCode(() -> transactionService.create(ctx.workspace().getId(), plannedNoWallet, ctx.user().getId()), "WALLET_NOT_FOUND");

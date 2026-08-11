@@ -19,6 +19,7 @@ public record RuntimeDiagnosticsResponse(
 
     public record Storage(
             VoiceAudio voiceAudio,
+            VoiceAsr voiceAsr,
             Avatar avatar,
             ReceiptOcr receiptOcr) {
     }
@@ -32,6 +33,18 @@ public record RuntimeDiagnosticsResponse(
             boolean apiSecretPresent,
             String baseFolder,
             long maxBytes) {
+    }
+
+    public record VoiceAsr(
+            String provider,
+            boolean enabled,
+            boolean configured,
+            boolean serviceUrlConfigured,
+            int timeoutSeconds,
+            String language,
+            long maxFileBytes,
+            double minAudioSeconds,
+            double maxAudioSeconds) {
     }
 
     public record Avatar(

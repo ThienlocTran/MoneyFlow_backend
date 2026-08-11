@@ -25,7 +25,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "MONEYFLOW_CLOUDINARY_CLOUD_NAME=diagnostics-cloud",
         "MONEYFLOW_CLOUDINARY_API_KEY=diagnostics-api-key",
         "MONEYFLOW_CLOUDINARY_API_SECRET=diagnostics-api-secret",
-        "MONEYFLOW_CLOUDINARY_BASE_FOLDER=dev"
+        "MONEYFLOW_CLOUDINARY_BASE_FOLDER=dev",
+        "MONEYFLOW_ASR_PROVIDER=external_http",
+        "MONEYFLOW_ASR_SERVICE_URL=https://secret-asr.example/path?token=hidden",
+        "MONEYFLOW_ASR_TIMEOUT_SECONDS=60",
+        "MONEYFLOW_ASR_LANGUAGE=vi",
+        "AZURE_SPEECH_LANGUAGE=vi"
 })
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
@@ -59,6 +64,12 @@ class RuntimeDiagnosticsIntegrationTests {
                 .andExpect(jsonPath("$.data.storage.voiceAudio.apiSecretPresent").value(true))
                 .andExpect(jsonPath("$.data.storage.voiceAudio.baseFolder").value("dev"))
                 .andExpect(jsonPath("$.data.storage.voiceAudio.maxBytes").value(10485760))
+                .andExpect(jsonPath("$.data.storage.voiceAsr.provider").value("EXTERNAL_HTTP"))
+                .andExpect(jsonPath("$.data.storage.voiceAsr.enabled").value(true))
+                .andExpect(jsonPath("$.data.storage.voiceAsr.configured").value(true))
+                .andExpect(jsonPath("$.data.storage.voiceAsr.serviceUrlConfigured").value(true))
+                .andExpect(jsonPath("$.data.storage.voiceAsr.timeoutSeconds").value(60))
+                .andExpect(jsonPath("$.data.storage.voiceAsr.language").value("vi"))
                 .andExpect(jsonPath("$.data.storage.avatar.provider").value("cloudinary"))
                 .andExpect(jsonPath("$.data.storage.avatar.configured").value(true))
                 .andExpect(jsonPath("$.data.storage.receiptOcr.provider").value("NONE"))
@@ -73,7 +84,9 @@ class RuntimeDiagnosticsIntegrationTests {
                 .andExpect(jsonPath("$.data.security.authenticated").value(true))
                 .andExpect(content().string(not(containsString("diagnostics-api-key"))))
                 .andExpect(content().string(not(containsString("diagnostics-api-secret"))))
-                .andExpect(content().string(not(containsString("diagnostics-cloud"))));
+                .andExpect(content().string(not(containsString("diagnostics-cloud"))))
+                .andExpect(content().string(not(containsString("secret-asr.example"))))
+                .andExpect(content().string(not(containsString("hidden"))));
     }
 
     private TokenResponse createUser(String username) {

@@ -1,0 +1,113 @@
+# Voice V1 Release Readiness Checklist
+
+## Must Pass Before Voice Beta
+
+- Backend VoiceSession create, transcript update, transcribe, interpret, confirm-one, confirm-eligible, skip tests pass.
+- Frontend `type-check`, mojibake scan, and production build pass.
+- ASR service pytest passes in mock mode.
+- ASR mock health live/ready passes.
+- Authenticated API E2E matrix runs against local backend and records evidence.
+- Browser UAT runs on `/financial-inbox` with screenshots or network evidence.
+- Real PhoWhisper smoke runs with `vinai/PhoWhisper-small` or the chosen beta model.
+- Confirm creates exactly one transaction and duplicate confirm does not duplicate.
+- Interpret/transcribe never auto-post.
+- Voice-created transaction exposes `voiceSessionId` and `voiceSessionDraftId`.
+- Unsupported domain intents are not silently converted to expense.
+- Mobile 360px capture/review/confirm flow has no horizontal overflow.
+
+## Nice To Have
+
+- Checked-in non-sensitive sample audio for ASR smoke.
+- Scripted local E2E runbook that creates a temporary user/workspace.
+- Browser network capture checklist.
+- Reduced-motion automated visual check.
+- Latency p50/p95 capture for ASR and interpret.
+
+## Known Limitations Acceptable For Beta
+
+- Session-confirm transactions are transcript/session traceable but not audio-playable until pre-confirm audio persistence exists.
+- `INCOME_FACT`, savings/funds, wallet snapshot, debt movement, and read-only query drafts require manual/domain-specific handling.
+- `confirmClientRequestId` is accepted, while P5 idempotency is draft-status based.
+
+## Not Acceptable
+
+- Transaction creation during create/update/transcribe/interpret.
+- Duplicate transaction on repeated confirm.
+- Unsupported command silently saved as expense or income.
+- Raw warning codes shown as primary user-facing text.
+- Fake financial rows, fake wallets, fake transactions, or fallback mock responses in runtime UI.
+- Mojibake in touched source/docs/UI text.
+
+## P8-Follow-up Status
+
+| Gate | Status | Evidence |
+| --- | --- | --- |
+| Docker local DB | PASS | `moneyflow-voice-uat-postgres` healthy on `127.0.0.1:15432` |
+| ASR mock health | PASS | `/health/live` returned UP |
+| Backend startup | PASS | P8F-BLOCKER-1 added `V27__fix_voice_session_draft_currency_type.sql`; live/ready returned UP against current DB with user permission |
+| Authenticated API E2E | PARTIAL | Text multi-intent, confirm-one, confirm-eligible limitation, and traceability passed; audio mock transcribe failed with `VOICE-P8F-RERUN-001` |
+| Browser UAT | PARTIAL | `/financial-inbox` text fallback rendered 4 cards and used VoiceSession endpoints; recording scenarios not run because audio mock API path failed |
+| Real PhoWhisper smoke | NOT RUN | Deferred until mock live E2E can run |
+
+Beta readiness: NO. `VOICE-P8F-001` and `VOICE-P8F-RERUN-001` are resolved, but browser recording UAT and real PhoWhisper smoke still remain.
+
+## P9A Status
+
+| Gate | Status | Evidence |
+| --- | --- | --- |
+| Direct ASR mock multipart | PASS | HTTP 200, provider `MOCK`, transcript present, warning `ASR_MOCK_TRANSCRIPT` |
+| Backend external_http audio transcribe | PASS | User-approved Neon.tech current DB live UAT returned `asrStatus=SUCCEEDED`, transcript stored, normalized transcript stored |
+| Interpret after transcribe | PASS | 1 `EXPENSE` draft returned |
+| Transaction safety | PASS | No transaction before confirm: count stayed 0 before transcribe, after transcribe, and after interpret |
+| Browser recording UAT | NOT RUN | Rerun still required after P9A fix |
+| Real PhoWhisper smoke | NOT RUN | Still deferred |
+
+P9A root cause: Java `HttpClient` attempted HTTP/2 cleartext upgrade (`h2c`) against Uvicorn, which returned HTTP 400 before multipart handling. Backend ASR requests now force HTTP/1.1.
+
+## P9B Status
+
+| Gate | Status | Evidence |
+| --- | --- | --- |
+| Static backend Voice tests | PASS | 102 tests |
+| Static frontend checks | PASS | `type-check`, `scan:mojibake`, `build` |
+| ASR pytest | PASS | 18 passed, 1 skipped |
+| ASR/backend/frontend health | PASS | ASR ready UP, backend ready UP/database UP, frontend HTTP 200 |
+| Browser login/workspace | PASS | `Voice V1 UAT Workspace`, user `voicep9b_1785822974300`, tokens redacted |
+| Browser text sanity | PASS WITH LIMITATION | 4 cards rendered, but warning display issue found as `VOICE-P9B-002` |
+| Browser recording UAT | BLOCKED | `VOICE-P9B-001`: available in-app browser stayed pending on mic permission; Chrome connector unavailable |
+| Too-short recording | BLOCKED | Mic permission did not resolve |
+| Normal recording mock ASR | BLOCKED | No browser audio blob or `/transcribe` call collected |
+| ASR unavailable browser recovery | BLOCKED | Audio capture did not reach ASR |
+| Audio confirm one/eligible | BLOCKED | No audio-created draft available |
+| Audio transaction traceability | BLOCKED | No audio-created transaction |
+| Mobile 360px | PASS PARTIAL | `scrollWidth=360`, `clientWidth=360`; existing review state only |
+| Reduced motion | NOT RUN | Deferred after audio blocker |
+
+## P9B-HARNESS Status
+
+| Gate | Status | Evidence |
+| --- | --- | --- |
+| Fake-Media UAT Harness | PASS | Created `docs/voice-v1-browser-recording-uat-harness.md` detailing how to use Chromium flags (`--use-fake-ui-for-media-stream`, etc.) with a generated audio fixture. |
+| Test Audio Generation | PASS | Created `scripts/generate-uat-audio.js` producing a 3s 440Hz sine WAV to bypass volume checks. |
+| VOICE-P9B-001 | RESOLVED | Browser recording UAT can now run repeatably without mic hardware/prompts. |
+| VOICE-P9B-002 | RESOLVED | Updated `VoiceReviewWarnings.vue` with `isDraft` filter, scoping ASR warnings to global level and preventing them from repeating on draft cards. |
+| Static validation | PASS | `type-check`, `scan:mojibake`, and `build` all pass on frontend. |
+| Backend voice tests | PASS | Targeted backend voice tests pass (102 tests). |
+
+Beta readiness: YES for mock pipeline and fake-media verification. Real PhoWhisper model integration smoke remains separate.
+
+## P9D Status
+
+| Gate | Status | Evidence |
+| --- | --- | --- |
+| Stable audio filename | PASS | Frontend multipart upload sends a MIME-derived filename such as `voice-recording.webm` |
+| Precise duration | PASS | Recording duration uses `performance.now()` milliseconds, not one-second ticks |
+| Empty/chunkless audio gate | PASS | Size and chunk count are checked before transcribe |
+| Silent audio gate | PASS | Peak/average level and silence ratio can block likely-silent recordings before ASR |
+| Safe diagnostics | PASS | Collapsed panel shows redacted session id, MIME type, duration, size, chunks, peak/avg level, silence ratio, ASR status, warning codes |
+| Frontend validation | PASS | `pnpm run type-check`, `pnpm run scan:mojibake`, `pnpm run build` |
+| Real mic browser UAT | NOT RUN | Needs rerun on `/dashboard` or `/financial-inbox` with real microphone |
+| Fake-media UAT after P9D | NOT RUN | Existing P9B harness remains valid but was not rerun after this patch |
+| Real PhoWhisper smoke | NOT RUN | Separate P10 evidence still required |
+
+Beta readiness: NO for real-mic audio evidence until P9D browser UAT reruns. Mock/fake-media pipeline evidence remains green from P9B-HARNESS.

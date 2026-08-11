@@ -74,8 +74,8 @@ class VoiceRegressionMatrixIntegrationTests {
                 .andExpect(jsonPath("$.data.candidate.type").value("EXPENSE"));
         assertVoiceReview(owner, "toi nhan luong 800k vao Cake", "INCOME", "800000")
                 .andExpect(jsonPath("$.data.candidate.walletId").value(cake.getId().toString()))
-                .andExpect(jsonPath("$.data.candidate.walletRequired").value(true));
-        assertVoiceReview(owner, "hom nay toi kiem duoc 800", "INCOME_FACT", "800000")
+                .andExpect(jsonPath("$.data.candidate.walletRequired").value(false));
+        assertVoiceReview(owner, "hom nay toi kiem duoc 800", "INCOME", "800000")
                 .andExpect(jsonPath("$.data.candidate.affectsWalletBalance").value(false))
                 .andExpect(jsonPath("$.data.candidate.needsFields").isArray());
         assertVoiceReview(owner, "MB con 4 trieu 8", "WALLET_SNAPSHOT", "4800000")
@@ -125,7 +125,7 @@ class VoiceRegressionMatrixIntegrationTests {
                         .content(json(Map.of("text", "hom nay kiem duoc 800, MB con 4tr8, toi an 50k"))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.mode").value("MULTI_DRAFT_REVIEW"))
-                .andExpect(jsonPath("$.data.drafts[0].candidate.type").value("INCOME_FACT"))
+                .andExpect(jsonPath("$.data.drafts[0].candidate.type").value("INCOME"))
                 .andExpect(jsonPath("$.data.drafts[1].candidate.type").value("WALLET_SNAPSHOT"))
                 .andExpect(jsonPath("$.data.drafts[1].candidate.walletId").value(mb.getId().toString()))
                 .andExpect(jsonPath("$.data.drafts[2].candidate.type").value("EXPENSE"));
