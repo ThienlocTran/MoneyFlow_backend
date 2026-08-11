@@ -1,6 +1,6 @@
 # Financial Insight Contract V1
 
-Status: P12B backend metric query layer implemented. Public insight APIs and insight cards are not implemented yet.
+Status: P12C internal spending insight rules implemented. Public insight APIs are not implemented yet.
 
 ## Guardrails
 
@@ -42,6 +42,39 @@ DTO records:
 - `MetricBreakdownRow`
 - `NoWalletIncomeMetric`
 - `WalletAffectingMetric`
+
+## P12C Spending Rule Service
+
+`SpendingInsightRuleService` turns P12B metrics into internal deterministic `InsightCard` records.
+
+Implemented card types:
+
+- `CATEGORY_OVERSPEND`
+- `JAR_OVERSPEND`
+- `SPENDING_SPIKE`
+- `UNCATEGORIZED_SPENDING`
+- `SPENDING_CONCENTRATION`
+- `NO_WALLET_INCOME`
+
+Internal card model:
+
+- `InsightCard`
+- `InsightEvidence`
+- `InsightType`
+- `InsightSeverity`
+- `InsightConfidence`
+
+Every card includes:
+
+- deterministic key
+- type, severity, confidence
+- title and message
+- amount and currency
+- period from/to
+- evidence with metric value, baseline when applicable, delta, ratio/share, entity id/name, rule key, and count
+- optional action metadata for cleanup-style cards
+
+No public controller is added in P12C.
 
 ## Metric Formulas
 
@@ -118,6 +151,34 @@ P12B uses explicit `LocalDate from` and `LocalDate to`, both inclusive:
 
 The query layer does not use current date.
 
+## P12C Rule Thresholds
+
+Baseline definition:
+
+- Full-month periods use the previous 3 completed calendar months.
+- Other explicit date ranges use 3 immediately preceding equal-length ranges.
+- Baseline amount is the average of those periods.
+
+Thresholds:
+
+- Category overspend: ratio >= `1.35`, delta >= `200000 VND`, current >= `300000 VND`.
+- Category critical: ratio >= `2.00`, delta >= `500000 VND`.
+- New category high spend: baseline zero and current >= `500000 VND`, `INFO`.
+- Jar overspend: ratio >= `1.30`, delta >= `300000 VND`, current >= `500000 VND`.
+- Jar critical: ratio >= `2.00`, delta >= `1000000 VND`.
+- Overall spending spike: ratio >= `1.30`, delta >= `500000 VND`.
+- Overall critical: ratio >= `1.75`, delta >= `1000000 VND`.
+- Uncategorized spending: count >= `3`, or amount >= `200000 VND`, or share >= `15%`.
+- Spending concentration: top category share >= `40%` and total expense >= `500000 VND`; warning at share >= `60%`.
+- No-wallet income: amount > `0`, `INFO`.
+
+Ranking and dedup:
+
+- Default maximum is 8 cards.
+- Sort by severity first, then amount, then deterministic key.
+- Zero-value cards are skipped.
+- Category and jar cards are allowed together when both have separate evidence.
+
 ## Security Rules
 
 - Metric service methods are internal and filter by `workspaceId`.
@@ -129,7 +190,8 @@ The query layer does not use current date.
 
 - No user-facing insight dashboard.
 - No public insight API endpoints.
-- No insight cards or Vietnamese user-facing messages yet.
-- No anomaly detection yet.
+- No public insight API endpoints yet.
+- No anomaly detection beyond deterministic P12C spending spike rules.
 - No final actually-spendable insight wrapper until P12D.
 - Metrics depend on existing transaction classification correctness.
+- Jar budget comparison is deferred because jars do not have a monthly budget amount.

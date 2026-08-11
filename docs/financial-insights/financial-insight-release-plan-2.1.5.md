@@ -1,6 +1,6 @@
 # Financial Insight Release Plan 2.1.5
 
-Status: P12B complete in backend code. Public insight APIs remain planned.
+Status: P12C complete in backend code. Public insight APIs remain planned.
 
 ## Theme
 
@@ -32,7 +32,7 @@ Deferred:
 | --- | --- | --- | --- |
 | P12A | Spec and metric audit | Complete | Docs identify formulas, gaps, risks, and P12B-P12G plan. |
 | P12B | Insight metric query layer | Complete | Queries are workspace-scoped, date-range aware, exclude deleted/draft/planned/void, preserve debt/transfer rules. |
-| P12C | Spending/category/jar insight rules | Next | Cards include evidence, severity, confidence, thresholds, and exclusions. |
+| P12C | Spending/category/jar insight rules | Complete | Cards include evidence, severity, confidence, thresholds, and exclusions. |
 | P12D | Actually spendable calculation backend | Planned | Uses existing planning service and states exclusions. |
 | P12E | Action items/data quality insights | Planned | Action items route to existing modules and never mutate data. |
 | P12F | Insight API endpoints | Planned | Endpoints return stable DTOs, membership checked, no writes, no fake data. |
@@ -67,10 +67,37 @@ Deferred:
 - empty state
 - invalid date range
 
+## P12C Delivered
+
+- Added internal `InsightCard` and evidence DTO records/enums.
+- Added `SpendingInsightRuleService`.
+- Implemented category overspend, jar overspend, overall spending spike, uncategorized spending, spending concentration, and no-wallet income cards.
+- Used trailing 3-period baseline averages.
+- Added severity/confidence mapping.
+- Added deterministic keys and ranking with default max 8 cards.
+- Kept public API work deferred.
+
+## P12C Test Coverage
+
+`FinancialInsightRuleServiceTests` covers:
+
+- category overspend warning
+- category overspend critical
+- small-delta noise suppression
+- new category high-spend info card
+- jar overspend by baseline
+- overall spending spike
+- uncategorized spending action card
+- spending concentration
+- no-wallet income info card
+- max-card ranking and severity order
+- workspace metric-service isolation
+- empty metrics
+
 ## Validation Strategy
 
 - P12B: `FinancialInsightMetricQueryServiceTests` plus transaction regression suite.
-- P12C: spending rule tests with threshold and insufficient-baseline cases.
+- P12C: `FinancialInsightRuleServiceTests`.
 - P12D: planning and actually-spendable integration tests.
 - P12E: action item tests for missing fields and stale data.
 - P12F: controller integration tests for membership, no writes, and empty states.
@@ -89,4 +116,4 @@ Deferred:
 
 ## Next Queue Item
 
-P12C - spending/category/jar insight rules.
+P12D - actually spendable calculation backend.
