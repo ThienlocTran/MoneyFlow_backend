@@ -129,7 +129,8 @@ public class ReceiptSessionService {
                 session.getImageOriginalFilename(),
                 session.getImageContentType(),
                 session.getImageSizeBytes(),
-                new byte[0])));
+                new byte[0],
+                session.getImageUrl())));
         session.setOcrProvider(result.provider().name());
 
         if (result.status() == ReceiptOcrStatus.DISABLED) {
@@ -168,10 +169,10 @@ public class ReceiptSessionService {
         session.setOcrStatus(ReceiptSessionOcrStatus.SUCCEEDED);
         session.setRawOcrText(result.text());
         session.setNormalizedOcrText(normalized);
-        session.setMerchantName(parsed.merchantName());
-        session.setReceiptDate(parsed.receiptDate());
-        session.setTotalAmount(parsed.totalAmount());
-        session.setCurrency(session.getCurrency() == null ? "VND" : session.getCurrency());
+        session.setMerchantName(result.merchantName() == null ? parsed.merchantName() : result.merchantName());
+        session.setReceiptDate(result.receiptDate() == null ? parsed.receiptDate() : result.receiptDate());
+        session.setTotalAmount(result.totalAmount() == null ? parsed.totalAmount() : result.totalAmount());
+        session.setCurrency(result.currency() == null ? (session.getCurrency() == null ? "VND" : session.getCurrency()) : result.currency());
         session.setWarningsJson(writeWarnings(codesOrEmpty(result)));
         return detail(receiptSessionRepository.save(session));
     }
@@ -347,10 +348,16 @@ public class ReceiptSessionService {
             case "OCR_NOT_CONFIGURED" -> "Receipt OCR is not configured.";
             case "OCR_PROVIDER_NOT_IMPLEMENTED" -> "Receipt OCR provider is not implemented yet.";
             case "OCR_PROVIDER_FAILED" -> "Receipt OCR provider failed.";
+            case "OCR_PROVIDER_BAD_REQUEST" -> "Receipt OCR provider rejected the image.";
             case "OCR_EMPTY_TEXT" -> "Receipt OCR returned no text.";
             case "OCR_LOW_CONFIDENCE" -> "Receipt OCR confidence is low.";
             case "OCR_PROVIDER_TIMEOUT" -> "Receipt OCR provider timed out.";
             case "OCR_UNSUPPORTED_IMAGE_FORMAT" -> "Receipt image format is unsupported.";
+            case "OCR_PROVIDER_AUTH_FAILED" -> "Receipt OCR provider authentication failed.";
+            case "OCR_PROVIDER_RATE_LIMITED" -> "Receipt OCR provider is rate limited.";
+            case "OCR_IMAGE_NOT_ACCESSIBLE" -> "Receipt image is not accessible to OCR.";
+            case "OCR_TOTAL_NOT_FOUND" -> "Receipt total was not found.";
+            case "OCR_DATE_NOT_FOUND" -> "Receipt date was not found.";
             case "OCR_FILE_TOO_LARGE" -> "Receipt image is too large.";
             case "OCR_NOT_REQUESTED" -> "OCR has not been requested.";
             default -> "Receipt session needs review.";

@@ -1,6 +1,6 @@
 # Receipt OCR Contract V1
 
-Status: backend contract for 2.1.4. P11C OCR provider abstraction and mock provider are implemented; Azure, draft builder, and confirm are not implemented yet.
+Status: backend contract for 2.1.4. P11D Azure Document Intelligence OCR provider is implemented; draft builder and confirm are not implemented yet.
 
 ## Product Guardrail
 
@@ -88,6 +88,71 @@ Mock provider behavior:
 - Filename containing `empty`: empty result mapped to `OCR_EMPTY_TEXT`.
 - Filename containing `unicode`: decomposed text used to verify NFC normalization.
 - Default: existing mock receipt text, total `40000`.
+
+## P11D Implemented Azure OCR
+
+Provider mode:
+
+- `azure_document_intelligence`
+
+Chosen REST API:
+
+- Azure AI Document Intelligence REST `2024-11-30`.
+- Analyze endpoint shape: `/documentintelligence/documentModels/{modelId}:analyze?api-version=2024-11-30`.
+- Default model: `prebuilt-receipt`.
+- Microsoft reference: `https://learn.microsoft.com/azure/ai-services/document-intelligence/`.
+
+Configuration placeholders:
+
+- `MONEYFLOW_RECEIPT_OCR_PROVIDER=azure_document_intelligence`
+- `AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT=<endpoint>`
+- `AZURE_DOCUMENT_INTELLIGENCE_KEY=<secret>`
+- `AZURE_DOCUMENT_INTELLIGENCE_MODEL_ID=prebuilt-receipt`
+- `AZURE_DOCUMENT_INTELLIGENCE_API_VERSION=2024-11-30`
+- `MONEYFLOW_RECEIPT_OCR_TIMEOUT_SECONDS=45`
+- `MONEYFLOW_RECEIPT_OCR_POLL_INTERVAL_MS=1000`
+- `MONEYFLOW_RECEIPT_OCR_MAX_POLL_ATTEMPTS=30`
+
+Request strategy:
+
+- Session OCR uses existing stored receipt image URL because P11B stores image metadata and URL, not image bytes.
+- Stateless image OCR can still pass bytes through `ReceiptImageInput`.
+- Provider sends image bytes when available; otherwise it sends Azure JSON `urlSource`.
+- The Azure key is sent only in `Ocp-Apim-Subscription-Key`, never in a query string.
+
+Polling:
+
+- POST analyze request.
+- Read `Operation-Location`.
+- Poll with the same key until `succeeded`, `failed`, timeout, or max attempts.
+
+Mapped fields:
+
+- `rawOcrText` from `analyzeResult.content`.
+- `merchantName` from `MerchantName`.
+- `receiptDate` from `TransactionDate`.
+- `totalAmount` and `currency` from `Total.valueCurrency`.
+- Normalized text remains NFC/LF at session service level.
+
+Status and warning mapping:
+
+- Missing config: `OCR_NOT_CONFIGURED`.
+- Missing image: `RECEIPT_IMAGE_REQUIRED`.
+- Missing stored URL/bytes: `OCR_IMAGE_NOT_ACCESSIBLE`.
+- Unsupported content type: `OCR_UNSUPPORTED_IMAGE_FORMAT`.
+- Azure 401/403: `OCR_PROVIDER_AUTH_FAILED`.
+- Azure 408 or poll timeout: `OCR_PROVIDER_TIMEOUT`.
+- Azure 429: `OCR_PROVIDER_RATE_LIMITED`.
+- Azure 400/415: `OCR_PROVIDER_BAD_REQUEST`.
+- Missing `Operation-Location` or Azure failed result: `OCR_PROVIDER_FAILED`.
+- Succeeded with empty content: `OCR_EMPTY_TEXT`.
+- Succeeded with text but missing total/date: `OCR_TOTAL_NOT_FOUND`, `OCR_DATE_NOT_FOUND`.
+
+Security and privacy:
+
+- No OCR text, image bytes, image URL, or Azure key is logged by the provider.
+- Workspace membership remains enforced before OCR.
+- OCR still does not build drafts and does not create transactions.
 
 ## Session DTO
 
@@ -252,10 +317,10 @@ Preferred future shape:
 - HEIC/HEIF upload support is deferred.
 - Existing stateless receipt review endpoints remain separate from receipt sessions.
 
-## P11C Known Limitations
+## P11D Known Limitations
 
-- Mock OCR is deterministic and not real OCR.
-- Azure Document Intelligence is not implemented until P11D.
+- Live Azure UAT requires a real configured Azure Document Intelligence resource and was not part of automated tests.
+- Session OCR depends on the stored receipt URL when image bytes are unavailable.
 - Receipt drafts are not implemented until P11E.
 - Confirm executor is not implemented until P11F.
 - UI is not implemented in this phase.

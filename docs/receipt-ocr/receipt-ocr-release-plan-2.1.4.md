@@ -1,6 +1,6 @@
 # Receipt OCR Release Plan 2.1.4
 
-Status: planned. P11C OCR provider abstraction and mock provider are implemented.
+Status: planned. P11D Azure Document Intelligence OCR provider is implemented.
 
 ## Product Guardrail
 
@@ -61,7 +61,7 @@ Deferred:
 - P11A: `git diff --check`, scoped mojibake scan, scoped secret scan.
 - P11B: session repository/service/controller integration tests; receipt and transaction targeted Maven tests.
 - P11C: provider selection, disabled/mock/Azure-placeholder behavior, OCR persistence, workspace isolation, no transaction side effect.
-- P11D: Azure provider unit tests using mocked HTTP, no real provider call.
+- P11D: Azure provider tests using mocked HTTP/fake local HTTP server, no real provider call.
 - P11E: parser/draft builder tests for Vietnamese receipts, missing fields, category hints.
 - P11F: confirm integration tests for success, missing required fields, idempotent replay, source traceability.
 - P11G: release checklist and targeted test suite.
@@ -90,7 +90,7 @@ Deferred:
 
 ## Next Queue Item
 
-P11D - Azure Document Intelligence provider.
+P11E - Receipt OCR draft builder/parser.
 
 ## P11B Delivered
 
@@ -128,3 +128,24 @@ Known limitations:
 - Receipt draft builder not implemented yet.
 - Confirm executor not implemented yet.
 - UI not implemented in this phase.
+
+## P11D Delivered
+
+- Implemented `azure_document_intelligence` provider behind backend config.
+- Chosen Azure Document Intelligence REST API version: `2024-11-30`.
+- Default model: `prebuilt-receipt`.
+- Request strategy: send image bytes when available; for receipt sessions, send stored image URL as `urlSource` because P11B stores URL metadata, not image bytes.
+- Poll strategy: read `Operation-Location`, poll until `succeeded`, `failed`, timeout, or max attempts.
+- Mapped raw text, merchant, date, total, currency, confidence warning, missing total/date warnings.
+- Mapped provider errors to stable OCR warning codes.
+- Added mocked HTTP provider tests and fake-server session integration tests.
+- Verified no OCR transaction side effect.
+- No Azure SDK or new dependency added.
+
+Known limitations:
+
+- Live Azure OCR UAT is not executed unless real env is configured locally.
+- Receipt draft builder not implemented yet.
+- Confirm executor not implemented yet.
+- UI not implemented in this phase.
+- OCR may miss totals/date/merchant; backend stores raw text and warnings, not fake values.
