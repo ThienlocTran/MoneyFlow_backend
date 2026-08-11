@@ -1,6 +1,6 @@
 # Planning Backend Release Plan 2.1.6
 
-Status: P13B complete in backend code. P13C reserve allocation remains planned.
+Status: P13C complete in backend code. P13D planning projection remains planned.
 
 ## Theme
 
@@ -34,7 +34,7 @@ MoneyFlow 2.1.6 should turn existing planning-adjacent backend pieces into a cle
 | --- | --- | --- | --- | --- | --- |
 | P13A | Planning backend audit + contract | Docs, model map, API proposal, risk register | Runtime code | Docs validation only | Audit/contract/plan/release docs exist and do not claim implementation. |
 | P13B | Planned obligation model + CRUD foundation | Complete: one-off planned obligation table, workspace-scoped CRUD, validation, cancel flow | Projection and UI | `PlannedObligationApiIntegrationTests` | Planned obligation can be created, read, updated, cancelled without wallet balance effects. |
-| P13C | Reserve allocation model + CRUD foundation | Unified planning reserve or integration contract over sinking/savings/emergency reserves | Cross-module dedupe beyond v1 | Reserve service/API tests | Active reserves reduce spendable; release does not create income. |
+| P13C | Reserve allocation model + CRUD foundation | Complete: planning reserve table, workspace-scoped CRUD, release/cancel flow | Projection and cross-module dedupe | `ReserveAllocationApiIntegrationTests` | Reserve allocation can be created, read, updated, released, cancelled without wallet balance effects. |
 | P13D | Planning projection service | Projection formula, warnings, debt/obligation/reserve inputs | Frontend UI | Projection service tests | Available ledger, reserves, upcoming, overdue, expected incoming, shortfall calculated correctly. |
 | P13E | Mark-paid/link-to-transaction behavior | Link obligation to posted transaction or explicit transaction creation path | Auto-posting | Transaction/linking tests | Paid obligation links safely, same workspace only, no duplicate spend. |
 | P13F | Planning API overview + action item integration | `/planning/overview`, warnings/action items, stable DTOs | Notifications | Controller/API tests | Frontend can fetch projection, obligations, reserves, warnings. |
@@ -77,11 +77,38 @@ Known P13B limitations:
 - No recurrence generation.
 - No frontend UI change.
 
+## P13C Delivered
+
+- Added `reserve_allocations` Flyway migration.
+- Added reserve allocation entity, status enum, and purpose type enum.
+- Added repository search capped at 100 rows.
+- Added service validation and same-workspace wallet/category/jar checks.
+- Added CRUD/list/detail/release/cancel endpoints under `/api/workspaces/{workspaceId}/planning/reserves`.
+- Added release flow: `ACTIVE -> RELEASED`, repeated release returns released state, cancelled release blocked.
+- Added cancel flow: `ACTIVE -> CANCELLED`, repeated cancel returns cancelled state, released cancel blocked.
+- Added `RESERVE_BALANCE_CHECK_UNAVAILABLE` warning instead of inventing available-balance math.
+- Preserved ledger invariants: no transactions are created or modified by reserve CRUD.
+
+Targeted validation:
+
+`.\mvnw.cmd "-Dtest=*ReserveAllocation*Tests,*PlanningReserve*Tests" test`
+
+Result: targeted reserve allocation tests passed.
+
+Known P13C limitations:
+
+- No projection engine integration until P13D.
+- No mark-paid/link-to-transaction until P13E.
+- Reserve does not move money between wallets.
+- Reserve release does not create income.
+- Available balance check warns because no reliable reserve-specific source is used in P13C.
+- No frontend UI change.
+
 ## Acceptance Rules
 
 - No expected income is counted as spendable.
 - No planned obligation changes wallet balance before payment/link.
-- No reserve allocation creates income or expense.
+- No reserve allocation creates income, expense, transfer, or wallet movement.
 - Payable debt is not normal expense.
 - Receivable debt is not spendable before collection.
 - Workspace isolation is enforced before data access.
@@ -118,4 +145,4 @@ Existing reusable pieces:
 
 ## Next Queue Item
 
-P13B - planned obligation model and CRUD foundation.
+P13D - planning projection service.

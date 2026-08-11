@@ -1,6 +1,6 @@
 # Planning Backend Contract V1
 
-Status: P13B planned obligation CRUD foundation implemented. Projection/reserve/mark-paid phases remain planned.
+Status: P13C reserve allocation CRUD foundation implemented. Projection/mark-paid phases remain planned.
 
 ## Goals
 
@@ -78,7 +78,7 @@ Proposed fields:
 - `createdAt`
 - `updatedAt`
 
-Existing sinking fund, savings goal, and emergency fund ledgers already cover much of this behavior. Planning v1 should not duplicate them unless a unified reserve contract is required for UI consistency.
+P13C adds a thin planning reserve table for explicit locked money. Existing sinking fund, savings goal, and emergency fund ledgers remain separate until projection unifies them.
 
 ### PlanningProjection
 
@@ -182,6 +182,10 @@ Updates reserve metadata/status.
 
 Releases reserve. It increases actually spendable but does not create income.
 
+`POST /reserves/{reserveId}/cancel`
+
+Cancels active reserve. Second cancel is idempotent. Released reserve cancellation is deferred.
+
 ## Response DTO Proposal
 
 `PlanningOverviewResponse`:
@@ -239,9 +243,23 @@ Computed state:
 
 `ReserveAllocationResponse`:
 
-- fields from `ReserveAllocation`
-- `sourceType`: `PLANNING_RESERVE`, `SINKING_FUND`, `SAVINGS_GOAL`, `EMERGENCY_FUND`
-- `evidence`
+- `id`
+- `workspaceId`
+- `name`
+- `amount`
+- `currency`
+- `status`: `ACTIVE`, `RELEASED`, `CANCELLED`
+- `purposeType`: `EMERGENCY_FUND`, `RENT`, `BILL`, `GOAL`, `CATEGORY_JAR`, `DEBT_PAYMENT`, `CUSTOM`
+- `walletId`, `walletName`
+- `categoryId`, `categoryName`
+- `jarId`, `jarName`
+- `targetDate`
+- `note`
+- `warnings`
+- `releasedAt`
+- `cancelledAt`
+- `createdAt`
+- `updatedAt`
 
 ## Business Rules
 
@@ -291,6 +309,53 @@ Ledger rule:
 - create/update/cancel planned obligation does not create or mutate transactions
 - wallet balance is unchanged by planned obligation CRUD
 
+## P13C Implemented Foundation
+
+Table: `reserve_allocations`
+
+Fields implemented:
+
+- workspace/user references
+- name, amount, currency
+- status: `ACTIVE`, `RELEASED`, `CANCELLED`
+- purpose type: `EMERGENCY_FUND`, `RENT`, `BILL`, `GOAL`, `CATEGORY_JAR`, `DEBT_PAYMENT`, `CUSTOM`
+- optional wallet/category/jar references
+- optional target date
+- note, released/cancelled timestamps, timestamps, soft-delete column, version
+
+Endpoints:
+
+- `POST /api/workspaces/{workspaceId}/planning/reserves`
+- `GET /api/workspaces/{workspaceId}/planning/reserves`
+- `GET /api/workspaces/{workspaceId}/planning/reserves/{reserveId}`
+- `PATCH /api/workspaces/{workspaceId}/planning/reserves/{reserveId}`
+- `POST /api/workspaces/{workspaceId}/planning/reserves/{reserveId}/release`
+- `POST /api/workspaces/{workspaceId}/planning/reserves/{reserveId}/cancel`
+
+Validation:
+
+- name required, trimmed, max 120
+- amount required and greater than zero
+- currency defaults to `VND`, must be 3 uppercase letters
+- purpose type defaults to `CUSTOM`
+- wallet/category/jar must belong to the same workspace
+- released/cancelled reserves cannot be patched
+- cancelled reserves cannot be released
+- released reserves cannot be cancelled
+
+Available balance behavior:
+
+- no reliable reserve-specific available-balance source is used in P13C
+- create/update returns `RESERVE_BALANCE_CHECK_UNAVAILABLE`
+- P13C does not invent balance math from expected income, receivables, or non-wallet rows
+
+Ledger rule:
+
+- create/update/release/cancel reserve does not create or mutate transactions
+- reserve does not move money between wallets
+- release does not create income
+- wallet balance is unchanged by reserve CRUD
+
 ## Warning Codes
 
 - `PLANNING_OBLIGATION_MISSING_AMOUNT`
@@ -300,8 +365,17 @@ Ledger rule:
 - `PLANNING_OBLIGATION_ALREADY_PAID`
 - `PLANNING_OBLIGATION_LINKED_TRANSACTION_MISSING`
 - `RESERVE_AMOUNT_EXCEEDS_AVAILABLE`
-- `RESERVE_DATA_UNAVAILABLE`
+- `RESERVE_BALANCE_CHECK_UNAVAILABLE`
 - `RESERVE_ALREADY_RELEASED`
+- `RESERVE_ALREADY_CANCELLED`
+- `RESERVE_CANCELLED_CANNOT_RELEASE`
+- `RESERVE_RELEASED_CANNOT_CANCEL`
+- `RESERVE_CANNOT_UPDATE_INACTIVE`
+- `RESERVE_WALLET_NOT_FOUND`
+- `RESERVE_CATEGORY_NOT_FOUND`
+- `RESERVE_JAR_NOT_FOUND`
+- `RESERVE_CROSS_WORKSPACE_REFERENCE`
+- `RESERVE_DATA_UNAVAILABLE`
 - `EXPECTED_INCOME_NOT_SPENDABLE`
 - `RECEIVABLE_NOT_SPENDABLE`
 - `PROJECTED_SHORTFALL`
