@@ -1,6 +1,6 @@
 # Financial Insight Release Plan 2.1.5
 
-Status: P12E complete in backend code. Public insight APIs remain planned.
+Status: P12F complete in backend code. Release lock remains planned.
 
 ## Theme
 
@@ -35,8 +35,40 @@ Deferred:
 | P12C | Spending/category/jar insight rules | Complete | Cards include evidence, severity, confidence, thresholds, and exclusions. |
 | P12D | Actually spendable calculation backend | Complete | Uses wallet balance, reserve, and obligation sources and states exclusions. |
 | P12E | Action items/data quality insights | Complete | Action items route to existing modules and never mutate data. |
-| P12F | Insight API endpoints | Planned | Endpoints return stable DTOs, membership checked, no writes, no fake data. |
+| P12F | Insight API endpoints | Complete | Endpoints return stable DTOs, membership checked, no writes, no fake data. |
 | P12G | Release lock | Planned | Targeted suites and release scans pass or limitations are documented. |
+
+## P12F Delivered
+
+- Added `FinancialInsightController` at `/api/workspaces/{workspaceId}/insights`.
+- Added read-only endpoints for overview, metrics, cards, actually spendable, and action items.
+- Added compact frontend-facing response DTO records.
+- Added inclusive `from/to` parsing and default current-month behavior.
+- Added validation for invalid dates, date ranges, period values, horizon days, and max cards.
+- Added workspace membership checks before insight service calls.
+- Reused P12B/P12C/P12D/P12E services; no fake data, no AI calls, no writes.
+- Kept no-wallet income copy informational: income counts in statistics but not wallet balance.
+
+## P12F Test Coverage
+
+`FinancialInsightControllerTests` covers:
+
+- overview default current month
+- overview custom range service calls
+- metrics response serialization
+- card max cap
+- actually-spendable default and custom horizon
+- action item serialization
+- invalid date range
+- invalid period and invalid max cards
+- workspace isolation before service calls
+- no-wallet income copy
+- empty state
+- no write side effects in controller scope
+
+Targeted validation command:
+
+`.\mvnw.cmd "-Dtest=*FinancialInsightController*Tests,*FinancialInsightApi*Tests,*InsightApi*Tests" test`
 
 ## P12B Delivered
 

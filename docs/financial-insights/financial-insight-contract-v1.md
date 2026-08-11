@@ -1,6 +1,6 @@
 # Financial Insight Contract V1
 
-Status: P12E internal action item and data quality detection implemented. Public insight APIs are not implemented yet.
+Status: P12F public read-only insight APIs implemented.
 
 ## Guardrails
 
@@ -10,17 +10,67 @@ Status: P12E internal action item and data quality detection implemented. Public
 - No fake runtime data: empty backend data returns empty or zero metrics.
 - No AI calls in the 2.1.5 backend foundation.
 
-## Proposed Endpoints
+## Implemented Endpoints
 
 Base path: `/api/workspaces/{workspaceId}/insights`
 
 | Endpoint | Purpose | Writes? | Status |
 | --- | --- | --- | --- |
-| `GET /overview?period=month` | Income, expense, cashflow, wallet, spendable, top cards | No | Planned |
-| `GET /spending?from=YYYY-MM-DD&to=YYYY-MM-DD` | Category and jar spending | No | Planned |
-| `GET /actually-spendable?date=YYYY-MM-DD` | Ledger balance, reserves, obligations, available estimate | No | Planned |
-| `GET /anomalies?period=month` | Rule-based unusual spending/income signals | No | Planned |
-| `GET /action-items` | Missing info and records needing review | No | Planned |
+| `GET /overview` | Totals, top insight cards, actually spendable, action items, data warnings | No | Implemented |
+| `GET /metrics?from=YYYY-MM-DD&to=YYYY-MM-DD` | Totals, income sources, category and jar spending, no-wallet income | No | Implemented |
+| `GET /cards?from=YYYY-MM-DD&to=YYYY-MM-DD` | Deterministic P12C insight cards | No | Implemented |
+| `GET /actually-spendable` | P12D spendable snapshot | No | Implemented |
+| `GET /action-items` | P12E cleanup and data quality action items | No | Implemented |
+
+## P12F Public API Contract
+
+All endpoints:
+
+- require authentication
+- call `WorkspaceService.verifyMembership(workspaceId, currentUserId)`
+- scope downstream service calls by `workspaceId`
+- are read-only GET endpoints
+- return `ApiResponse.ok(message, data)` on success
+- return existing structured error responses for validation and access failures
+
+### Query Parameters
+
+- `from` and `to` use `YYYY-MM-DD`.
+- Date ranges are inclusive.
+- `overview` accepts optional `period=today|week|month|custom`, optional `from/to`, optional `horizonDays`, optional `maxCards`.
+- `metrics` and `cards` require `from` and `to`.
+- `actually-spendable` accepts optional `asOfDate` and optional `horizonDays`.
+- `action-items` accepts optional `from/to` and optional `asOfDate`.
+
+Defaults:
+
+- `overview` with no date params uses the current month from the injected UTC `Clock`.
+- `period=week` uses Monday through Sunday.
+- `period=today` uses the current UTC date.
+- `action-items` with no date params uses the current month.
+- `horizonDays` defaults to `30`.
+- `maxCards` defaults to `8` and is capped at `20`.
+
+Validation:
+
+- invalid date format returns `INVALID_INSIGHT_DATE`
+- `from > to` returns `INVALID_INSIGHT_DATE_RANGE`
+- invalid `period` returns `INVALID_INSIGHT_PERIOD`
+- `period=custom` without both dates returns `INVALID_INSIGHT_DATE_RANGE`
+- `horizonDays <= 0` or `maxCards <= 0` returns `INVALID_INSIGHT_PARAMETER`
+
+### Response DTOs
+
+P12F exposes frontend-facing response records under `insight.dto.response`:
+
+- `FinancialInsightOverviewResponse`
+- `FinancialMetricResponse`
+- `InsightCardListResponse`
+- `ActuallySpendableResponse`
+- `FinancialActionItemListResponse`
+- shared period, totals, breakdown, card, action item, and no-wallet income response records
+
+No-wallet income response copy is informational: it says the amount still counts in income statistics but does not increase wallet balance.
 
 ## P12B Metric Query Service
 
