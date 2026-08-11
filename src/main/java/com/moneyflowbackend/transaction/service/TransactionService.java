@@ -512,8 +512,23 @@ public class TransactionService {
     }
 
     @Transactional
+    public TransactionResponse createWithReceiptSource(UUID workspaceId, TransactionRequest req, UUID userId,
+                                                       String rawInput, String sourceReference,
+                                                       UUID receiptSessionId, UUID receiptSessionDraftId) {
+        return createWithSource(workspaceId, req, userId, TransactionSourceType.RECEIPT, rawInput, null,
+                sourceReference, null, null, receiptSessionId, receiptSessionDraftId);
+    }
+
+    @Transactional
     public TransactionResponse createWithSource(UUID workspaceId, TransactionRequest req, UUID userId, TransactionSourceType sourceType, String rawInput,
                                                 UUID voiceRecordId, String sourceReference, UUID voiceSessionId, UUID voiceSessionDraftId) {
+        return createWithSource(workspaceId, req, userId, sourceType, rawInput, voiceRecordId, sourceReference,
+                voiceSessionId, voiceSessionDraftId, null, null);
+    }
+
+    private TransactionResponse createWithSource(UUID workspaceId, TransactionRequest req, UUID userId, TransactionSourceType sourceType, String rawInput,
+                                                UUID voiceRecordId, String sourceReference, UUID voiceSessionId, UUID voiceSessionDraftId,
+                                                UUID receiptSessionId, UUID receiptSessionDraftId) {
         requireWritableMember(workspaceId, userId);
         Workspace workspace = findWorkspace(workspaceId);
         User user = userRepository.findById(userId)
@@ -545,6 +560,8 @@ public class TransactionService {
                 .sourceReference(normalizeText(sourceReference))
                 .voiceSessionId(voiceSessionId)
                 .voiceSessionDraftId(voiceSessionDraftId)
+                .receiptSessionId(receiptSessionId)
+                .receiptSessionDraftId(receiptSessionDraftId)
                 .walletUnknown(false)
                 .historical(false)
                 .affectsWalletBalance(affectsWalletBalance)
@@ -1132,6 +1149,8 @@ public class TransactionService {
                 .voiceRecordId(tx.getVoiceRecordId())
                 .voiceSessionId(tx.getVoiceSessionId())
                 .voiceSessionDraftId(tx.getVoiceSessionDraftId())
+                .receiptSessionId(tx.getReceiptSessionId())
+                .receiptSessionDraftId(tx.getReceiptSessionDraftId())
                 .hasVoiceAudio(false)
                 .voiceAudioAvailable(false)
                 .playbackAvailable(false)

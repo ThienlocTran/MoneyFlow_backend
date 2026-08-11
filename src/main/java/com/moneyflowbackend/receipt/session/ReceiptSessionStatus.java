@@ -5,6 +5,8 @@ public enum ReceiptSessionStatus {
     IMAGE_UPLOADED,
     DRAFTED,
     NEEDS_REVIEW,
+    PARTIALLY_CONFIRMED,
+    CONFIRMED,
     FAILED,
     DELETED
 }

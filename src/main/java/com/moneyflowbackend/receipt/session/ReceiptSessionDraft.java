@@ -87,6 +87,15 @@ public class ReceiptSessionDraft {
     @Column(name = "warnings_json", columnDefinition = "TEXT")
     private String warningsJson;
 
+    @Column(name = "confirmed_entity_type", length = 30)
+    private String confirmedEntityType;
+
+    @Column(name = "confirmed_entity_id")
+    private UUID confirmedEntityId;
+
+    @Column(name = "confirmed_at")
+    private Instant confirmedAt;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     @Builder.Default
     private Instant createdAt = Instant.now();

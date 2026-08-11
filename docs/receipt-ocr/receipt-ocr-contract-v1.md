@@ -1,6 +1,6 @@
 # Receipt OCR Contract V1
 
-Status: backend contract for 2.1.4. P11E receipt review drafts are implemented; confirm is not implemented yet.
+Status: backend contract for 2.1.4. P11F receipt draft confirm is implemented.
 
 ## Product Guardrail
 
@@ -193,7 +193,7 @@ Builder rules:
 - If no total marker exists, the largest plausible amount is used with `RECEIPT_TOTAL_INFERRED`.
 - Date prefers structured `receiptDate`, then parses simple OCR dates.
 - Merchant prefers structured `merchantName`, then the first safe OCR merchant line.
-- Note is `Hoa don: <merchant>` or `Hoa don OCR`.
+- Note is `Hóa đơn: <merchant>` or `Hóa đơn OCR`.
 - Source text stores a concise OCR excerpt, not the full raw OCR payload.
 - Wallet is never guessed and remains `null`.
 - Category ID is never guessed; category hint is derived from keywords only.
@@ -217,6 +217,82 @@ Draft warnings:
 - `RECEIPT_CATEGORY_HINT_ONLY`
 - `RECEIPT_OCR_REQUIRED`
 - `RECEIPT_MERCHANT_NOT_FOUND`
+
+## P11F Implemented Confirm Executor
+
+`POST /api/workspaces/{workspaceId}/receipt-sessions/{sessionId}/drafts/{draftId}/confirm`
+
+Request:
+
+```json
+{
+  "amount": 35000,
+  "currency": "VND",
+  "transactionDate": "2026-08-11",
+  "walletId": "00000000-0000-0000-0000-000000000000",
+  "categoryId": "00000000-0000-0000-0000-000000000000",
+  "note": "Hóa đơn: Quán Cà Phê Demo",
+  "merchantName": "Quán Cà Phê Demo"
+}
+```
+
+Response:
+
+- `receiptSessionId`
+- `confirmedDraftId`
+- `draftStatus`
+- `confirmedEntityType`
+- `confirmedEntityId`
+- `idempotentReplay`
+- `warnings`
+- `session.status`
+- `transaction`
+
+Validation:
+
+- Session must belong to the workspace and authenticated member.
+- Draft must belong to the session.
+- Receipt confirm supports `EXPENSE` drafts only.
+- Amount must be positive.
+- Transaction date, wallet, and category are required.
+- Wallet and category must belong to the same workspace.
+- User-correctable validation returns warning responses and does not create a transaction.
+
+Warnings:
+
+- `RECEIPT_DRAFT_MISSING_AMOUNT`
+- `RECEIPT_DRAFT_MISSING_WALLET`
+- `RECEIPT_DRAFT_MISSING_CATEGORY`
+- `RECEIPT_DRAFT_MISSING_DATE`
+- `RECEIPT_DRAFT_ALREADY_CONFIRMED`
+- `RECEIPT_DRAFT_INVALID_STATE`
+
+Transaction creation:
+
+- Uses `TransactionService.createWithReceiptSource(...)`.
+- Creates a normal posted `EXPENSE` transaction.
+- Preserves wallet/category/amount/date validation and wallet balance behavior from the transaction domain.
+- Sets `sourceType=RECEIPT`.
+- Stores `sourceReference=receipt-session:{sessionId}:draft:{draftId}`.
+- Stores receipt evidence links on the transaction: `receiptSessionId`, `receiptSessionDraftId`.
+
+Idempotency:
+
+- A confirmed draft stores `confirmedEntityType=TRANSACTION`, `confirmedEntityId`, and `confirmedAt`.
+- Re-confirm returns the existing transaction with `idempotentReplay=true`.
+- A unique receipt draft transaction index prevents duplicate receipt confirm rows.
+
+Status transitions:
+
+- Successful draft confirm sets draft status to `CONFIRMED`.
+- One confirmed draft among multiple drafts sets session status to `PARTIALLY_CONFIRMED`.
+- All drafts confirmed sets session status to `CONFIRMED`.
+- Validation failure keeps the draft in `NEEDS_REVIEW`.
+
+No-auto-save invariant:
+
+- Create session, upload image, OCR, and draft build still create no transaction.
+- Only confirm mutates the ledger.
 
 ## Session DTO
 
@@ -358,11 +434,11 @@ Existing preview warnings should be mapped or retained compatibly:
 
 ## Transaction Evidence Link
 
-Preferred future shape:
+Implemented shape:
 
 - Add `TransactionSourceType.RECEIPT`.
 - Store `sourceReference=receipt-session:{sessionId}:draft:{draftId}`.
-- Add nullable receipt session/draft link columns only after migration review.
+- Add nullable receipt session/draft link columns.
 - Preserve image evidence URL/public ID on receipt session, not directly on transaction unless product requires it.
 
 ## Security
@@ -386,11 +462,11 @@ Preferred future shape:
 - Live Azure UAT requires a real configured Azure Document Intelligence resource and was not part of automated tests.
 - Session OCR depends on the stored receipt URL when image bytes are unavailable.
 
-## P11E Known Limitations
+## P11E/P11F Known Limitations
 
-- Confirm executor is not implemented until P11F.
 - UI is not implemented in this phase.
 - Category is hint-only; no category ID is guessed or created.
 - Wallet is not guessed.
 - Line-item split into multiple transactions is deferred.
 - OCR drafts still require user review before ledger mutation.
+- Storage disabled means transaction can save without image playback.

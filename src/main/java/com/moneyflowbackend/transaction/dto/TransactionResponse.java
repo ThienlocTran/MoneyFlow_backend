@@ -58,6 +58,8 @@ public class TransactionResponse {
     private UUID voiceRecordId;
     private UUID voiceSessionId;
     private UUID voiceSessionDraftId;
+    private UUID receiptSessionId;
+    private UUID receiptSessionDraftId;
     private String voiceTranscript;
     private boolean hasVoiceAudio;
     private boolean voiceAudioAvailable;

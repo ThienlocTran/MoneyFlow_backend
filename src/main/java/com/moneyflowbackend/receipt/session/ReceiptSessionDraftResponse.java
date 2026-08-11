@@ -26,6 +26,9 @@ public class ReceiptSessionDraftResponse {
     private String note;
     private String sourceText;
     private Double confidence;
+    private String confirmedEntityType;
+    private UUID confirmedEntityId;
+    private Instant confirmedAt;
     private List<ReceiptSessionWarningResponse> warnings;
     private Instant createdAt;
     private Instant updatedAt;

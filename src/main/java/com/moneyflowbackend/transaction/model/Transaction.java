@@ -81,6 +81,12 @@ public class Transaction {
     @Column(name = "voice_session_draft_id")
     private UUID voiceSessionDraftId;
 
+    @Column(name = "receipt_session_id")
+    private UUID receiptSessionId;
+
+    @Column(name = "receipt_session_draft_id")
+    private UUID receiptSessionDraftId;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "transaction_type", nullable = false, length = 30)
     private TransactionType transactionType;

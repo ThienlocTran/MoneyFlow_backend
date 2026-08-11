@@ -10,6 +10,17 @@ import com.moneyflowbackend.receipt.ocr.ReceiptOcrStatus;
 import com.moneyflowbackend.receipt.service.ReceiptTextParser;
 import com.moneyflowbackend.receipt.session.storage.ReceiptImageStorageService;
 import com.moneyflowbackend.receipt.session.storage.StoredReceiptImage;
+import com.moneyflowbackend.transaction.dto.TransactionRequest;
+import com.moneyflowbackend.transaction.dto.TransactionResponse;
+import com.moneyflowbackend.transaction.model.TransactionSourceType;
+import com.moneyflowbackend.transaction.model.TransactionStatus;
+import com.moneyflowbackend.transaction.model.TransactionType;
+import com.moneyflowbackend.transaction.repository.TransactionRepository;
+import com.moneyflowbackend.transaction.service.TransactionService;
+import com.moneyflowbackend.wallet.model.Wallet;
+import com.moneyflowbackend.wallet.repository.WalletRepository;
+import com.moneyflowbackend.category.model.Category;
+import com.moneyflowbackend.category.repository.CategoryRepository;
 import com.moneyflowbackend.workspace.model.Workspace;
 import com.moneyflowbackend.workspace.model.WorkspaceMember;
 import com.moneyflowbackend.workspace.repository.WorkspaceMemberRepository;
@@ -24,6 +35,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -46,6 +58,10 @@ public class ReceiptSessionService {
     private final ReceiptTextParser receiptTextParser;
     private final ReceiptSessionDraftRepository receiptSessionDraftRepository;
     private final ReceiptSessionDraftBuilder receiptSessionDraftBuilder;
+    private final TransactionService transactionService;
+    private final TransactionRepository transactionRepository;
+    private final WalletRepository walletRepository;
+    private final CategoryRepository categoryRepository;
     private final Clock clock;
     private final long maxImageBytes;
     private static final Pattern MANY_BLANK_LINES = Pattern.compile("\\n{3,}");
@@ -60,6 +76,10 @@ public class ReceiptSessionService {
             ReceiptTextParser receiptTextParser,
             ReceiptSessionDraftRepository receiptSessionDraftRepository,
             ReceiptSessionDraftBuilder receiptSessionDraftBuilder,
+            TransactionService transactionService,
+            TransactionRepository transactionRepository,
+            WalletRepository walletRepository,
+            CategoryRepository categoryRepository,
             Clock clock,
             @Value("${MONEYFLOW_RECEIPT_MAX_IMAGE_BYTES:8388608}") long maxImageBytes) {
         this.receiptSessionRepository = receiptSessionRepository;
@@ -71,6 +91,10 @@ public class ReceiptSessionService {
         this.receiptTextParser = receiptTextParser;
         this.receiptSessionDraftRepository = receiptSessionDraftRepository;
         this.receiptSessionDraftBuilder = receiptSessionDraftBuilder;
+        this.transactionService = transactionService;
+        this.transactionRepository = transactionRepository;
+        this.walletRepository = walletRepository;
+        this.categoryRepository = categoryRepository;
         this.clock = clock;
         this.maxImageBytes = Math.max(1, maxImageBytes);
     }
@@ -108,6 +132,35 @@ public class ReceiptSessionService {
                 : ReceiptSessionStatus.DRAFTED);
         session.setWarningsJson(writeWarnings(readWarnings(draft.getWarningsJson())));
         return detail(receiptSessionRepository.save(session));
+    }
+
+    @Transactional
+    public ReceiptSessionConfirmDraftResponse confirmDraft(UUID workspaceId, UUID sessionId, UUID draftId,
+                                                           ReceiptSessionConfirmDraftRequest req, UUID userId) {
+        requireActiveMember(workspaceId, userId);
+        ReceiptSession session = session(workspaceId, sessionId);
+        ReceiptSessionDraft draft = draft(session, draftId);
+        ReceiptSessionConfirmDraftResponse replay = replayIfConfirmed(session, draft);
+        if (replay != null) return replay;
+
+        String validationCode = validationCode(workspaceId, draft, req);
+        if (validationCode != null) {
+            draft.setStatus(ReceiptSessionDraftStatus.NEEDS_REVIEW);
+            draft.setWarningsJson(validationCode);
+            draft.setUpdatedAt(Instant.now());
+            receiptSessionDraftRepository.save(draft);
+            return confirmResponse(session, draft, false, List.of(warning(validationCode)), null);
+        }
+
+        TransactionResponse tx = createTransaction(workspaceId, session, draft, req, userId);
+        draft.setStatus(ReceiptSessionDraftStatus.CONFIRMED);
+        draft.setConfirmedEntityType("TRANSACTION");
+        draft.setConfirmedEntityId(tx.getId());
+        draft.setConfirmedAt(Instant.now(clock));
+        draft.setUpdatedAt(Instant.now(clock));
+        receiptSessionDraftRepository.save(draft);
+        updateConfirmStatus(session);
+        return confirmResponse(session, draft, false, List.of(), tx);
     }
 
     @Transactional
@@ -283,6 +336,9 @@ public class ReceiptSessionService {
                 .note(draft.getNote())
                 .sourceText(draft.getSourceText())
                 .confidence(draft.getConfidence())
+                .confirmedEntityType(draft.getConfirmedEntityType())
+                .confirmedEntityId(draft.getConfirmedEntityId())
+                .confirmedAt(draft.getConfirmedAt())
                 .warnings(readWarnings(draft.getWarningsJson()))
                 .createdAt(draft.getCreatedAt())
                 .updatedAt(draft.getUpdatedAt())
@@ -300,6 +356,123 @@ public class ReceiptSessionService {
     private ReceiptSession session(UUID workspaceId, UUID sessionId) {
         return receiptSessionRepository.findByIdAndWorkspaceIdAndDeletedAtIsNull(sessionId, workspaceId)
                 .orElseThrow(() -> new BusinessException("RECEIPT_SESSION_NOT_FOUND", "Receipt session not found", HttpStatus.NOT_FOUND));
+    }
+
+    private ReceiptSessionDraft draft(ReceiptSession session, UUID draftId) {
+        return receiptSessionDraftRepository.findById(draftId)
+                .filter(draft -> draft.getReceiptSession().getId().equals(session.getId()))
+                .orElseThrow(() -> new BusinessException("RECEIPT_DRAFT_NOT_FOUND", "Receipt draft not found", HttpStatus.NOT_FOUND));
+    }
+
+    private ReceiptSessionConfirmDraftResponse replayIfConfirmed(ReceiptSession session, ReceiptSessionDraft draft) {
+        if (draft.getStatus() != ReceiptSessionDraftStatus.CONFIRMED || draft.getConfirmedEntityId() == null) {
+            return null;
+        }
+        TransactionResponse tx = transactionRepository.findByIdAndWorkspaceId(draft.getConfirmedEntityId(), session.getWorkspace().getId())
+                .map(transactionService::mapExistingToResponse)
+                .orElse(null);
+        return confirmResponse(session, draft, true, List.of(warning("RECEIPT_DRAFT_ALREADY_CONFIRMED")), tx);
+    }
+
+    private String validationCode(UUID workspaceId, ReceiptSessionDraft draft, ReceiptSessionConfirmDraftRequest req) {
+        if (!"EXPENSE".equals(draft.getType())) return "RECEIPT_DRAFT_INVALID_STATE";
+        if (amount(draft, req) == null || amount(draft, req).signum() <= 0) return "RECEIPT_DRAFT_MISSING_AMOUNT";
+        if (transactionDate(draft, req) == null) return "RECEIPT_DRAFT_MISSING_DATE";
+        if (walletId(draft, req) == null) return "RECEIPT_DRAFT_MISSING_WALLET";
+        if (categoryId(draft, req) == null) return "RECEIPT_DRAFT_MISSING_CATEGORY";
+        Wallet wallet = walletRepository.findByIdAndWorkspaceId(walletId(draft, req), workspaceId).orElse(null);
+        if (wallet == null || !wallet.isActive()) return "RECEIPT_DRAFT_INVALID_STATE";
+        Category category = categoryRepository.findByIdAndWorkspaceId(categoryId(draft, req), workspaceId).orElse(null);
+        if (category == null || !category.isActive() || category.isArchived()) return "RECEIPT_DRAFT_INVALID_STATE";
+        return null;
+    }
+
+    private TransactionResponse createTransaction(UUID workspaceId, ReceiptSession session, ReceiptSessionDraft draft,
+                                                  ReceiptSessionConfirmDraftRequest req, UUID userId) {
+        var existing = transactionRepository.findByWorkspaceIdAndReceiptSessionDraftIdAndSourceType(
+                workspaceId, draft.getId(), TransactionSourceType.RECEIPT);
+        if (existing.isPresent()) {
+            return transactionService.mapExistingToResponse(existing.get());
+        }
+        TransactionRequest txReq = new TransactionRequest();
+        txReq.setType(TransactionType.EXPENSE);
+        txReq.setStatus(TransactionStatus.POSTED);
+        txReq.setAmount(amount(draft, req));
+        txReq.setWalletId(walletId(draft, req));
+        txReq.setCategoryId(categoryId(draft, req));
+        txReq.setTransactionDate(transactionDate(draft, req));
+        txReq.setDescription(note(draft, req));
+        txReq.setNote(note(draft, req));
+        txReq.setAffectsWalletBalance(true);
+        return transactionService.createWithReceiptSource(
+                workspaceId,
+                txReq,
+                userId,
+                sourceText(session, draft),
+                sourceReference(session, draft),
+                session.getId(),
+                draft.getId());
+    }
+
+    private void updateConfirmStatus(ReceiptSession session) {
+        List<ReceiptSessionDraft> drafts = receiptSessionDraftRepository.findAllByReceiptSessionIdOrderByDraftIndexAsc(session.getId());
+        boolean anyConfirmed = drafts.stream().anyMatch(draft -> draft.getStatus() == ReceiptSessionDraftStatus.CONFIRMED);
+        boolean allConfirmed = !drafts.isEmpty() && drafts.stream().allMatch(draft -> draft.getStatus() == ReceiptSessionDraftStatus.CONFIRMED);
+        session.setStatus(!anyConfirmed ? session.getStatus() : allConfirmed ? ReceiptSessionStatus.CONFIRMED : ReceiptSessionStatus.PARTIALLY_CONFIRMED);
+        session.setUpdatedAt(Instant.now(clock));
+        receiptSessionRepository.save(session);
+    }
+
+    private ReceiptSessionConfirmDraftResponse confirmResponse(ReceiptSession session, ReceiptSessionDraft draft, boolean replay,
+                                                               List<ReceiptSessionWarningResponse> warnings, TransactionResponse tx) {
+        return ReceiptSessionConfirmDraftResponse.builder()
+                .receiptSessionId(session.getId())
+                .confirmedDraftId(draft.getId())
+                .draftStatus(draft.getStatus())
+                .confirmedEntityType(draft.getConfirmedEntityType())
+                .confirmedEntityId(draft.getConfirmedEntityId())
+                .idempotentReplay(replay)
+                .warnings(warnings)
+                .transaction(tx)
+                .session(ReceiptSessionConfirmDraftResponse.SessionSummary.builder()
+                        .status(session.getStatus())
+                        .build())
+                .build();
+    }
+
+    private BigDecimal amount(ReceiptSessionDraft draft, ReceiptSessionConfirmDraftRequest req) {
+        return req != null && req.getAmount() != null ? req.getAmount() : draft.getAmount();
+    }
+
+    private UUID walletId(ReceiptSessionDraft draft, ReceiptSessionConfirmDraftRequest req) {
+        return req != null && req.getWalletId() != null ? req.getWalletId() : draft.getWalletId();
+    }
+
+    private UUID categoryId(ReceiptSessionDraft draft, ReceiptSessionConfirmDraftRequest req) {
+        return req != null && req.getCategoryId() != null ? req.getCategoryId() : draft.getCategoryId();
+    }
+
+    private java.time.LocalDate transactionDate(ReceiptSessionDraft draft, ReceiptSessionConfirmDraftRequest req) {
+        return req != null && req.getTransactionDate() != null ? req.getTransactionDate() : draft.getTransactionDate();
+    }
+
+    private String note(ReceiptSessionDraft draft, ReceiptSessionConfirmDraftRequest req) {
+        String note = normalize(req == null ? null : req.getNote());
+        if (note != null) return note;
+        String merchant = normalize(req == null ? null : req.getMerchantName());
+        if (merchant == null) merchant = normalize(draft.getMerchantName());
+        String draftNote = normalize(draft.getNote());
+        return draftNote != null ? draftNote : merchant;
+    }
+
+    private String sourceText(ReceiptSession session, ReceiptSessionDraft draft) {
+        String draftSource = normalize(draft.getSourceText());
+        if (draftSource != null) return draftSource;
+        return normalize(session.getNormalizedOcrText());
+    }
+
+    private String sourceReference(ReceiptSession session, ReceiptSessionDraft draft) {
+        return "receipt-session:" + session.getId() + ":draft:" + draft.getId();
     }
 
     private WorkspaceMember requireActiveMember(UUID workspaceId, UUID userId) {
@@ -417,6 +590,9 @@ public class ReceiptSessionService {
             case "RECEIPT_DRAFT_MISSING_AMOUNT" -> "Receipt draft is missing amount.";
             case "RECEIPT_DRAFT_MISSING_WALLET" -> "Receipt draft needs a wallet before confirm.";
             case "RECEIPT_DRAFT_MISSING_CATEGORY" -> "Receipt draft needs a category before confirm.";
+            case "RECEIPT_DRAFT_MISSING_DATE" -> "Receipt draft is missing date.";
+            case "RECEIPT_DRAFT_ALREADY_CONFIRMED" -> "Receipt draft is already confirmed.";
+            case "RECEIPT_DRAFT_INVALID_STATE" -> "Receipt draft cannot be confirmed with these values.";
             case "RECEIPT_DATE_NOT_FOUND" -> "Receipt date was not found.";
             case "RECEIPT_DATE_AMBIGUOUS" -> "Receipt date is ambiguous.";
             case "RECEIPT_TOTAL_INFERRED" -> "Receipt total was inferred from OCR text.";

@@ -53,6 +53,16 @@ public class ReceiptSessionController {
         return ResponseEntity.ok(ApiResponse.ok("Receipt drafts built", receiptSessionService.buildDrafts(workspaceId, sessionId, currentUserId())));
     }
 
+    @PostMapping("/{sessionId}/drafts/{draftId}/confirm")
+    public ResponseEntity<ApiResponse<ReceiptSessionConfirmDraftResponse>> confirmDraft(
+            @PathVariable UUID workspaceId,
+            @PathVariable UUID sessionId,
+            @PathVariable UUID draftId,
+            @RequestBody(required = false) ReceiptSessionConfirmDraftRequest req) {
+        return ResponseEntity.ok(ApiResponse.ok("Receipt draft confirmed",
+                receiptSessionService.confirmDraft(workspaceId, sessionId, draftId, req, currentUserId())));
+    }
+
     @GetMapping("/{sessionId}")
     public ResponseEntity<ApiResponse<ReceiptSessionDetailResponse>> get(
             @PathVariable UUID workspaceId,

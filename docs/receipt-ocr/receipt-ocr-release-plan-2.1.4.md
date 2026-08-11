@@ -1,6 +1,6 @@
 # Receipt OCR Release Plan 2.1.4
 
-Status: planned. P11E receipt review drafts are implemented.
+Status: planned. P11F receipt draft confirm is implemented.
 
 ## Product Guardrail
 
@@ -90,7 +90,7 @@ Deferred:
 
 ## Next Queue Item
 
-P11F - Receipt draft confirm executor.
+P11G - Receipt OCR 2.1.4 backend release lock.
 
 ## P11B Delivered
 
@@ -166,8 +166,29 @@ Known limitations:
 
 Known limitations:
 
-- Confirm executor not implemented yet.
 - UI not implemented yet.
 - Category ID resolution is deferred.
 - Wallet remains null until user/client supplies it.
 - Line-item split into multiple transactions is deferred.
+
+## P11F Delivered
+
+- Added `POST /api/workspaces/{workspaceId}/receipt-sessions/{sessionId}/drafts/{draftId}/confirm`.
+- Confirm creates a normal posted expense through `TransactionService.createWithReceiptSource(...)`.
+- Added receipt transaction traceability: `receipt_session_id`, `receipt_session_draft_id`.
+- Added receipt draft confirm metadata: `confirmed_entity_type`, `confirmed_entity_id`, `confirmed_at`.
+- Added `RECEIPT` transaction source type.
+- Confirm validates amount, date, wallet, category, draft/session ownership, and workspace-scoped references.
+- Confirm warning responses do not create transactions.
+- Confirm is idempotent and replays the existing transaction after double submit.
+- Draft status becomes `CONFIRMED`; session status becomes `PARTIALLY_CONFIRMED` or `CONFIRMED`.
+- Upload, OCR, and draft build still do not create transactions.
+- Added receipt confirm integration tests for success, missing amount/wallet/category, idempotency, partial status, workspace isolation, invalid references, and no-auto-save regression.
+
+Known limitations:
+
+- No frontend UI yet.
+- Receipt line items are not split into separate transactions.
+- Azure OCR quality still requires user review.
+- Storage disabled means transaction can save without image playback.
+- Category and wallet must be supplied by the client/user before confirm.
