@@ -1,6 +1,6 @@
 # Receipt OCR Release Plan 2.1.4
 
-Status: planned. P11A is docs/audit only.
+Status: planned. P11B session/image upload foundation is implemented.
 
 ## Product Guardrail
 
@@ -59,7 +59,7 @@ Deferred:
 ## Validation Strategy
 
 - P11A: `git diff --check`, scoped mojibake scan, scoped secret scan.
-- P11B: session repository/service/controller integration tests.
+- P11B: session repository/service/controller integration tests; receipt and transaction targeted Maven tests.
 - P11C: provider selection, disabled/mock behavior, limit validation tests.
 - P11D: Azure provider unit tests using mocked HTTP, no real provider call.
 - P11E: parser/draft builder tests for Vietnamese receipts, missing fields, category hints.
@@ -90,4 +90,23 @@ Deferred:
 
 ## Next Queue Item
 
-P11B - receipt session/upload backend foundation.
+P11C - OCR provider abstraction + mock provider.
+
+## P11B Delivered
+
+- Added `receipt_sessions` table.
+- Added receipt session create endpoint.
+- Added receipt image upload endpoint.
+- Added receipt session detail endpoint.
+- Added image validation for missing/empty, unsupported type, and size.
+- Added disabled/success/failure storage statuses.
+- Added backend-only Cloudinary receipt image storage, disabled by default.
+- Added integration tests for create, upload, storage status, validation, workspace isolation, missing session, and no transaction side effect.
+
+Known limitations:
+
+- OCR not implemented yet.
+- Receipt draft builder not implemented yet.
+- Confirm executor not implemented yet.
+- UI not implemented in this phase.
+- HEIC/HEIF support deferred.

@@ -1,6 +1,6 @@
 # Receipt OCR Contract V1
 
-Status: proposed backend contract for 2.1.4. Not implemented yet.
+Status: backend contract for 2.1.4. P11B session/image upload foundation is implemented; OCR, draft builder, and confirm are not implemented yet.
 
 ## Product Guardrail
 
@@ -37,6 +37,32 @@ Base path: `/api/workspaces/{workspaceId}/receipt-sessions`
 | `GET /{sessionId}` | Load review/debug detail. | No |
 
 Keep existing `/receipt-review/parse` and `/parse-with-images` compatible during migration. They remain stateless preview endpoints unless explicitly replaced.
+
+## P11B Implemented Endpoints
+
+`POST /api/workspaces/{workspaceId}/receipt-sessions`
+
+- Creates a durable receipt session.
+- Sets `status=CREATED`.
+- Sets `imageStorageStatus=NOT_REQUESTED`.
+- Sets `ocrStatus=NOT_REQUESTED`.
+- Does not create a transaction.
+
+`POST /api/workspaces/{workspaceId}/receipt-sessions/{sessionId}/image`
+
+- Accepts multipart field `file`.
+- Validates empty file, size, and content type before storage.
+- Stores image metadata.
+- If storage is disabled, returns `imageStorageStatus=STORAGE_NOT_CONFIGURED`.
+- If storage succeeds, returns `imageStorageStatus=STORED` and `imageUrl`.
+- If storage fails, returns `imageStorageStatus=STORAGE_FAILED`.
+- Does not run OCR.
+- Does not create a transaction.
+
+`GET /api/workspaces/{workspaceId}/receipt-sessions/{sessionId}`
+
+- Loads receipt session detail.
+- Enforces workspace ownership by session ID and workspace ID.
 
 ## Session DTO
 
@@ -103,22 +129,21 @@ Session status:
 Image storage status:
 
 - `NOT_REQUESTED`
-- `NOT_CONFIGURED`
-- `UPLOADING`
+- `STORAGE_NOT_CONFIGURED`
 - `STORED`
 - `STORAGE_FAILED`
+- `UNSUPPORTED_FORMAT`
+- `FILE_TOO_LARGE`
 - `DELETED`
 
 OCR status:
 
-- `SKIPPED`
-- `DISABLED`
-- `PENDING`
+- `NOT_REQUESTED`
+- `READY`
+- `RUNNING`
 - `SUCCEEDED`
-- `TEXT_EMPTY`
 - `FAILED`
-- `TIMEOUT`
-- `UNSUPPORTED`
+- `NOT_CONFIGURED`
 
 Draft status:
 
@@ -133,7 +158,7 @@ Draft status:
 - `RECEIPT_IMAGE_REQUIRED`
 - `RECEIPT_STORAGE_NOT_CONFIGURED`
 - `RECEIPT_STORAGE_FAILED`
-- `OCR_NOT_CONFIGURED`
+- `OCR_NOT_REQUESTED`
 - `OCR_UNSUPPORTED_IMAGE_FORMAT`
 - `OCR_FILE_TOO_LARGE`
 - `OCR_EMPTY_TEXT`
@@ -191,3 +216,11 @@ Preferred future shape:
 - OCR provider calls must be backend-only.
 - File validation happens before storage/OCR.
 - No fake OCR output in runtime provider modes.
+
+## P11B Known Limitations
+
+- OCR is not run from receipt sessions yet.
+- No receipt draft entity exists yet.
+- No confirm executor exists yet.
+- HEIC/HEIF upload support is deferred.
+- Existing stateless receipt review endpoints remain separate from receipt sessions.
