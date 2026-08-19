@@ -140,6 +140,24 @@ class VoiceSessionConfirmIntegrationTests {
     }
 
     @Test
+    void confirmIncomeSessionWithoutWalletAndWithoutIncomeSource() throws Exception {
+        TestUser owner = registerAndLogin("vsc_income_no_wallet_no_source");
+        String sessionId = interpretedSession(owner, "Hôm nay kiếm được 800000");
+        String draftId = firstDraftId(sessionId);
+
+        mockMvc.perform(post("/api/workspaces/{workspaceId}/voice-sessions/{sessionId}/drafts/{draftId}/confirm",
+                        owner.workspace().getId(), sessionId, draftId)
+                        .header("Authorization", bearer(owner.token()))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.draftStatus").value("CONFIRMED"))
+                .andExpect(jsonPath("$.data.transaction.walletId").doesNotExist())
+                .andExpect(jsonPath("$.data.transaction.incomeSourceId").doesNotExist())
+                .andExpect(jsonPath("$.data.transaction.affectsWalletBalance").value(false));
+    }
+
+    @Test
     void missingRequiredFieldsReturnWarningsWithoutTransaction() throws Exception {
         TestUser owner = registerAndLogin("vsc_missing");
         Wallet cash = wallet(owner.workspace(), "Cash");

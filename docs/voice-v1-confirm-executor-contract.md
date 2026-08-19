@@ -132,7 +132,7 @@ Behavior:
 | Draft type | Confirm support | Output entity | Affects wallet | Required fields |
 | --- | --- | --- | --- | --- |
 | `EXPENSE` | Yes | `TRANSACTION` | Yes | `amount`, `walletId`, `categoryId` |
-| `INCOME` | Yes | `TRANSACTION` | Yes | `amount`, `walletId` |
+| `INCOME` | Yes | `TRANSACTION` | Optional | `amount` |
 | `INCOME_FACT` | No in P5 | None | No | Manual handling |
 | `SAVINGS_ALLOCATION` | No in P5 | None | Depends on future domain executor | Manual handling |
 | `SINKING_FUND_CONTRIBUTION` | No in P5 | None | Depends on future domain executor | Manual handling |
